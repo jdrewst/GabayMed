@@ -124,20 +124,30 @@ export const appointmentAPI = {
 
       // Transform for Scheduler UI
       return data.map(apt => {
-        const dateObj = new Date(apt.appointment_date);
+        let hour = 8;
+        if (apt.appointment_time) {
+          const parts = apt.appointment_time.split(':');
+          hour = parseInt(parts[0], 10);
+        } else if (apt.appointment_date && apt.appointment_date.includes('T')) {
+          const dateObj = new Date(apt.appointment_date);
+          if (!isNaN(dateObj.getTime())) {
+            hour = dateObj.getHours();
+          }
+        }
+
         return {
           id: apt.appointment_id,
           patientId: apt.patient_id,
           providerId: apt.provider_id,
           procedureId: apt.procedure_id,
           fullDate: apt.appointment_date,
-          time: dateObj.getHours(), 
+          time: hour, 
           patient: apt.patients?.full_name || 'Unknown',
           procedure: apt.procedures?.name || 'General',
-          status: apt.status,
-          operatory: 'Room 1', 
+          status: apt.status || 'PENDING',
+          operatory: 'Room 101', 
           length: apt.duration || 30,
-          notes: apt.notes
+          notes: apt.notes || ''
         };
       });
 
