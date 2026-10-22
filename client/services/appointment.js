@@ -124,20 +124,30 @@ export const appointmentAPI = {
 
       // Transform for Scheduler UI
       return data.map(apt => {
-        const dateObj = new Date(apt.appointment_date);
+        let hour = 8;
+        if (apt.appointment_time) {
+          const parts = apt.appointment_time.split(':');
+          hour = parseInt(parts[0], 10);
+        } else if (apt.appointment_date && apt.appointment_date.includes('T')) {
+          const dateObj = new Date(apt.appointment_date);
+          if (!isNaN(dateObj.getTime())) {
+            hour = dateObj.getHours();
+          }
+        }
+
         return {
           id: apt.appointment_id,
           patientId: apt.patient_id,
           providerId: apt.provider_id,
           procedureId: apt.procedure_id,
           fullDate: apt.appointment_date,
-          time: dateObj.getHours(), 
+          time: hour, 
           patient: apt.patients?.full_name || 'Unknown',
           procedure: apt.procedures?.name || 'General',
-          status: apt.status,
-          operatory: 'Room 1', 
+          status: apt.status || 'PENDING',
+          operatory: 'Room 101', 
           length: apt.duration || 30,
-          notes: apt.notes
+          notes: apt.notes || ''
         };
       });
 
@@ -166,6 +176,12 @@ export const appointmentAPI = {
     const facilityId = Session.getFacilityId();
     
     try {
+      const dateObj = new Date(newAppointment.date);
+      const dateStr = getLocalDateStr(dateObj);
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const timeStr = `${hours}:${minutes}:00`;
+
       const { data, error } = await supabase
         .from('appointments')
         .insert([{
@@ -173,10 +189,11 @@ export const appointmentAPI = {
           patient_id: newAppointment.patientId,
           provider_id: newAppointment.providerId,
           procedure_id: newAppointment.procedureId,
-          appointment_date: newAppointment.date, // ISO String
-          duration: parseInt(newAppointment.duration),
-          status: newAppointment.status,
-          notes: newAppointment.notes
+          appointment_date: dateStr,
+          appointment_time: timeStr,
+          duration: parseInt(newAppointment.duration) || 30,
+          status: newAppointment.status || 'PENDING',
+          notes: newAppointment.notes || ''
         }])
         .select()
         .single();
