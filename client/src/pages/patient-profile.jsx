@@ -140,7 +140,7 @@ export function PatientProfile({ patient }) {
                     <span>•</span>
                     <span>{patientData.sex === 'M' || patientData.sex === 'Male' ? 'Male' : 'Female'}</span>
                     <span>•</span>
-                    <span className="font-mono text-xs">ID: {patientData.patientId.substring(0,8)}...</span>
+                    <span className="font-mono text-xs">ID: {String(patientData.patientId).length > 8 ? `${String(patientData.patientId).substring(0,8)}...` : String(patientData.patientId)}</span>
                   </div>
                 </div>
                 <div className="flex gap-2">

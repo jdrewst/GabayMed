@@ -41,7 +41,7 @@ export const POSTGabayAPI = {
       // Patient Fields
       date_of_birth,
       gender,
-      insurance_plan_id
+      insurance_id
     } = patientData;
 
     try {
@@ -50,7 +50,7 @@ export const POSTGabayAPI = {
       }
 
       // 1. Insert into Profiles
-      // This will fire your DB trigger to create the empty patient row
+      // no trigger
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .insert([{
@@ -59,24 +59,29 @@ export const POSTGabayAPI = {
           address,
           email
         }])
-        .select('id') // Get the ID to find the linked patient
+        .select('id, full_name, phone_number, address')
         .single();
 
       if (profileError) throw profileError;
 
       if (!profile) throw new Error("Profile creation failed");
 
-      // 2. Update the automatically created Patient row
-      // We use UPDATE, not INSERT, because the trigger already made the row
+      // 2. Insert into Patients
+      // We use INSERT, not UPDATE, because there's no trigger
       const { error: patientError } = await supabase
         .from('patients')
-        .update({
+        .insert({
+          full_name: full_name || profile.full_name,
+          phone_number: phone_number || profile.phone_number,
+          address: address || profile.address,
+          profile_id: profile.id,
           date_of_birth,
           gender,
-          insurance_plan_id,
+          age: date_of_birth ? Math.abs(new Date(Date.now() - new Date(date_of_birth).getTime()).getUTCFullYear() - 1970) : null,
+          insurance_id,
+          created_at: new Date().toISOString(),
           facility_id: facilityId // Add facility_id here
-        })
-        .eq('user_id', profile.id); 
+        });
 
       if (patientError) throw patientError;
 
