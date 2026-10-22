@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { ChevronLeft, ChevronRight, CalendarIcon, Clock, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -30,10 +30,10 @@ export function AppointmentScheduler() {
 
   const [formData, setFormData] = useState({
     patient: '',
-    patientId: null, // Added to store ID
-    status: 'unconfirmed',
+    patientId: null,
+    status: 'PENDING',
     procedure: '',
-    operatory: '',
+    operatory: 'Room 101',
     primaryProvider: '',
     additionalProvider: '',
     length: '30',
@@ -68,7 +68,7 @@ export function AppointmentScheduler() {
     return bookedAppointments.find((apt) => apt.providerId === providerId && apt.time === time)
   }
 
-  // NEW FUNCTION: Handle slot clicks to initialize form data
+  // Handle slot clicks to initialize form data
   const handleSlotClick = (providerId, time, appointment) => {
     setSelectedSlot({ providerId, time, date: selectedDate, appointment })
     
@@ -79,39 +79,44 @@ export function AppointmentScheduler() {
         patientId: null,
         status: 'PENDING', 
         procedure: '',
-        operatory: '',
-        primaryProvider: providerId.toString(), 
+        operatory: 'Room 101',
+        primaryProvider: providerId ? providerId.toString() : '', 
         additionalProvider: '',
         length: '30',
         notes: ''
       })
     } else {
-      // POPULATE FORM FOR EDITING
+      // POPULATE FORM FOR EDITING (with safe fallbacks to avoid crashes)
       setFormData({
-        patient: appointment.patient,
-        patientId: appointment.patientId,
-        status: appointment.status,
+        patient: appointment.patient || '',
+        patientId: appointment.patientId || null,
+        status: appointment.status || 'PENDING',
         procedure: appointment.procedureId ? appointment.procedureId.toString() : '',
         operatory: appointment.operatory || 'Room 101',
-        primaryProvider: appointment.providerId.toString(),
+        primaryProvider: appointment.providerId ? appointment.providerId.toString() : (providerId ? providerId.toString() : ''),
         additionalProvider: '',
-        length: appointment.length.toString(),
+        length: appointment.length ? appointment.length.toString() : '30',
         notes: appointment.notes || ''
       })
     }
   }
 
   const handleNewAppointment = () => {
-    if (providers.length === 0) return;
+    const defaultProviderId = providers.length > 0 && providers[0].id ? providers[0].id.toString() : ''
     
-    setSelectedSlot({ providerId: providers[0].id, time: 8, date: selectedDate, appointment: null })
+    setSelectedSlot({ 
+      providerId: defaultProviderId || (providers[0]?.id ?? 1), 
+      time: 8, 
+      date: selectedDate, 
+      appointment: null 
+    })
     setFormData({
       patient: '',
       patientId: null,
-      status: 'PENDING', // Changed from 'unconfirmed' to match Select options
+      status: 'PENDING',
       procedure: '',
-      operatory: '',
-      primaryProvider: providers[0].id.toString(),
+      operatory: 'Room 101',
+      primaryProvider: defaultProviderId,
       additionalProvider: '',
       length: '30',
       notes: ''
@@ -194,6 +199,23 @@ export function AppointmentScheduler() {
         alert("Failed to update appointment: " + result.error);
     }
   }
+
+  const handleCancelAppointment = async () => {
+    if (!selectedSlot?.appointment?.id) return;
+    if (!window.confirm("Are you sure you want to cancel this appointment?")) return;
+
+    const result = await appointmentAPI.updateAppointment(selectedSlot.appointment.id, {
+      status: 'CANCELLED'
+    });
+
+    if (result.success) {
+      const appointmentsData = await appointmentAPI.getAppointmentsByDate(selectedDate);
+      setBookedAppointments(appointmentsData);
+      setSelectedSlot(null); // Close panel
+    } else {
+      alert("Failed to cancel appointment: " + result.error);
+    }
+  }
   // ------------------
 
   const isFormValid = () => {
@@ -222,7 +244,7 @@ export function AppointmentScheduler() {
 
   return (
     <div className="flex h-[calc(100vh-120px)] gap-6">
-      <div className="flex-1 flex flex-col gap-4">
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-semibold">
@@ -255,7 +277,7 @@ export function AppointmentScheduler() {
           <Button onClick={handleNewAppointment}>New Appointment</Button>
         </div>
 
-        <div className="flex-1 border rounded-2xl overflow-auto bg-white">
+        <div className="flex-1 border rounded-2xl overflow-auto bg-white shadow-sm">
           <div className="grid min-w-[800px]" style={{ gridTemplateColumns: `80px repeat(${providers.length}, 1fr)` }}>
             {/* Header */}
             <div className="sticky top-0 z-10 bg-white border-b p-4"></div>
@@ -277,7 +299,7 @@ export function AppointmentScheduler() {
 
             {/* Time Slots */}
             {hours.map((hour) => (
-              <>
+              <React.Fragment key={`hour-row-${hour}`}>
                 <div
                   key={`time-${hour}`}
                   className="border-b p-4 text-sm text-muted-foreground text-right sticky left-0 bg-white"
@@ -317,7 +339,7 @@ export function AppointmentScheduler() {
                     </div>
                   )
                 })}
-              </>
+              </React.Fragment>
             ))}
           </div>
         </div>
@@ -325,7 +347,7 @@ export function AppointmentScheduler() {
 
       {/* Right Panel - Appointment Details */}
       {selectedSlot && (
-        <Card className="w-[400px] overflow-auto border-l shadow-none rounded-2xl border-y-0 border-r-0">
+        <Card className="w-[400px] shrink-0 overflow-auto border shadow-md rounded-2xl bg-white">
           <CardContent className="p-6 space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-lg">
@@ -520,7 +542,7 @@ export function AppointmentScheduler() {
                 {selectedSlot.appointment ? (
                   <>
                     <Button className="w-full bg-blue-500" onClick={handleUpdate}>Update</Button>
-                    <Button variant="destructive" className="w-full">
+                    <Button variant="destructive" className="w-full" onClick={handleCancelAppointment}>
                       Cancel Appointment
                     </Button>
                   </>
