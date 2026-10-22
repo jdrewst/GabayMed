@@ -77,7 +77,7 @@ export const profileAPI = {
       const { data, error } = await supabase
         .from('patient_insurance')
         .select(`
-          id,
+          insurance_id,
           subscriber_id,
           coverage_start_date,
           coverage_end_date,
@@ -95,7 +95,7 @@ export const profileAPI = {
 
       // Transform for UI
       return data.map(item => ({
-        id: item.id,
+        id: item.patient_id,
         carrier: item.insurance_plans?.carrier?.name || 'Unknown Carrier',
         coverageType: item.insurance_plans?.plan_name || 'Unknown Plan',
         subscriberId: item.subscriber_id,
