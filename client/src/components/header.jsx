@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check } from "lucide-react"
+import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
@@ -252,6 +252,18 @@ export function Header() {
                       <Settings className="w-4 h-4" />
                       Settings
                     </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    onClick={() => {
+                      localStorage.removeItem('gabay_auth')
+                      window.history.pushState({}, '', '/login')
+                      window.dispatchEvent(new PopStateEvent('popstate'))
+                    }}
+                    className="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Log Out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
