@@ -176,6 +176,12 @@ export const appointmentAPI = {
     const facilityId = Session.getFacilityId();
     
     try {
+      const dateObj = new Date(newAppointment.date);
+      const dateStr = getLocalDateStr(dateObj);
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const timeStr = `${hours}:${minutes}:00`;
+
       const { data, error } = await supabase
         .from('appointments')
         .insert([{
@@ -183,10 +189,11 @@ export const appointmentAPI = {
           patient_id: newAppointment.patientId,
           provider_id: newAppointment.providerId,
           procedure_id: newAppointment.procedureId,
-          appointment_date: newAppointment.date, // ISO String
-          duration: parseInt(newAppointment.duration),
-          status: newAppointment.status,
-          notes: newAppointment.notes
+          appointment_date: dateStr,
+          appointment_time: timeStr,
+          duration: parseInt(newAppointment.duration) || 30,
+          status: newAppointment.status || 'PENDING',
+          notes: newAppointment.notes || ''
         }])
         .select()
         .single();
