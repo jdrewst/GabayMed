@@ -111,7 +111,7 @@ export function PatientsTable({ patients = [], loading = false }) {
                       {patient.gender}
                     </td>
                     <td className="py-4 text-sm text-muted-foreground font-mono text-xs">
-                      {patient.user_id ? `${patient.user_id.substring(0, 8)}...` : 'N/A'}
+                      {patient.user_id ? (String(patient.user_id).length > 8 ? `${String(patient.user_id).substring(0, 8)}...` : String(patient.user_id)) : 'N/A'}
                     </td>
                     <td className="py-4 text-sm">
                       {patient.visit_date && patient.visit_date !== 'N/A'

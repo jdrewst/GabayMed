@@ -50,7 +50,7 @@ export function AddPatientDialog({ open, onOpenChange }) {
       email: email,
       date_of_birth: format(dob, "yyyy-MM-dd"),
       gender: gender,
-      insurance_plan_id: insuranceId || null // Optional
+      insurance_id: insuranceId || null // Optional
     };
 
     const result = await POSTGabayAPI.createPatient(patientData);

@@ -1,7 +1,7 @@
 // This service manages the active Facility ID.
 // You only need to change the ID here, and it updates everywhere.
 
-const DEV_FACILITY_ID = "0d626563-5fca-4a25-a00c-2655d8cd05a7";
+const DEV_FACILITY_ID = "d7f1b581-3b68-491d-a515-aeb94a5bee3f";
 
 export const Session = {
   getFacilityId: () => {

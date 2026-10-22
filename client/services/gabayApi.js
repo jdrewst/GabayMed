@@ -324,6 +324,7 @@ export const GabayAPI = {
         .select(`
           patient_id,
           full_name,
+          age,
           date_of_birth,
           gender,
           appointments (
@@ -339,7 +340,7 @@ export const GabayAPI = {
       const patientsList = data.map(patient => {
         
         // A. Calculate Age
-        let age = 'N/A';
+        let age = patient.age || 'N/A';
         if (patient.date_of_birth) {
             const dob = new Date(patient.date_of_birth);
             const diff_ms = Date.now() - dob.getTime();
@@ -395,7 +396,7 @@ export const GabayAPI = {
           status,
           type,
           insurance_plans (
-            plan_id,
+            insurance_id,
             plan_name
           )
         `);
@@ -427,7 +428,7 @@ export const GabayAPI = {
       const { data, error } = await supabase
         .from('insurance_plans')
         .select(`
-          plan_id,
+          insurance_id,
           plan_name,
           carrier ( name )
         `);
@@ -435,7 +436,7 @@ export const GabayAPI = {
       if (error) throw error;
 
       return data.map(plan => ({
-        id: plan.plan_id,
+        id: plan.insurance_id,
         name: plan.plan_name,
         carrier: plan.carrier?.name
       }));
@@ -453,7 +454,7 @@ export const GabayAPI = {
         .from('patient_insurance')
         .insert([{
           patient_id: patientId,
-          plan_id: planData.planId,
+          insurance_id: planData.planId,
           subscriber_id: planData.subscriberId,
           coverage_type: planData.coverageType,
           coverage_start_date: planData.coverageStartDate,
