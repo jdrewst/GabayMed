@@ -32,6 +32,12 @@ export const settingsAPI = {
   // --- PROVIDERS ---
   async getProviders() {
     const facilityID = Session.getFacilityId();
+
+    if(!facilityID) {
+      console.error("🚨 Facility ID is missing! Ensure the user is logged in and has a facility.");
+      return [];
+    }
+
     try {
       const { data, error } = await supabase
         .from('providers')
@@ -39,27 +45,29 @@ export const settingsAPI = {
           provider_id,
           facility_id,
           name,
-          email,
           type,
-          specialization,
-          license_number,
-          schedule_details
-        `).eq('facility_id', facilityID);
+          "NPI",
+          working_hrs,
+          specialization
+        `)
+        .eq('facility_id', facilityID)
+        .order('provider_id');
       
       if (error) throw error;
       
-      return data.map(p => ({
+      return (data ?? []).map(p => ({
         id: p.provider_id,
         name: p.name,
-        email: p.email,
         type: p.type,
-        specialization: p.specialization,
-        licenseNo: p.license_number,
-        schedule: p.schedule_details
+        role: p.type,
+        licenseNo: p.NPI,
+        workingHours: p.working_hrs,
+        schedule: p.working_hrs,
+        specialization: p.specialization
       }));
     } catch (error) {
       console.error("Get Providers Error:", error);
-      return [];
+      throw error;
     }
   },
 

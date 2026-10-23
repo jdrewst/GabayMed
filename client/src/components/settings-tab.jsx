@@ -748,6 +748,7 @@ export function SettingsTabs() {
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>License No.</TableHead>
+                    <TableHead>Specialization</TableHead>
                     <TableHead>Schedule</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
@@ -777,6 +778,7 @@ export function SettingsTabs() {
                         </TableCell>
                         <TableCell>{user.type || user.role}</TableCell>
                         <TableCell>{user.licenseNo || 'N/A'}</TableCell>
+                        <TableCell>{user.specialization || 'N/A'}</TableCell>
                         <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate" title={JSON.stringify(user.schedule)}>
                           {formatScheduleDisplay(user.schedule)}
                         </TableCell>
@@ -888,13 +890,13 @@ export function SettingsTabs() {
                 <TableBody>
                   {loadingProcedures ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         Loading procedures...
                       </TableCell>
                     </TableRow>
                   ) : procedures.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         No procedures found. Click "Add Procedure" to get started.
                       </TableCell>
                     </TableRow>
