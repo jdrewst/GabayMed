@@ -215,23 +215,28 @@ export const settingsAPI = {
   async getLocation() {
     const facilityId = Session.getFacilityId();
     try {
-      const { data, error } = await supabase
+
+      const {data, error} = await supabase
         .from('facilities')
-        .select('*')
+        .select('facility_id, name, abbreviation, location, contact_num, email')
         .eq('facility_id', facilityId)
         .single();
-        
-      if (error) throw error;
-      
+
+        console.log('Matching facility:', data);
+        console.log('Lookup error:', error);
+
+      if(error) throw error;
       return {
         clinicName: data.name,
-        abbreviation: data.name 
-        ? data.name.split(' ').map(w => w[0]).join('').substring(0, 4).toUpperCase() : 'CLINIC',
-        address: data.address,
-        phone: data.contact_number,
+        abbreviation: data.abbreviation,
+        // abbreviation: data.name 
+        // ? data.name.split(' ').map(w => w[0]).join('').substring(0, 4).toUpperCase() : 'CLINIC',
+        address: data.location,
+        phone: data.contact_num,
         email: data.email,
         timezone: 'Asia/Manila'
-      };
+      }
+      
     } catch (error) {
       console.error("Get Location Error:", error);
       return null;
@@ -240,18 +245,49 @@ export const settingsAPI = {
 
   async updateLocation(locationData) {
     const facilityId = Session.getFacilityId();
+
+    if (!facilityId) {
+    return {
+      success: false,
+      error: "Facility ID is missing."
+    };
+  }
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('facilities')
         .update({
-          name: locationData.clinicName,
-          address: locationData.address,
-          phone_number: locationData.phone,
-          email: locationData.email
+          name: locationData.clinicName.trim(),
+          abbreviation: locationData.abbreviation.trim(),
+          location: locationData.address.trim(),
+          contact_num: locationData.phone.trim(),
+          email: locationData.email.trim()
         })
-        .eq('facility_id', facilityId);
+        .eq('facility_id', facilityId)
+        .select('facility_id, name, abbreviation, location, contact_num, email');
+
+      console.log('Updated facility:', data);
+      console.log('Supabase error:', error);
+      
+        // .from('facilities')
+        // .update({
+        //   name: locationData.clinicName,
+        //   address: locationData.location,
+        //   phone_number: locationData.contact_num,
+        // })
+        // .eq('facility_id', facilityId)
+        // .select('facility_id')
+        // .maybeSingle();
+
+        // console.log('Updated facility:', data);
+        // console.log('Supabase error:', error);
         
       if (error) throw error;
+      if (!data || data.length === 0) {
+        return{
+          success: false,
+          error: "Facility not found or update failed."
+        }
+      }
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
