@@ -22,18 +22,24 @@ export function PatientLedger({ patientId }) {
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
   const [isProcedureDialogOpen, setIsProcedureDialogOpen] = useState(false)
   const [providers, setProviders] = useState([])
-  
+  const [procedureCodes, setProcedureCodes] = useState([])
+
   // Payment form state
   const [paymentForm, setPaymentForm] = useState({
     date: new Date().toISOString().split('T')[0],
     amount: '',
     method: '',
-    paidAtVisit: false
+    paidAtVisit: false,
+    provider: '',
+    appointmentId: '', 
+    procedureId: ''
   })
   
   // Procedure form state
   const [procedureForm, setProcedureForm] = useState({
     date: new Date().toISOString().split('T')[0],
+    appointmentId: '',
+    procedureId: '',
     provider: '',
     code: '',
     description: '',
@@ -87,11 +93,16 @@ export function PatientLedger({ patientId }) {
 
   useEffect(() => {
     fetchTransactions()
-    
-    // Load providers for the dropdown
+    // Load providers and procedure codes for the dropdown specifically for this patient
     const loadProviders = async () => {
-      const provs = await appointmentAPI.getProviders();
-      setProviders(provs);
+      if (patientId) {
+        // Change from appointmentAPI.getProviders() to the new ledgerAPI method
+        const provs = await ledgerAPI.getPatientProviders(patientId);
+        setProviders(provs);
+
+        const codes = await ledgerAPI.getPatientProcedures(patientId);
+        setProcedureCodes(codes);
+      }
     }
     loadProviders();
   }, [patientId])
@@ -234,7 +245,39 @@ export function PatientLedger({ patientId }) {
                     </div>
                   </div>
                 </div>
-
+                <div className="space-y-2 col-span-2">
+                  <Label>Apply to Unpaid Charge</Label>
+                  <Select
+                    onValueChange={(val) => {
+                      // Safely convert types so the strict equality check succeeds
+                      const charge = transactions.find(t => String(t.id) === String(val));
+                      setPaymentForm({ 
+                        ...paymentForm, 
+                        appointmentId: charge?.appointmentId || '',
+                        procedureId: charge?.procedureId || '',
+                        // Ensure this matches what ledgerAPI.addPayment expects (paymentData.provider_id)
+                        provider_id: charge?.providerId || '' 
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select an outstanding procedure..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {transactions
+                        .filter(t => t.amount > 0 && t.paymentStatus === 'UNPAID')
+                        .map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.date} - {t.description} (₱{t.amount})
+                          </SelectItem>
+                        ))
+                      }
+                      {transactions.filter(t => t.amount > 0 && t.paymentStatus === 'UNPAID').length === 0 && (
+                        <SelectItem value="none" disabled>No unpaid charges</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="border rounded-lg p-4 mt-2 bg-slate-50">
                   <h4 className="font-medium mb-2 text-sm">Allocation</h4>
                   <Table>
@@ -318,11 +361,36 @@ export function PatientLedger({ patientId }) {
                 </div>
                 <div className="space-y-2">
                   <Label>Procedure Code <span className="text-red-500">*</span></Label>
-                  <Input 
-                    placeholder="Enter code..."
+                  <Select
                     value={procedureForm.code}
-                    onChange={(e) => setProcedureForm({ ...procedureForm, code: e.target.value })}
-                  />
+                    onValueChange={(val) => {
+                      // Find the specific object to extract both the code and appointmentId
+                      const selected = procedureCodes.find(c => c.code === val);
+                      setProcedureForm({ 
+                        ...procedureForm, 
+                        code: val,
+                        appointmentId: selected?.appointmentId || '' 
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Procedure Code" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {procedureCodes.length > 0 ? (
+                        procedureCodes.map((item) => (
+                          // Use item.code for both the key and the value string
+                          <SelectItem key={item.code} value={item.code}>
+                            {item.code}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="none" disabled>
+                          No procedures found
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Description</Label>

@@ -47,6 +47,7 @@ export const appointmentAPI = {
         .select(`
           appointment_id,
           appointment_date,
+          operatory,
           status,
           patients ( full_name ),
           procedures ( name ),
@@ -106,6 +107,8 @@ export const appointmentAPI = {
         .select(`
           appointment_id,
           appointment_date,
+          appointment_time,
+          operatory,
           status,
           duration, 
           notes,
@@ -145,7 +148,7 @@ export const appointmentAPI = {
           patient: apt.patients?.full_name || 'Unknown',
           procedure: apt.procedures?.name || 'General',
           status: apt.status || 'PENDING',
-          operatory: 'Room 101', 
+          operatory: apt.operatory || 'Room 101', 
           length: apt.duration || 30,
           notes: apt.notes || ''
         };
@@ -189,6 +192,7 @@ export const appointmentAPI = {
           patient_id: newAppointment.patientId,
           provider_id: newAppointment.providerId,
           procedure_id: newAppointment.procedureId,
+          operatory: newAppointment.operatory || 'Room 101',
           appointment_date: dateStr,
           appointment_time: timeStr,
           duration: parseInt(newAppointment.duration) || 30,
@@ -332,6 +336,7 @@ export const appointmentAPI = {
         .update({
           provider_id: updates.providerId,
           procedure_id: updates.procedureId,
+          operatory: updates.operatory,
           duration: parseInt(updates.duration),
           status: updates.status,
           notes: updates.notes
