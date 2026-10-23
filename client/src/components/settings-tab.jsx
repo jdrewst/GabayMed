@@ -39,6 +39,15 @@ export function SettingsTabs() {
   })
 
   const daysOfWeek = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const scheduleDayLabels = {
+    mon: 'Monday',
+    tue: 'Tuesday',
+    wed: 'Wednesday',
+    thu: 'Thursday',
+    fri: 'Friday',
+    sat: 'Saturday',
+    sun: 'Sunday'
+  };
 
   // Updated to match Provider Schema
   const [userFormData, setUserFormData] = useState({
@@ -198,6 +207,16 @@ export function SettingsTabs() {
     return scheduleJson
   }
 
+  const formatRoleDisplay = (role) => {
+    if (!role) return 'N/A';
+
+    return role
+      .toLowerCase()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   const handleScheduleChange = (day, field, value) => {
     setScheduleData(prev => ({
       ...prev,
@@ -285,10 +304,36 @@ export function SettingsTabs() {
       return
     }
 
+    const schedule = formatScheduleForAPI();
+    const workingHrs = Object.values(scheduleData).reduce(
+      (total, day) => {
+        if (!day.active) return total;
+
+        const [startHour, startMinute] = day.start.split(':').map(Number);
+        const [endHour, endMinute] = day.end.split(':').map(Number);
+
+        const startMinutes = startHour * 60 + startMinute;
+        const endMinutes = endHour * 60 + endMinute;
+
+        if (endMinutes <= startMinutes) {
+          return total;
+        }
+
+        return total + (endMinutes - startMinutes) / 60;
+      },
+      0
+    );
+
+    if (workingHrs <= 0) {
+      alert('Please select at least one valid working day and schedule.');
+      return;
+    }
+
     const payload = {
       ...userFormData,
-      schedule: formatScheduleForAPI()
-    }
+      schedule,
+      working_hrs: Math.round(workingHrs)
+    };
 
     const result = await settingsAPI.createProvider(payload);
 
@@ -776,12 +821,68 @@ export function SettingsTabs() {
                           </Avatar>
                           <div className="font-medium">{user.name}</div>
                         </TableCell>
-                        <TableCell>{user.type || user.role}</TableCell>
+                        <TableCell>{formatRoleDisplay(user.type || user.role)}</TableCell>
                         <TableCell>{user.licenseNo || 'N/A'}</TableCell>
                         <TableCell>{user.specialization || 'N/A'}</TableCell>
-                        <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate" title={JSON.stringify(user.schedule)}>
-                          {formatScheduleDisplay(user.schedule)}
+                        <TableCell className="min-w-[190px] align-top">
+                          {user.schedule && Object.keys(user.schedule).length > 0 ? (
+                            <details className="group relative">
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-md border px-3 py-2 hover:bg-slate-50">
+                                <span className="text-sm font-medium text-gray-700">
+                                  {Object.keys(user.schedule).length} days scheduled
+                                </span>
+
+                                <svg
+                                  className="h-4 w-4 shrink-0 text-gray-500 transition-transform group-open:rotate-180"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="m6 9 6 6 6-6"
+                                  />
+                                </svg>
+                              </summary>
+
+                              <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border bg-white p-3 shadow-lg">
+                                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                  Weekly Schedule
+                                </p>
+
+                                <div className="space-y-3">
+                                  {daysOfWeek.map((day) => {
+                                    const hours = user.schedule?.[day];
+
+                                    return (
+                                      <div
+                                        key={day}
+                                        className="flex items-center justify-between gap-3 text-sm"
+                                      >
+                                        <span className="text-gray-600">
+                                          {scheduleDayLabels[day]}
+                                        </span>
+
+                                        {hours ? (
+                                          <span className="whitespace-nowrap font-medium text-gray-800">
+                                            {hours.replace('-', ' – ')}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400">Closed</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </details>
+                          ) : (
+                            <span className="text-sm text-gray-400">Not set</span>
+                          )}
                         </TableCell>
+
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm" onClick={() => handleEditUser(user)}>
                             Edit
