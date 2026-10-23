@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { GlobalSearch } from "@/components/global-search"
 import { Badge } from "@/components/ui/badge"
 import { profileAPI } from "../../services/profile"
+import LogoSvg from "@/assets/Logo.svg"
 
 const notificationsData = [
   {
@@ -140,7 +141,7 @@ export function Header() {
         <div className="bg-[#FAFEFF] rounded-full shadow-sm border px-6 py-3">
           <div className="flex items-center justify-between">
             <a href="/" className="flex items-center">
-              <img src="/src/assets/Logo.svg" alt="GabayMed" className="w-10 h-10" />
+              <img src={LogoSvg} alt="GabayMed" className="w-10 h-10" />
             </a>
 
             <div className="flex items-center gap-2">

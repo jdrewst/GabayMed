@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Eye, EyeOff, Loader2, AlertCircle } from "lucide-react"
 import { GabayAPI } from "../../services/gabayApi.js"
+import LogoSvg from "@/assets/Logo.svg"
 
 export default function LoginPage({ onLoginSuccess }) {
   const [email, setEmail] = useState("")
@@ -114,7 +115,7 @@ export default function LoginPage({ onLoginSuccess }) {
           {/* Logo & Brand Name */}
           <div className="flex items-center justify-center gap-3.5 mb-8">
             <img
-              src="/src/assets/Logo.svg"
+              src={LogoSvg}
               alt="GabayMed Logo"
               className="w-11 h-11 object-contain drop-shadow-sm"
             />
