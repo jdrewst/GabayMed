@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react"
-import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check, LogOut } from "lucide-react"
+import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check, LogOut, Building2, MapPin, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { GlobalSearch } from "@/components/global-search"
 import { Badge } from "@/components/ui/badge"
+import { profileAPI } from "../../services/profile"
 
 const notificationsData = [
   {
@@ -48,6 +49,43 @@ const notificationsData = [
 export function Header() {
   const [currentPage, setCurrentPage] = useState('dashboard')
   const [notifications, setNotifications] = useState(notificationsData)
+  const [facility, setFacility] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('gabay_facility_data')
+        if (cached) return JSON.parse(cached)
+      } catch (e) {}
+    }
+    return null
+  })
+
+  useEffect(() => {
+    const fetchFacilityDetails = async () => {
+      try {
+        const data = await profileAPI.getFacilityProfile()
+        if (data) {
+          setFacility(data)
+        }
+      } catch (error) {
+        console.error("Failed to fetch facility details for header:", error)
+      }
+    }
+
+    fetchFacilityDetails()
+
+    const handleFacilityUpdated = (e) => {
+      if (e.detail) {
+        setFacility(prev => ({ ...prev, ...e.detail }))
+      } else {
+        fetchFacilityDetails()
+      }
+    }
+
+    window.addEventListener('facilityUpdated', handleFacilityUpdated)
+    return () => {
+      window.removeEventListener('facilityUpdated', handleFacilityUpdated)
+    }
+  }, [])
 
   const unreadCount = notifications.filter(n => !n.read).length
 
@@ -235,21 +273,47 @@ export function Header() {
                   <Button variant="ghost" size="icon" className="rounded-full p-0">
                     <Avatar className="w-10 h-10">
                       <AvatarImage src="/caring-doctor.png" alt="User" />
-                      <AvatarFallback>DR</AvatarFallback>
+                      <AvatarFallback>{facility?.abbreviation || 'DR'}</AvatarFallback>
                     </Avatar>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" className="w-64">
+                  {/* Facility Details Header */}
+                  <div className="px-3 py-2.5 bg-slate-50/80 border-b border-slate-100 rounded-t-md -mt-1 -mx-1 mb-1">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                        {facility?.abbreviation || <Building2 className="w-4 h-4 text-blue-600" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900 truncate">
+                          {facility?.clinicName || facility?.name || 'Medical Center'}
+                        </p>
+                        {facility?.address && (
+                          <p className="text-xs text-muted-foreground truncate flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 shrink-0 text-slate-400" />
+                            <span className="truncate">{facility.address}</span>
+                          </p>
+                        )}
+                        {facility?.email && (
+                          <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1 mt-0.5">
+                            <Mail className="w-3 h-3 shrink-0 text-slate-400" />
+                            <span className="truncate">{facility.email}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   <DropdownMenuItem asChild>
-                    <a href="/profile" className="flex items-center gap-2">
-                      <User className="w-4 h-4" />
-                      Metropolitan Medical Center
+                    <a href="/profile" className="flex items-center gap-2 cursor-pointer">
+                      <User className="w-4 h-4 text-slate-500" />
+                      <span className="truncate font-medium">{facility?.clinicName || facility?.name || 'Facility Profile'}</span>
                     </a>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <a href="/settings" className="flex items-center gap-2">
-                      <Settings className="w-4 h-4" />
+                    <a href="/settings" className="flex items-center gap-2 cursor-pointer">
+                      <Settings className="w-4 h-4 text-slate-500" />
                       Settings
                     </a>
                   </DropdownMenuItem>
@@ -257,6 +321,7 @@ export function Header() {
                   <DropdownMenuItem 
                     onClick={() => {
                       localStorage.removeItem('gabay_auth')
+                      localStorage.removeItem('gabay_facility_data')
                       window.history.pushState({}, '', '/login')
                       window.dispatchEvent(new PopStateEvent('popstate'))
                     }}
