@@ -130,13 +130,6 @@ export default function LoginPage({ onLoginSuccess }) {
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p>{error}</p>
-                <button
-                  type="button"
-                  onClick={handleDemoLogin}
-                  className="mt-1 text-xs text-[#3CA5EC] font-semibold underline hover:text-[#2a8ed2] block"
-                >
-                  Or continue as Demo / Preview mode &rarr;
-                </button>
               </div>
             </div>
           )}
