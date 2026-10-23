@@ -214,34 +214,86 @@ export const profileAPI = {
   },
 
   // 6. Get Facility/Location Profile
-  async getFacilityProfile() {
-    const facilityId = Session.getFacilityId();
+  async getFacilityProfile(specificFacilityId = null) {
+    let facilityId = specificFacilityId;
+
+    // Check auth user association if not explicitly provided
+    if (!facilityId && typeof window !== 'undefined') {
+      try {
+        const authRaw = localStorage.getItem('gabay_auth');
+        if (authRaw) {
+          const authData = JSON.parse(authRaw);
+          const user = authData.user;
+          const email = user?.email || authData.email;
+
+          if (user?.user_metadata?.facility_id) {
+            facilityId = user.user_metadata.facility_id;
+          } else if (email) {
+            // Check if provider has facility_id
+            const { data: prov } = await supabase
+              .from('providers')
+              .select('facility_id')
+              .eq('email', email)
+              .maybeSingle();
+
+            if (prov?.facility_id) {
+              facilityId = prov.facility_id;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not resolve facility from auth user:", err);
+      }
+    }
+
+    if (!facilityId) {
+      facilityId = Session.getFacilityId();
+    }
+
     if (!facilityId) return null;
 
     try {
       const { data, error } = await supabase
         .from('facilities')
-        .select('name, address, contact_number, email') 
+        .select('facility_id, name, abbreviation, location, contact_num, email, regulatory_id') 
         .eq('facility_id', facilityId)
         .single();
 
       if (error) throw error;
 
-      // Generate a simple abbreviation from the name (e.g., "City Hospital" -> "CH")
-      const abbreviation = data.name 
+      // Generate a simple abbreviation if not set in DB
+      const abbreviation = data.abbreviation || (data.name 
         ? data.name.split(' ').map(w => w[0]).join('').substring(0, 4).toUpperCase() 
-        : 'CLINIC';
+        : 'CLINIC');
 
-      return {
+      const facilityData = {
+        facilityId: data.facility_id,
         clinicName: data.name,
+        name: data.name,
         abbreviation: abbreviation,
-        address: data.address,
-        phone: data.contact_number,
-        email: data.email || 'admin@gabaymed.com', // Fallback if null
-        timezone: 'Asia/Manila' // Default for PH context
+        address: data.location || '',
+        location: data.location || '',
+        phone: data.contact_num || '',
+        email: data.email || 'admin@gabaymed.com',
+        regulatoryId: data.regulatory_id || '',
+        timezone: 'Asia/Manila'
       };
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('gabay_facility_data', JSON.stringify(facilityData));
+      }
+
+      return facilityData;
     } catch (error) {
       console.error("Get Facility Profile Error:", error.message);
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem('gabay_facility_data');
+        if (cached) {
+          try {
+            return JSON.parse(cached);
+          } catch (_) {}
+        }
+      }
       return null;
     }
   }

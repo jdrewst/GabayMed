@@ -41,6 +41,16 @@ export default function ProfilePage() {
     }
 
     fetchLocationInfo()
+
+    const handleUpdate = (e) => {
+      if (e.detail) {
+        setLocationInfo(prev => ({ ...prev, ...e.detail }));
+      } else {
+        fetchLocationInfo();
+      }
+    };
+    window.addEventListener('facilityUpdated', handleUpdate);
+    return () => window.removeEventListener('facilityUpdated', handleUpdate);
   }, [])
 
   return (
@@ -51,7 +61,7 @@ export default function ProfilePage() {
           <div className="flex items-center gap-4 mb-6">
             <Avatar className="w-20 h-20">
               <AvatarImage src="/caring-doctor.png" alt="User" />
-              <AvatarFallback>DR</AvatarFallback>
+              <AvatarFallback>{locationInfo.abbreviation || 'DR'}</AvatarFallback>
             </Avatar>
             <div>
               <h1 className="text-2xl font-bold">

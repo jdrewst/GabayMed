@@ -334,6 +334,20 @@ export function SettingsTabs() {
     const result = await settingsAPI.updateLocation(locationData);
 
     if (result.success) {
+      const updatedFacility = {
+        clinicName: locationData.clinicName,
+        name: locationData.clinicName,
+        abbreviation: locationData.abbreviation,
+        address: locationData.address,
+        location: locationData.address,
+        phone: locationData.phone,
+        email: locationData.email,
+        timezone: locationData.timezone || 'Asia/Manila'
+      };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('gabay_facility_data', JSON.stringify(updatedFacility));
+        window.dispatchEvent(new CustomEvent('facilityUpdated', { detail: updatedFacility }));
+      }
       alert('Location updated successfully!')
     } else {
       alert('Failed to save location: ' + result.error)
