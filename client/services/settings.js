@@ -45,6 +45,7 @@ export const settingsAPI = {
           provider_id,
           facility_id,
           name,
+          email,
           type,
           "NPI",
           working_hrs,
@@ -59,6 +60,7 @@ export const settingsAPI = {
       return (data ?? []).map(p => ({
         id: p.provider_id,
         name: p.name,
+        email: p.email || '',
         type: p.type,
         role: p.type,
         licenseNo: p.NPI,
@@ -186,9 +188,9 @@ export const settingsAPI = {
     try {
       const updates = {
         name: providerData.name,
-        email: providerData.email,
+        email: providerData.email || null,
         type: providerData.type || providerData.role,
-        license_number: providerData.licenseNo,
+        NPI: providerData.licenseNo,
         schedule_details: providerData.schedule,
         specialization: providerData.specialization
       };

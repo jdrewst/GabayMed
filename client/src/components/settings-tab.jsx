@@ -360,12 +360,14 @@ export function SettingsTabs() {
 
   // Handle edit user
   const handleEditUser = (user) => {
+    console.log("Editing provider:", user);
+
     setEditingUserId(user.id)
     setUserFormData({
-      name: user.name,
-      email: user.email,
-      role: user.type || user.role,
-      licenseNo: user.licenseNo,
+      name: user.name || '',
+      email: user.email || '',
+      role: (user.type || user.role || '').toUpperCase(),
+      licenseNo: user.licenseNo || '',
       specialization: user.specialization || '',
       password: '' // Don't populate password
     })
@@ -704,12 +706,12 @@ export function SettingsTabs() {
                             <SelectValue placeholder="Select role" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Doctor">Doctor</SelectItem>
-                            <SelectItem value="Dentist">Dentist</SelectItem>
-                            <SelectItem value="Nurse">Nurse</SelectItem>
-                            <SelectItem value="Receptionist">Receptionist</SelectItem>
-                            <SelectItem value="Administrator">Administrator</SelectItem>
-                            <SelectItem value="Medical Assistant">Medical Assistant</SelectItem>
+                            <SelectItem value="DOCTOR">Doctor</SelectItem>
+                            <SelectItem value="DENTIST">Dentist</SelectItem>
+                            <SelectItem value="NURSE">Nurse</SelectItem>
+                            <SelectItem value="RECEPTIONIST">Receptionist</SelectItem>
+                            <SelectItem value="ADMINISTRATOR">Administrator</SelectItem>
+                            <SelectItem value="MEDICAL_ASSISTANT">Medical Assistant</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
