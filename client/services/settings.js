@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { GabayAPI } from './gabayApi';
 import { Session } from './session'; // Import the session helper
 
 // Helper to get env vars in both Vite (Frontend) and Node (Test Script)
@@ -74,116 +75,30 @@ export const settingsAPI = {
     }
   },
 
-  async createProvider(providerData) {
-
-    const facilityId = Session.getFacilityId();
-
-    if (!facilityId) {
-      console.error("🚨 Facility ID is missing! Ensure the user is logged in and has a facility.");
-      return { success: false, error: "Facility ID is missing." };
-    }
-
-    const {data: authData, error: authError } = await supabase.auth.getUser();
-    console.log("Session facility ID:", facilityId);
-    console.log("Authenticated user ID:", authData?.user?.id);
-    console.log("Auth error:", authError);
-
-    try {
-      // Validate required working hours
-      const rawWorkingHrs = providerData.working_hrs;
-
-      if (
-        rawWorkingHrs === undefined ||
-        rawWorkingHrs === null ||
-        rawWorkingHrs === ""
-      ) {
-        return {
-          success: false,
-          error: "Working hours are required."
-        };
-      }
-
-      const workingHrs = Number(rawWorkingHrs);
-
-      if (
-        !Number.isSafeInteger(workingHrs) ||
-        workingHrs <= 0
-      ) {
-        return {
-          success: false,
-          error: "Please enter valid working hours."
-        };
-      }
-
-      const providerRecord = {
-        name: providerData.name.trim(),
-        type: providerData.type || providerData.role,
-        NPI: providerData.licenseNo.trim() || '',
-        specialization: providerData.specialization || null,
-        working_hrs: workingHrs,
-        schedule_details: providerData.schedule || {},
-        facility_id: facilityId
-      };
-
-      const {data, error} = await supabase
-        .from('providers')
-        .insert([providerRecord])
-        .select('provider_id, name, type, NPI, specialization, working_hrs, schedule_details')
-        .single();
-
-      if (error) throw error;
-
-      return {
-        success: true,
-        provider: {
-          id: data.provider_id,
-          name: data.name,
-          type: data.type,
-          role: data.type,
-          licenseNo: data.NPI,
-          specialization: data.specialization,
-          working_hrs: data.working_hrs,
-          schedule: data.schedule_details
-        }
-      };
-    }  catch (error) {
-      console.error("Create Provider Error:", {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
-      });
-
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-
-    // try {
-    //   const { data, error } = await supabase
-    //     .from('providers')
-    //     .insert([{
-    //       name: providerData.name,
-    //       email: providerData.email,
-    //       type: providerData.type || providerData.role,
-    //       password: providerData.password,
-    //       license_number: providerData.licenseNo,
-    //       schedule_details: providerData.schedule,
-    //       specialization: providerData.specialization,
-    //       facility_id: Session.getFacilityId()
-    //     }])
-    //     .select()
-    //     .single();
-        
-    //   if (error) throw error;
-      
-    //   return { success: true, provider: { ...providerData, id: data.provider_id } };
-    // } catch (error) {
-    //   return { success: false, error: error.message };
-    // }
+  async getAccessContext() {
+    return GabayAPI.getClinicAccount();
   },
-  
+
+  async createProvider(providerData) {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (!session?.access_token) throw new Error('Please sign in before creating a provider.');
+      const response = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify(providerData)
+      });
+      let result;
+      try { result = await response.json(); }
+      catch { throw new Error('Provider API is unavailable. Start the backend server and check its configuration.'); }
+      if (!response.ok) throw new Error(result.error || 'Provider account creation failed.');
+      return result;
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
   async updateProvider(id, providerData) {
     try {
       const updates = {
@@ -195,9 +110,6 @@ export const settingsAPI = {
         specialization: providerData.specialization
       };
 
-      if (providerData.password) {
-        updates.password = providerData.password;
-      }
 
       const { error } = await supabase
         .from('providers')

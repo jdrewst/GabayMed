@@ -87,7 +87,25 @@ export const GabayAPI = {
     });
     
     if (error) throw error;
-    return data;
+    try {
+      const account = await this.getClinicAccount();
+      return { ...data, account };
+    } catch (accountError) {
+      await supabase.auth.signOut();
+      throw accountError;
+    }
+  },
+
+  async getClinicAccount() {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) throw new Error('Please sign in with a clinic account.');
+    const { data: account, error: accountError } = await supabase.from('users')
+      .select('id, email, role, facility_id').eq('id', user.id).single();
+    if (accountError || !account?.facility_id || !['IT Admin', 'Hospital Staff'].includes(account.role)) {
+      throw new Error('Your account needs an IT Admin or Hospital Staff role and a clinic assignment.');
+    }
+    Session.setFacilityId(account.facility_id);
+    return account;
   },
 
   /**
@@ -96,6 +114,9 @@ export const GabayAPI = {
   async logout() {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    localStorage.removeItem('gabay_auth');
+    localStorage.removeItem('gabay_facility_id');
+    localStorage.removeItem('gabay_facility_data');
   },
 
   /**

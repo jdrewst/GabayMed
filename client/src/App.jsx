@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { GabayAPI } from '../services/gabayApi'
 import LoginPage from './pages/login'
 import DashboardPage from './pages/dashboard'
 import PatientsPage from './pages/patients'
@@ -27,6 +28,19 @@ function App() {
     if (!hasAuth && path === '/') return 'login'
     return 'dashboard'
   })
+
+  const [access, setAccess] = useState({ loading: true, account: null, error: '' })
+  useEffect(() => {
+    if (currentPage === 'login') return
+    let active = true
+    setAccess({ loading: true, account: null, error: '' })
+    GabayAPI.getClinicAccount().then(account => {
+      if (active) setAccess({ loading: false, account, error: '' })
+    }).catch(error => {
+      if (active) setAccess({ loading: false, account: null, error: error.message })
+    })
+    return () => { active = false }
+  }, [currentPage])
 
   // Simple client-side routing
   useEffect(() => {
@@ -108,7 +122,12 @@ function App() {
 
   const handleLoginSuccess = () => {
     window.history.pushState({}, '', '/')
-    setCurrentPage('dashboard')
+    window.location.assign('/')
+  }
+
+  if (currentPage !== 'login') {
+    if (access.loading) return <div className="p-8 text-center">Checking your account...</div>
+    if (!access.account) return <LoginPage onLoginSuccess={handleLoginSuccess} initialError={access.error} />
   }
 
   return (

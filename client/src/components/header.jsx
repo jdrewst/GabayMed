@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { GlobalSearch } from "@/components/global-search"
 import { Badge } from "@/components/ui/badge"
+import { GabayAPI } from "../../services/gabayApi"
 import { profileAPI } from "../../services/profile"
 
 const notificationsData = [
@@ -319,7 +320,8 @@ export function Header() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem 
-                    onClick={() => {
+                    onClick={async () => {
+                      await GabayAPI.logout()
                       localStorage.removeItem('gabay_auth')
                       localStorage.removeItem('gabay_facility_data')
                       window.history.pushState({}, '', '/login')

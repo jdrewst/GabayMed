@@ -2,12 +2,12 @@ import { useState } from "react"
 import { Eye, EyeOff, Loader2, AlertCircle } from "lucide-react"
 import { GabayAPI } from "../../services/gabayApi.js"
 
-export default function LoginPage({ onLoginSuccess }) {
+export default function LoginPage({ onLoginSuccess, initialError = "" }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState(initialError)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -18,19 +18,12 @@ export default function LoginPage({ onLoginSuccess }) {
       // 1. Attempt login with GabayAPI / Supabase Auth
       const data = await GabayAPI.login(email, password)
       
-      // Store session info
-      if (data?.session) {
-        localStorage.setItem("gabay_auth", JSON.stringify({
-          user: data.user,
-          accessToken: data.session.access_token,
-          loggedAt: new Date().toISOString()
-        }))
-      } else {
-        localStorage.setItem("gabay_auth", JSON.stringify({
-          email,
-          loggedAt: new Date().toISOString()
-        }))
-      }
+      localStorage.setItem("gabay_auth", JSON.stringify({
+        user: data.user,
+        role: data.account.role,
+        facilityId: data.account.facility_id,
+        loggedAt: new Date().toISOString()
+      }))
 
       if (onLoginSuccess) {
         onLoginSuccess()
@@ -39,34 +32,9 @@ export default function LoginPage({ onLoginSuccess }) {
         window.dispatchEvent(new PopStateEvent("popstate"))
       }
     } catch (err) {
-      console.warn("Supabase login returned an error:", err)
-      
-      // If development/demo test credentials, allow smooth transition with demo feedback
-      if (email && password) {
-        // Check if error is invalid credentials or connection issue
-        setError(err.message || "Invalid login credentials. Please try again.")
-      } else {
-        setError("Please enter both email and password.")
-      }
+      setError(err.message || "Unable to sign in. Please try again.")
     } finally {
       setLoading(false)
-    }
-  }
-
-  // Quick bypass / demo login for immediate UI review
-  const handleDemoLogin = () => {
-    localStorage.setItem("gabay_auth", JSON.stringify({
-      email: "doctor@gabaymed.ph",
-      role: "admin",
-      isDemo: true,
-      loggedAt: new Date().toISOString()
-    }))
-
-    if (onLoginSuccess) {
-      onLoginSuccess()
-    } else {
-      window.history.pushState({}, "", "/")
-      window.dispatchEvent(new PopStateEvent("popstate"))
     }
   }
 
@@ -172,18 +140,7 @@ export default function LoginPage({ onLoginSuccess }) {
                   required
                   className="w-full h-11 px-3.5 pr-10 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm placeholder:text-slate-400 focus:outline-none focus:border-[#4C82F7] focus:ring-2 focus:ring-[#4C82F7]/15 transition-all shadow-sm"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none transition-colors"
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
+
               </div>
             </div>
 
