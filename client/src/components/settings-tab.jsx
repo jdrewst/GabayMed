@@ -15,6 +15,20 @@ import { settingsAPI } from "../../services/settings" // Import API
 export function SettingsTabs() {
   const [activeTab, setActiveTab] = useState('users')
   const [users, setUsers] = useState([])
+  const [account, setAccount] = useState(null)
+  const [accessError, setAccessError] = useState('')
+  const [creatingProvider, setCreatingProvider] = useState(false)
+  const [providerError, setProviderError] = useState('')
+  const [createdCredentials, setCreatedCredentials] = useState(null)
+  const [copyMessage, setCopyMessage] = useState('')
+  const canAddProvider = account?.role === 'IT Admin'
+
+  useEffect(() => {
+    let active = true
+    settingsAPI.getAccessContext().then(data => { if (active) setAccount(data) })
+      .catch(error => { if (active) setAccessError(error.message) })
+    return () => { active = false }
+  }, [])
   const [procedures, setProcedures] = useState([])
   const [procedureLoadError, setProcedureLoadError] = useState('')
   const [loadingUsers, setLoadingUsers] = useState(true)
@@ -49,7 +63,6 @@ export function SettingsTabs() {
   const [userFormData, setUserFormData] = useState({
     name: '',
     email: '',
-    password: '',
     role: '',
     licenseNo: '',
     specialization: ''
@@ -76,9 +89,14 @@ export function SettingsTabs() {
   useEffect(() => {
     const fetchUsers = async () => {
       setLoadingUsers(true);
-      const data = await settingsAPI.getProviders();
-      setUsers(data);
-      setLoadingUsers(false);
+      try {
+        const data = await settingsAPI.getProviders();
+        setUsers(data);
+      } catch (error) {
+        setAccessError(error.message);
+      } finally {
+        setLoadingUsers(false);
+      }
     }
     fetchUsers()
   }, [])
@@ -216,6 +234,11 @@ export function SettingsTabs() {
 
   // Handle save new user (Provider)
   const handleSaveUser = async () => {
+    if (creatingProvider) return
+    if (!canAddProvider) {
+      setProviderError('Only IT Admin accounts can add providers.')
+      return
+    }
     if (!isUserFormValid()) {
       alert('Please fill in all required fields.')
       return
@@ -252,7 +275,10 @@ export function SettingsTabs() {
       working_hrs: Math.round(workingHrs)
     };
 
+    setCreatingProvider(true)
+    setProviderError('')
     const result = await settingsAPI.createProvider(payload);
+    setCreatingProvider(false)
 
     if (result.success) {
       // Add new user to the list
@@ -262,16 +288,16 @@ export function SettingsTabs() {
       setUserFormData({
         name: '',
         email: '',
-        password: '',
         role: '',
         licenseNo: '',
         specialization: ''
       })
       setScheduleData(parseScheduleToState({})) // Reset schedule
       setIsUserDialogOpen(false)
-      alert('Provider created successfully!')
+      setCreatedCredentials(result.credentials)
+      setCopyMessage('')
     } else {
-      alert('Failed to create provider: ' + result.error)
+      setProviderError(result.error)
     }
   }
 
@@ -286,7 +312,6 @@ export function SettingsTabs() {
       role: (user.type || user.role || '').toUpperCase(),
       licenseNo: user.licenseNo || '',
       specialization: user.specialization || '',
-      password: '' // Don't populate password
     })
     setScheduleData(parseScheduleToState(user.schedule))
     setIsEditUserDialogOpen(true)
@@ -316,7 +341,6 @@ export function SettingsTabs() {
       setUserFormData({
         name: '',
         email: '',
-        password: '',
         role: '',
         licenseNo: '',
         specialization: ''
@@ -361,6 +385,30 @@ export function SettingsTabs() {
         <p className="text-muted-foreground">Manage your clinic configuration and preferences</p>
       </div>
 
+      {accessError && <p role="alert" className="text-sm text-red-600">{accessError}</p>}
+      {account && <p className="text-sm text-muted-foreground">Signed in as {account.role}</p>}
+      <Dialog open={createdCredentials !== null} onOpenChange={value => { if (!value) setCreatedCredentials(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Provider Account Created</DialogTitle>
+            <DialogDescription>Share these login details with the provider. The password is displayed only here and is cleared when you close this dialog.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label htmlFor="created-email">Email</Label><Input id="created-email" readOnly value={createdCredentials?.email || ''} /></div>
+            <div className="space-y-2"><Label htmlFor="generated-password">Generated Password</Label><Input id="generated-password" autoComplete="off" readOnly value={createdCredentials?.password || ''} /></div>
+            <p className="text-sm">Account role: Hospital Staff</p>
+            <Button variant="outline" onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(`Email: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`)
+                setCopyMessage('Login details copied.')
+              } catch { setCopyMessage('Copy was unavailable. Select and copy the login details manually.') }
+            }}>Copy Login Details</Button>
+            {copyMessage && <p role="status" className="text-sm">{copyMessage}</p>}
+            <div className="flex justify-end"><Button onClick={() => setCreatedCredentials(null)}>Done</Button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-4 lg:w-[600px]">
           <TabsTrigger value="users">Providers</TabsTrigger>
@@ -377,7 +425,16 @@ export function SettingsTabs() {
                 <CardTitle>Providers & Staff</CardTitle>
                 <CardDescription>Manage staff access and provider schedules</CardDescription>
               </div>
-              <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
+              {canAddProvider && <Dialog open={isUserDialogOpen} onOpenChange={value => {
+                if (creatingProvider) return
+                if (value) {
+                  setUserFormData({ name: '', email: '', role: '', licenseNo: '', specialization: '' })
+                  setScheduleData(parseScheduleToState({}))
+                  setEditingUserId(null)
+                }
+                setProviderError('')
+                setIsUserDialogOpen(value)
+              }}>
                 <DialogTrigger asChild>
                   <Button className="bg-blue-500">Add New Provider</Button>
                 </DialogTrigger>
@@ -413,23 +470,13 @@ export function SettingsTabs() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="password">Password <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="password"
-                          type="password"
-                          placeholder="Minimum 6 characters"
-                          value={userFormData.password}
-                          onChange={(e) => handleUserInputChange('password', e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="role">Role / Type <span className="text-red-500">*</span></Label>
+                        <Label htmlFor="role">Provider Type <span className="text-red-500">*</span></Label>
                         <Select
                           value={userFormData.role}
                           onValueChange={(value) => handleUserInputChange('role', value)}
                         >
                           <SelectTrigger id="role">
-                            <SelectValue placeholder="Select role" />
+                            <SelectValue placeholder="Select provider type" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="DOCTOR">Doctor</SelectItem>
@@ -502,24 +549,25 @@ export function SettingsTabs() {
                   </div>
 
                   <div className="flex justify-end gap-3">
-                    <Button variant="outline" onClick={() => setIsUserDialogOpen(false)}>
+                    <Button variant="outline" disabled={creatingProvider} onClick={() => setIsUserDialogOpen(false)}>
                       Cancel
                     </Button>
                     <Button 
                       className="bg-blue-500 hover:bg-blue-600"
                       onClick={handleSaveUser}
-                      disabled={!isUserFormValid()}
+                      disabled={!isUserFormValid() || creatingProvider}
                     >
-                      Create Provider
+                      {creatingProvider ? 'Creating Account...' : 'Create Provider'}
                     </Button>
                   </div>
+                  {providerError && <p role="alert" className="text-sm text-red-600 mt-3">{providerError}</p>}
                   {!isUserFormValid() && (
                     <p className="text-xs text-muted-foreground text-center">
-                      Please fill in all required fields (Name, Email, Password, Role)
+                      Please fill in all required fields (Name, Email, Provider Type)
                     </p>
                   )}
                 </DialogContent>
-              </Dialog>
+              </Dialog>}
 
               {/* Edit User Dialog */}
               <Dialog open={isEditUserDialogOpen} onOpenChange={setIsEditUserDialogOpen}>
@@ -561,7 +609,7 @@ export function SettingsTabs() {
                           onValueChange={(value) => handleUserInputChange('role', value)}
                         >
                           <SelectTrigger id="edit-role">
-                            <SelectValue placeholder="Select role" />
+                            <SelectValue placeholder="Select provider type" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="DOCTOR">Doctor</SelectItem>
@@ -668,7 +716,7 @@ export function SettingsTabs() {
                   ) : users.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center text-muted-foreground">
-                        No providers found. Click "Add New Provider" to get started.
+                        {canAddProvider ? 'No providers found. Click Add New Provider to get started.' : 'No providers found.'}
                       </TableCell>
                     </TableRow>
                   ) : (
