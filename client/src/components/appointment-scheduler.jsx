@@ -103,6 +103,38 @@ export function AppointmentScheduler() {
     return bookedAppointments.find((apt) => apt.providerId === providerId && apt.time === time)
   }
 
+  const getAppointmentStatusColor = (status) => {
+    const colors = {
+      pending: "bg-yellow-50 hover:bg-yellow-100 border-yellow-200",
+      confirmed: "bg-green-50 hover:bg-green-100 border-green-200",
+      ongoing: "bg-blue-50 hover:bg-blue-100 border-blue-200",
+      complete: "bg-gray-100 hover:bg-gray-200 border-gray-300",
+      missed: "bg-orange-50 hover:bg-orange-100 border-orange-200",
+      cancelled: "bg-red-50 hover:bg-red-100 border-red-200",
+    };
+
+    return (
+      colors[String(status ?? "").trim().toLowerCase()] ||
+      "bg-white hover:bg-slate-50 border-gray-200"
+    );
+  };
+
+  const getAppointmentStatusChipColor = (status) => {
+    const colors = {
+      pending: "bg-yellow-100 text-yellow-800 border-yellow-300",
+      confirmed: "bg-green-100 text-green-800 border-green-300",
+      ongoing: "bg-blue-100 text-blue-800 border-blue-300",
+      complete: "bg-gray-200 text-gray-800 border-gray-300",
+      missed: "bg-orange-100 text-orange-800 border-orange-300",
+      cancelled: "bg-red-100 text-red-800 border-red-300",
+    };
+
+    return (
+      colors[String(status ?? "").trim().toLowerCase()] ||
+      "bg-gray-100 text-gray-800 border-gray-300"
+    );
+  };
+
   // Handle slot clicks to initialize form data
   const handleSlotClick = (providerId, time, appointment) => {
     setSelectedSlot({ providerId, time, date: selectedDate, appointment })
@@ -349,8 +381,9 @@ export function AppointmentScheduler() {
                     <div
                       key={`slot-${provider.id}-${hour}`}
                       className={`border-b border-l min-h-[100px] p-2 relative group cursor-pointer transition-colors ${
-                        appointment ? "bg-blue-50 hover:bg-blue-100" : "hover:bg-slate-50"
-                      }`}
+                        appointment 
+                        ? getAppointmentStatusColor(appointment.status)
+                        : "hover:bg-slate-50"}`}
                       // UPDATED: Use the new handler instead of inline function
                       onClick={() => handleSlotClick(provider.id, hour, appointment)}
                     >
@@ -358,7 +391,12 @@ export function AppointmentScheduler() {
                         <div className="space-y-1">
                           <div className="font-medium text-sm">{appointment.patient}</div>
                           <div className="text-xs text-muted-foreground">{appointment.procedure}</div>
-                          <Badge variant="secondary" className="text-xs">
+                          <Badge 
+                            variant="outline"
+                            className={`text-xs font-medium ${getAppointmentStatusChipColor(
+                              appointment.status
+                            )}`}
+                          >
                             {appointment.status}
                           </Badge>
                         </div>

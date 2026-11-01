@@ -121,7 +121,7 @@ export const appointmentAPI = {
         .eq('facility_id', facilityId)
         .gte('appointment_date', start)
         .lte('appointment_date', end)
-        .neq('status', 'CANCELLED');
+        // .neq('status', 'CANCELLED');
 
       if (error) throw error;
 
