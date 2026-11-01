@@ -28,6 +28,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const API_BASE_URL = 'http://localhost:3000/api'; 
 
 export const GabayAPI = {
+  onAuthStateChange(callback) {
+    return supabase.auth.onAuthStateChange(callback).data.subscription;
+  },
   // 1. AUTH AND PROFILE
 
   /**
@@ -81,11 +84,15 @@ export const GabayAPI = {
    * @returns {Promise<Object>} Session data
    */
   async login(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const response = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
     });
-    
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(result.error || 'Login is temporarily unavailable.'), {
+      status: response.status, code: result.code, retryAfter: result.retry_after || 0
+    });
+    const { data, error } = await supabase.auth.setSession(result);
     if (error) throw error;
     try {
       const account = await this.getClinicAccount();
@@ -104,19 +111,35 @@ export const GabayAPI = {
     if (accountError || !account?.facility_id || !['IT Admin', 'Hospital Staff'].includes(account.role)) {
       throw new Error('Your account needs an IT Admin or Hospital Staff role and a clinic assignment.');
     }
-    Session.setFacilityId(account.facility_id);
-    return account;
+    const mustChangePassword = user.app_metadata?.must_change_password === true;
+    Session.setFacilityId(mustChangePassword ? null : account.facility_id);
+    return { ...account, mustChangePassword };
+  },
+
+  async changeFirstPassword(password) {
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) throw new Error('Please sign in again.');
+    const response = await fetch('/api/first-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session.access_token}` },
+      body: JSON.stringify({ password })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Password change failed.');
+    // A fresh sign-in obtains tokens with the updated server-controlled metadata.
+    await this.logout();
   },
 
   /**
    * Log Out
    */
   async logout() {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    localStorage.removeItem('gabay_auth');
-    localStorage.removeItem('gabay_facility_id');
-    localStorage.removeItem('gabay_facility_data');
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+    } finally {
+      Session.clear();
+    }
   },
 
   /**

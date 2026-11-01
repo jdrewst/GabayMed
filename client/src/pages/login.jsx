@@ -1,6 +1,8 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Eye, EyeOff, Loader2, AlertCircle } from "lucide-react"
 import { GabayAPI } from "../../services/gabayApi.js"
+import { SystemNotice } from "@/components/system-notice"
+import { LoginBackground } from "@/components/login-background"
 import LogoSvg from "@/assets/Logo.svg"
 
 export default function LoginPage({ onLoginSuccess, initialError = "" }) {
@@ -9,15 +11,32 @@ export default function LoginPage({ onLoginSuccess, initialError = "" }) {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(initialError)
+  const [cooldown, setCooldown] = useState(null)
+  const [now, setNow] = useState(Date.now())
+  const remaining = cooldown?.email === email.trim().toLowerCase()
+    ? Math.max(0, Math.ceil((cooldown.until - now) / 1000)) : 0
+  useEffect(() => {
+    if (!cooldown) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [cooldown])
+  const [systemNotice, setSystemNotice] = useState(() => {
+    const message = sessionStorage.getItem('gabay_system_notice') || ''
+    return message
+  })
+  useEffect(() => { sessionStorage.removeItem('gabay_system_notice') }, [])
+  useEffect(() => { if (initialError) setError(initialError) }, [initialError])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (loading || remaining > 0) return
     setError("")
     setLoading(true)
 
     try {
       // 1. Attempt login with GabayAPI / Supabase Auth
       const data = await GabayAPI.login(email, password)
+      localStorage.setItem('gabay_last_activity', String(Date.now()))
       
       localStorage.setItem("gabay_auth", JSON.stringify({
         user: data.user,
@@ -33,7 +52,16 @@ export default function LoginPage({ onLoginSuccess, initialError = "" }) {
         window.dispatchEvent(new PopStateEvent("popstate"))
       }
     } catch (err) {
-      setError(err.message || "Unable to sign in. Please try again.")
+      setPassword('')
+      if (err.retryAfter > 0) {
+        setNow(Date.now())
+        setCooldown({ email: email.trim().toLowerCase(), until: Date.now() + err.retryAfter * 1000 })
+      }
+      setError(err.status === 429
+        ? err.message
+        : err.code === 'invalid_credentials'
+          ? "Email or password is incorrect."
+          : err.message || "Unable to sign in. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -41,40 +69,7 @@ export default function LoginPage({ onLoginSuccess, initialError = "" }) {
 
   return (
     <div className="min-h-screen w-full relative flex items-center justify-center bg-white overflow-hidden select-none">
-      {/* Top Wave Graphic Header */}
-      <div className="absolute top-0 left-0 right-0 w-full overflow-hidden leading-none pointer-events-none z-0">
-        <svg
-          viewBox="0 0 1440 380"
-          className="w-full h-[260px] sm:h-[320px] md:h-[380px] object-cover"
-          preserveAspectRatio="none"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <defs>
-            <linearGradient id="waveGradient" x1="0%" y1="0%" x2="100%" y2="80%">
-              <stop offset="0%" stopColor="#55C9FD" />
-              <stop offset="50%" stopColor="#6FD2FD" />
-              <stop offset="100%" stopColor="#8BE0FE" />
-            </linearGradient>
-            <filter id="softGlow" x="-5%" y="-5%" width="110%" height="115%">
-              <feDropShadow dx="0" dy="8" stdDeviation="14" floodColor="#38bdf8" floodOpacity="0.22" />
-            </filter>
-          </defs>
-          
-          {/* Main Soft Top Wave */}
-          <path
-            d="M0 0H1440V180C1320 250 1180 270 1020 220C860 170 700 160 520 220C360 275 180 265 0 180V0Z"
-            fill="url(#waveGradient)"
-            filter="url(#softGlow)"
-          />
-          {/* Ambient curve matching provided mockup */}
-          <path
-            d="M0 0H1440V160C1290 230 1140 255 980 200C820 145 660 155 490 215C320 275 160 255 0 165V0Z"
-            fill="url(#waveGradient)"
-            opacity="0.9"
-          />
-        </svg>
-      </div>
+      <LoginBackground />
 
       {/* Main Login Card */}
       <div className="relative z-10 w-full max-w-[420px] mx-4 sm:mx-auto">
@@ -92,15 +87,7 @@ export default function LoginPage({ onLoginSuccess, initialError = "" }) {
             </h1>
           </div>
 
-          {/* Error Message if any */}
-          {error && (
-            <div className="mb-5 p-3 rounded-xl bg-red-50 border border-red-200/80 text-red-600 text-xs flex items-start gap-2 animate-in fade-in duration-200">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p>{error}</p>
-              </div>
-            </div>
-          )}
+          <SystemNotice message={error ? `${error}${remaining > 0 ? ` Retry in ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}.` : ''}` : systemNotice} kind={error ? 'error' : 'info'} onClose={() => { setError(''); setSystemNotice('') }} />
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -149,7 +136,7 @@ export default function LoginPage({ onLoginSuccess, initialError = "" }) {
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || remaining > 0}
                 className="w-full h-11 rounded-full text-white font-medium text-sm sm:text-base bg-gradient-to-b from-[#55C5F8] to-[#3BA5EC] hover:from-[#49bdf5] hover:to-[#329ce4] active:scale-[0.99] transition-all shadow-[0_4px_16px_rgba(59,165,236,0.36)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75"
               >
                 {loading ? (
@@ -158,7 +145,7 @@ export default function LoginPage({ onLoginSuccess, initialError = "" }) {
                     <span>Logging in...</span>
                   </>
                 ) : (
-                  <span>Log In</span>
+                  <span>{remaining > 0 ? `Retry in ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}` : 'Log In'}</span>
                 )}
               </button>
             </div>

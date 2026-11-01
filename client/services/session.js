@@ -1,24 +1,13 @@
-// This service manages the active Facility ID.
-// You only need to change the ID here, and it updates everywhere.
-
-const DEV_FACILITY_ID = "d7f1b581-3b68-491d-a515-aeb94a5bee3f";
-
+// Verified account context for UI filtering. Database RLS remains the access boundary.
+let facilityId = null;
 export const Session = {
-  getFacilityId: () => {
-    // 1. Check LocalStorage (if you implement a real Login later)
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('gabay_facility_id');
-      if (stored) return stored;
-    }
-
-    // 2. Fallback to the hardcoded ID for development
-    return DEV_FACILITY_ID;
+  getFacilityId() {
+    if (!facilityId) throw new Error('Sign in with an account assigned to a clinic.');
+    return facilityId;
   },
-
-  // Call this when the user logs in
-  setFacilityId: (id) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('gabay_facility_id', id);
-    }
+  setFacilityId(id) { facilityId = id || null; },
+  clear() {
+    facilityId = null;
+    for (const key of ['gabay_auth', 'gabay_facility_id', 'gabay_facility_data', 'gabay_last_activity']) localStorage.removeItem(key);
   }
 };
