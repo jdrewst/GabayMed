@@ -165,11 +165,52 @@ export const appointmentAPI = {
     try {
       const { data, error } = await supabase
         .from('procedures')
-        .select('procedure_id, name');
+        .select('procedure_id, procedure_code, name, description, category, price, duration')
+        .order ('name', { ascending: true });
       
       if (error) throw error;
-      return data.map(p => ({ id: p.procedure_id, name: p.name }));
+      return data.map(p => ({ 
+        id: p.procedure_id, 
+        code: p.procedure_code, 
+        name: p.name, 
+        description: p.description, 
+        category: p.category, 
+        price: p.price, 
+        duration: p.duration 
+      }));
     } catch (error) {
+      console.error("Get Procedures Error:", error.message);
+      return [];
+    }
+  },
+
+  // 3.1 Search Procedures
+  async searchProcedures(query) {
+    const term = query?.trim();
+    if (!term) return [];
+    const escapedTerm = term.replace(/[\\%_,().]/g, '\\$&');
+    try{
+      const {data, error,} = await supabase
+        .from('procedures')
+        .select('procedure_id, procedure_code, name, description, category, price, duration')
+        .or(
+          `procedure_code.ilike.%${escapedTerm}%,name.ilike.%${escapedTerm}%,description.ilike.%${escapedTerm}%`
+        )
+        .order('procedure_code', { ascending: true })
+        .limit(10);
+      
+      if (error) throw error;
+      return data.map(p => ({ 
+        id: p.procedure_id, 
+        code: p.procedure_code, 
+        name: p.name, 
+        description: p.description, 
+        category: p.category, 
+        price: p.price, 
+        duration: p.duration 
+      }));
+    } catch (error) {
+      console.error("Search Procedures Error:", error.message);
       return [];
     }
   },

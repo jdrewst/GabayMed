@@ -40,6 +40,13 @@ export function AppointmentScheduler() {
     notes: ''
   })
 
+  //Procedure-search state
+  const [procedureSearch, setProcedureSearch] = useState("");
+  const [procedureResults, setProcedureResults] = useState([]);
+  const [selectedProcedure, setSelectedProcedure] = useState(null);
+  const [showProcedureResults, setShowProcedureResults] = useState(false);
+  const [isSearchingProcedures, setIsSearchingProcedures] = useState(false);
+
   // Fetch Data on Mount and Date Change
   useEffect(() => {
     const loadData = async () => {
@@ -51,8 +58,8 @@ export function AppointmentScheduler() {
         const appointmentsData = await appointmentAPI.getAppointmentsByDate(selectedDate);
         setBookedAppointments(appointmentsData);
 
-        const proceduresData = await appointmentAPI.getProcedures();
-        setProcedures(proceduresData);
+        // const proceduresData = await appointmentAPI.getProcedures();
+        // setProcedures(proceduresData);
 
       } catch (error) {
         console.error("Failed to load scheduler data", error);
@@ -63,6 +70,34 @@ export function AppointmentScheduler() {
 
     loadData();
   }, [selectedDate]);
+
+  useEffect(() => {
+    const term = procedureSearch.trim();
+    if (!term || selectedProcedure) {
+      setProcedureResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearchingProcedures(true);
+      try {
+        const results = await appointmentAPI.searchProcedures(term);
+        if (!cancelled) {
+          setProcedureResults(results);
+        }
+      } catch (error) {
+        console.error("Failed to search procedures:", error);
+      } finally {
+        if (!cancelled) {
+          setIsSearchingProcedures(false);
+        }
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [procedureSearch, selectedProcedure]);
 
   const getAppointmentForSlot = (providerId, time) => {
     return bookedAppointments.find((apt) => apt.providerId === providerId && apt.time === time)
@@ -426,27 +461,71 @@ export function AppointmentScheduler() {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-2">
-                <Label>Procedures <span className="text-red-500">*</span></Label>
-                <Select 
-                  value={formData.procedure} // Use formData directly
-                  onValueChange={(value) => setFormData({ ...formData, procedure: value })}
-                  // Removed disabled prop
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select procedure" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {procedures.length > 0 ? (
-                      procedures.map((proc) => (
-                        <SelectItem key={proc.id} value={proc.id.toString()}>{proc.name}</SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="0" disabled>No procedures found</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="procedure-search"> Procedures <span className="text-red-500">*</span></Label>
+                <div className="relative">
+                  <Input
+                    id="procedure-search"
+                    placeholder="Search procedure"
+                    value={procedureSearch}
+                    onChange={(e) => {
+                      setProcedureSearch(e.target.value);
+                      setShowProcedureResults(true);
+                      // Clear the previous selection when the search changes.
+                      setFormData((prev) => ({...prev,procedure: "",}));
+                      setSelectedProcedure(null);
+                    }}
+                    onFocus={() => setShowProcedureResults(true)}
+                    autoComplete="off"
+                  />
+
+                  {showProcedureResults && procedureSearch.trim() && (
+                    <div className="absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-white shadow-md">
+                      {isSearchingProcedures ? (
+                        <div className="p-3 text-sm text-gray-500">Searching procedures...</div>
+                      ) : procedureResults.length > 0 ? (
+                        procedureResults.map((proc) => (
+                          <button
+                            key={proc.id}
+                            type="button"
+                            className="flex w-full flex-col items-start border-b p-3 text-left hover:bg-gray-100 last:border-b-0"
+                            onClick={() => {
+                              setFormData((prev) => ({...prev, procedure: proc.id.toString(),}));
+                              setSelectedProcedure(proc);
+                              setProcedureSearch( `${proc.code || ""} — ${proc.name}`);
+                              setShowProcedureResults(false);
+                            }}
+                          >
+                            <span className="font-medium"> {proc.code && `${proc.code} — `}{proc.name} </span>
+                            {proc.description && (<span className="mt-1 text-sm text-gray-500">{proc.description}</span>)}
+                            {proc.category && (<span className="mt-1 text-xs text-gray-400">{proc.category}</span>)}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-3 text-sm text-gray-500">No matching procedures found.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {selectedProcedure && (
+                  <div className="rounded-md border bg-gray-50 p-3 text-sm">
+                    <p>
+                      <span className="font-medium">Procedure Code:</span>{" "}
+                      {selectedProcedure.code || "N/A"}
+                    </p>
+
+                    <p>
+                      <span className="font-medium">Procedure Name:</span>{" "}
+                      {selectedProcedure.name}
+                    </p>
+
+                    <p>
+                      <span className="font-medium">Description:</span>{" "}
+                      {selectedProcedure.description || "No description available."}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
