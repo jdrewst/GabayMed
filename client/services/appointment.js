@@ -47,10 +47,12 @@ export const appointmentAPI = {
         .select(`
           appointment_id,
           appointment_date,
+          appointment_time,
           operatory,
           status,
+          procedure_id,
           patients ( full_name ),
-          procedures ( name ),
+          procedures ( procedure_id ),
           providers ( name )
         `)
         .eq('facility_id', facilityId)
@@ -61,7 +63,7 @@ export const appointmentAPI = {
 
       if (error) throw error;
 
-      return data;
+      return data || [];
 
     } catch (error) {
       console.error("Get Today's Appointments Error:", error.message);
@@ -80,7 +82,7 @@ export const appointmentAPI = {
       
       if (error) throw error;
       
-      return data.map(p => ({
+      return (data || []).map(p => ({
         id: p.provider_id,
         name: p.name,
         role: p.specialization || 'Provider',
@@ -116,17 +118,20 @@ export const appointmentAPI = {
           patient_id, 
           procedure_id,
           patients ( full_name ),
-          procedures ( name )
+          procedures ( procedure_id )
         `)
         .eq('facility_id', facilityId)
         .gte('appointment_date', start)
         .lte('appointment_date', end)
         .neq('status', 'CANCELLED');
 
-      if (error) throw error;
+      if (error) {
+        console.error("Get Scheduler Appointments Supabase Error:", error);
+        throw error;
+      }
 
       // Transform for Scheduler UI
-      return data.map(apt => {
+      return (data || []).map(apt => {
         let hour = 8;
         if (apt.appointment_time) {
           const parts = apt.appointment_time.split(':');
@@ -138,15 +143,17 @@ export const appointmentAPI = {
           }
         }
 
+        const procId = apt.procedure_id || apt.procedures?.procedure_id || 'General';
+
         return {
           id: apt.appointment_id,
           patientId: apt.patient_id,
           providerId: apt.provider_id,
-          procedureId: apt.procedure_id,
+          procedureId: apt.procedure_id || apt.procedures?.procedure_id,
           fullDate: apt.appointment_date,
           time: hour, 
           patient: apt.patients?.full_name || 'Unknown',
-          procedure: apt.procedures?.name || 'General',
+          procedure: procId,
           status: apt.status || 'PENDING',
           operatory: apt.operatory || 'Room 101', 
           length: apt.duration || 30,
@@ -165,11 +172,15 @@ export const appointmentAPI = {
     try {
       const { data, error } = await supabase
         .from('procedures')
-        .select('procedure_id, name');
+        .select('*');
       
       if (error) throw error;
-      return data.map(p => ({ id: p.procedure_id, name: p.name }));
+      return (data || []).map(p => ({ 
+        id: p.procedure_id, 
+        name: p.procedure_id ? `Procedure ${p.procedure_id}` : (p.description || p.name || 'Procedure') 
+      }));
     } catch (error) {
+      console.error("Get Procedures Error:", error.message);
       return [];
     }
   },
@@ -185,13 +196,20 @@ export const appointmentAPI = {
       const minutes = String(dateObj.getMinutes()).padStart(2, '0');
       const timeStr = `${hours}:${minutes}:00`;
 
+      const providerId = !isNaN(Number(newAppointment.providerId)) 
+        ? parseInt(newAppointment.providerId, 10) 
+        : newAppointment.providerId;
+      const procedureId = !isNaN(Number(newAppointment.procedureId)) 
+        ? parseInt(newAppointment.procedureId, 10) 
+        : newAppointment.procedureId;
+
       const { data, error } = await supabase
         .from('appointments')
         .insert([{
           facility_id: facilityId,
           patient_id: newAppointment.patientId,
-          provider_id: newAppointment.providerId,
-          procedure_id: newAppointment.procedureId,
+          provider_id: providerId,
+          procedure_id: procedureId,
           operatory: newAppointment.operatory || 'Room 101',
           appointment_date: dateStr,
           appointment_time: timeStr,
@@ -222,8 +240,9 @@ export const appointmentAPI = {
         .limit(5);
 
       if (error) throw error;
-      return data.map(p => ({ id: p.patient_id, name: p.full_name }));
+      return (data || []).map(p => ({ id: p.patient_id, name: p.full_name }));
     } catch (error) {
+      console.error("Search Patients Error:", error.message);
       return [];
     }
   },
@@ -252,7 +271,7 @@ export const appointmentAPI = {
         hoursMap[i] = 0;
       }
 
-      data.forEach(app => {
+      (data || []).forEach(app => {
         const date = new Date(app.appointment_date);
         const hour = date.getHours();
         if (hoursMap[hour] !== undefined) {
@@ -303,7 +322,8 @@ export const appointmentAPI = {
           appointment_id,
           appointment_date,
           status,
-          procedures ( name ),
+          procedure_id,
+          procedures ( procedure_id ),
           providers ( name )
         `)
         .eq('facility_id', facilityId)
@@ -315,10 +335,10 @@ export const appointmentAPI = {
 
       if (error) throw error;
 
-      return data.map(apt => ({
+      return (data || []).map(apt => ({
         id: apt.appointment_id,
         date: apt.appointment_date,
-        procedure: apt.procedures?.name || 'General Checkup',
+        procedure: apt.procedure_id || apt.procedures?.procedure_id || 'General Checkup',
         provider: apt.providers?.name || 'Unknown Provider',
         status: apt.status
       }));
@@ -331,16 +351,28 @@ export const appointmentAPI = {
   // 8. Update Appointment
   async updateAppointment(id, updates) {
     try {
+      const updateData = {
+        operatory: updates.operatory,
+        duration: parseInt(updates.duration),
+        status: updates.status,
+        notes: updates.notes
+      };
+
+      if (updates.providerId !== undefined) {
+        updateData.provider_id = !isNaN(Number(updates.providerId)) 
+          ? parseInt(updates.providerId, 10) 
+          : updates.providerId;
+      }
+
+      if (updates.procedureId !== undefined) {
+        updateData.procedure_id = !isNaN(Number(updates.procedureId)) 
+          ? parseInt(updates.procedureId, 10) 
+          : updates.procedureId;
+      }
+
       const { data, error } = await supabase
         .from('appointments')
-        .update({
-          provider_id: updates.providerId,
-          procedure_id: updates.procedureId,
-          operatory: updates.operatory,
-          duration: parseInt(updates.duration),
-          status: updates.status,
-          notes: updates.notes
-        })
+        .update(updateData)
         .eq('appointment_id', id)
         .select()
         .single();

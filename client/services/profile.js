@@ -160,7 +160,7 @@ export const profileAPI = {
           code,
           appointments (
             appointment_date,
-            procedures ( name )
+            procedures ( procedure_id )
           )
         `)
         .eq('patient_id', patientId)
@@ -171,7 +171,7 @@ export const profileAPI = {
       return data.map(item => ({
         id: item.ledger_id,
         date: item.created_at,
-        description: item.description || item.appointments?.procedures?.name || 'Medical Service',
+        description: item.description || (item.appointments?.procedures?.procedure_id ? `Procedure #${item.appointments.procedures.procedure_id}` : 'Medical Service'),
         amount: item.amount,
         status: item.payment_status,
         method: item.payment_method

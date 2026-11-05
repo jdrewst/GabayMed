@@ -33,7 +33,7 @@ export function AppointmentScheduler() {
     patientId: null,
     status: 'PENDING',
     procedure: '',
-    operatory: '',
+    operatory: 'Room 101',
     primaryProvider: '',
     additionalProvider: '',
     length: '30',
@@ -65,7 +65,10 @@ export function AppointmentScheduler() {
   }, [selectedDate]);
 
   const getAppointmentForSlot = (providerId, time) => {
-    return bookedAppointments.find((apt) => apt.providerId === providerId && apt.time === time)
+    return bookedAppointments.find((apt) => 
+      String(apt.providerId) === String(providerId) && 
+      Number(apt.time) === Number(time)
+    )
   }
 
   // Handle slot clicks to initialize form data
@@ -73,13 +76,13 @@ export function AppointmentScheduler() {
     setSelectedSlot({ providerId, time, date: selectedDate, appointment })
     
     if (!appointment) {
-      // Initialize form data so "Save" button works immediately
+      // Initialize form data so "Save" button works smoothly
       setFormData({
         patient: '',
         patientId: null,
         status: 'PENDING', 
-        procedure: '',
-        operatory: '',
+        procedure: procedures[0]?.id ? procedures[0].id.toString() : '',
+        operatory: 'Room 101',
         primaryProvider: providerId ? providerId.toString() : '', 
         additionalProvider: '',
         length: '30',
@@ -87,12 +90,16 @@ export function AppointmentScheduler() {
       })
     } else {
       // POPULATE FORM FOR EDITING (with safe fallbacks to avoid crashes)
+      const procVal = appointment.procedureId 
+        ? appointment.procedureId.toString() 
+        : (appointment.procedure ? appointment.procedure.toString() : '');
+
       setFormData({
         patient: appointment.patient || '',
         patientId: appointment.patientId || null,
         status: appointment.status || 'PENDING',
-        procedure: appointment.procedureId ? appointment.procedureId.toString() : '',
-        operatory: appointment.operatory || '',
+        procedure: procVal,
+        operatory: appointment.operatory || 'Room 101',
         primaryProvider: appointment.providerId ? appointment.providerId.toString() : (providerId ? providerId.toString() : ''),
         additionalProvider: '',
         length: appointment.length ? appointment.length.toString() : '30',
@@ -114,8 +121,8 @@ export function AppointmentScheduler() {
       patient: '',
       patientId: null,
       status: 'PENDING',
-      procedure: '',
-      operatory: '',
+      procedure: procedures[0]?.id ? procedures[0].id.toString() : '',
+      operatory: 'Room 101',
       primaryProvider: defaultProviderId,
       additionalProvider: '',
       length: '30',
@@ -123,7 +130,7 @@ export function AppointmentScheduler() {
     })
   }
 
-  // --- New Search Logic ---
+  // --- Search Logic ---
   const handlePatientSearch = async (value) => {
     setFormData({ ...formData, patient: value, patientId: null }); // Reset ID on type
     if (value.length > 1) {
@@ -138,7 +145,7 @@ export function AppointmentScheduler() {
       setFormData({ ...formData, patient: patient.name, patientId: patient.id });
       setPatientSearchResults([]);
   }
-  // ------------------------
+  // --------------------
 
   // --- Save Logic ---
   const handleSave = async () => {
@@ -147,17 +154,14 @@ export function AppointmentScheduler() {
         return;
     }
 
-    // Construct Date Time
     const date = new Date(selectedSlot.date);
     date.setHours(selectedSlot.time, 0, 0, 0);
-    // Adjust for timezone offset if necessary, or use local ISO
-    // For simplicity, using ISO string (UTC)
     
     const newAppointment = {
         patientId: formData.patientId,
         providerId: formData.primaryProvider,
         procedureId: formData.procedure,
-        operatory: formData.operatory,
+        operatory: formData.operatory || 'Room 101',
         date: date.toISOString(),
         duration: formData.length,
         status: formData.status,
@@ -316,13 +320,14 @@ export function AppointmentScheduler() {
                       className={`border-b border-l min-h-[100px] p-2 relative group cursor-pointer transition-colors ${
                         appointment ? "bg-blue-50 hover:bg-blue-100" : "hover:bg-slate-50"
                       }`}
-                      // UPDATED: Use the new handler instead of inline function
                       onClick={() => handleSlotClick(provider.id, hour, appointment)}
                     >
                       {appointment ? (
                         <div className="space-y-1">
                           <div className="font-medium text-sm">{appointment.patient}</div>
-                          <div className="text-xs text-muted-foreground">{appointment.procedure}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Procedure #{appointment.procedure}
+                          </div>
                           <Badge variant="secondary" className="text-xs">
                             {appointment.status}
                           </Badge>
@@ -385,7 +390,7 @@ export function AppointmentScheduler() {
                   <Input
                     className="pl-9"
                     placeholder="Search patient..."
-                    value={selectedSlot.appointment?.patient || formData.patient}
+                    value={formData.patient}
                     onChange={(e) => handlePatientSearch(e.target.value)}
                     disabled={!!selectedSlot.appointment} // Keep Patient locked for edits to avoid confusion
                   />
@@ -409,9 +414,8 @@ export function AppointmentScheduler() {
               <div className="space-y-2">
                 <Label>Status <span className="text-red-500">*</span></Label>
                 <Select 
-                  value={formData.status} // Use formData directly
+                  value={formData.status}
                   onValueChange={(value) => setFormData({ ...formData, status: value })}
-                  // Removed disabled prop
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select status" />
@@ -430,9 +434,8 @@ export function AppointmentScheduler() {
               <div className="space-y-2">
                 <Label>Procedures <span className="text-red-500">*</span></Label>
                 <Select 
-                  value={formData.procedure} // Use formData directly
+                  value={formData.procedure}
                   onValueChange={(value) => setFormData({ ...formData, procedure: value })}
-                  // Removed disabled prop
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select procedure" />
@@ -440,10 +443,12 @@ export function AppointmentScheduler() {
                   <SelectContent>
                     {procedures.length > 0 ? (
                       procedures.map((proc) => (
-                        <SelectItem key={proc.id} value={proc.id.toString()}>{proc.name}</SelectItem>
+                        <SelectItem key={proc.id} value={proc.id.toString()}>
+                          Procedure #{proc.id}
+                        </SelectItem>
                       ))
                     ) : (
-                      <SelectItem value="0" disabled>No procedures found</SelectItem>
+                      <SelectItem value="none" disabled>No procedures found</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
@@ -452,9 +457,8 @@ export function AppointmentScheduler() {
               <div className="space-y-2">
                 <Label>Operatory <span className="text-red-500">*</span></Label>
                 <Select 
-                  value={formData.operatory} // Use formData directly
+                  value={formData.operatory}
                   onValueChange={(value) => setFormData({ ...formData, operatory: value })}
-                  // Removed disabled prop
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select room" />
@@ -471,9 +475,8 @@ export function AppointmentScheduler() {
               <div className="space-y-2">
                 <Label>Primary Provider <span className="text-red-500">*</span></Label>
                 <Select 
-                  value={formData.primaryProvider} // Use formData directly
+                  value={formData.primaryProvider}
                   onValueChange={(value) => setFormData({ ...formData, primaryProvider: value })}
-                  // Removed disabled prop
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select provider" />
@@ -493,7 +496,6 @@ export function AppointmentScheduler() {
                 <Select 
                   value={formData.additionalProvider}
                   onValueChange={(value) => setFormData({ ...formData, additionalProvider: value })}
-                  // Removed disabled prop
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select additional provider" />
@@ -511,9 +513,8 @@ export function AppointmentScheduler() {
               <div className="space-y-2">
                 <Label>Length (minutes) <span className="text-red-500">*</span></Label>
                 <Select 
-                  value={formData.length} // Use formData directly
+                  value={formData.length}
                   onValueChange={(value) => setFormData({ ...formData, length: value })}
-                  // Removed disabled prop
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select duration" />
@@ -536,7 +537,6 @@ export function AppointmentScheduler() {
                   rows={3}
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  // Removed disabled prop
                 />
               </div>
 
