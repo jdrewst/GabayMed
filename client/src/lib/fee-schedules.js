@@ -39,10 +39,10 @@ export function buildFeeForm(procedures, schedules, schedule, today = localDate(
       const standardPrice = standardItem?.scheduleFee ?? standardItem?.currentFee
 
       // Reference Rate: based on the PHcase_rate column of procedures table (fallback to office/base if absent)
-      const phRate = p.phCaseRate ?? p.PHcase_rate ?? p.ph_case_rate
-      const referenceFee = phRate != null 
-        ? Number(phRate) 
-        : (standardPrice ?? Number((Number(p.price || 0) + Number(p.officeFee || 0)).toFixed(2)))
+      //const phRate = p.phCaseRate ?? p.PHcase_rate ?? p.ph_case_rate
+      //const referenceFee = phRate != null 
+        //? Number(phRate) 
+        //: (standardPrice ?? Number((Number(p.price || 0) + Number(p.officeFee || 0)).toFixed(2)))
 
       // Current Fee: based on current_fee column of fee_schedule_items table
       let currentFeeVal = saved?.current_fee ?? saved?.currentFee ?? saved?.scheduleFee

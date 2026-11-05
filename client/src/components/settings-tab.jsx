@@ -1134,7 +1134,6 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
                 <TableHead>Include</TableHead>
                 <TableHead>Procedure Code</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead>Reference Rate</TableHead>
                 <TableHead>Current Fee</TableHead>
                 <TableHead>New Fee *</TableHead>
               </TableRow></TableHeader>
@@ -1142,7 +1141,6 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
                   <TableCell><input type="checkbox" aria-label={`Include ${item.name}`} checked={item.included} onChange={e => changeItem(item.code, { included: e.target.checked })} /></TableCell>
                   <TableCell className="font-mono">{item.code}</TableCell>
                   <TableCell>{item.name}</TableCell>
-                  <TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
                   <TableCell className="whitespace-nowrap font-medium text-slate-700">{money(item.currentFee ?? item.current_fee ?? 0)}</TableCell>
                   <TableCell><Input aria-label={`New Fee for ${item.name}`} type="number" min="0" max="9999999999.99" step="0.01" required={item.included} disabled={!item.included || busy} value={item.scheduleFee} onChange={e => changeItem(item.code, { scheduleFee: e.target.value, newFee: e.target.value })} /></TableCell>
                 </TableRow>)}</TableBody>

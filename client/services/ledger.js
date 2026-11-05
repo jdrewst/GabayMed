@@ -226,6 +226,68 @@ export const ledgerAPI = {
     }
   },
 
+  // Get Payment Distribution
+  async getPaymentDistribution(patientId) {
+    try {
+      // 1. Get sum of all charges (where type is not PMT/PAYMENT)
+      const { data: ledgerData, error: ledgerError } = await supabase
+        .from('ledger')
+        .select('total_bill_amount, type')
+        .eq('patient_id', patientId)
+        .neq('type', 'PMT')
+        .neq('type', 'PAYMENT');
+
+      if (ledgerError) throw ledgerError;
+
+      const totalBalance = ledgerData.reduce((sum, item) => sum + parseFloat(item.total_bill_amount || 0), 0);
+
+      // 2. Fetch the patient's insurance plan details
+      const { data: patientData, error: patientError } = await supabase
+        .from('patients')
+        .select(`
+          insurance_id,
+          insurance_plans (
+            max_limit,
+            deductible,
+            copay_amount
+          )
+        `)
+        .eq('patient_id', patientId)
+        .single();
+
+      if (patientError && patientError.code !== 'PGRST116') throw patientError;
+
+      let insurancePortion = 0;
+      let patientPortion = totalBalance;
+
+      // 3. Apply the distribution logic
+      const plan = patientData?.insurance_plans;
+      if (plan && totalBalance > 0) {
+        const maxLimit = parseFloat(plan.max_limit || 0);
+        const deductible = parseFloat(plan.deductible || 0);
+        const copay = parseFloat(plan.copay_amount || 0);
+
+        if (maxLimit > totalBalance) {
+          insurancePortion = deductible + copay;
+        } else {
+          insurancePortion = maxLimit;
+        }
+        
+        // Prevent negative patient portion if insurance portion exceeds balance
+        patientPortion = Math.max(0, totalBalance - insurancePortion);
+      }
+
+      return {
+        totalBalance,
+        insurancePortion,
+        patientPortion
+      };
+    } catch (error) {
+      console.error("Get Payment Distribution Error:", error.message);
+      return { totalBalance: 0, insurancePortion: 0, patientPortion: 0 };
+    }
+  },
+  
   // Update a charge's payment_status (e.g. after applying a payment)
   async updateChargeStatus(ledgerId, status) {
     try {

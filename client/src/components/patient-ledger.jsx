@@ -34,6 +34,11 @@ export function PatientLedger({ patientId }) {
     appointmentId: '', 
     procedureId: ''
   })
+  const [distribution, setDistribution] = useState({
+    totalBalance: 0,
+    insurancePortion: 0,
+    patientPortion: 0
+  })
 
   // Allocation state: maps charge id -> applied amount string
   const [allocations, setAllocations] = useState({})
@@ -84,6 +89,30 @@ export function PatientLedger({ patientId }) {
     }))
     .filter(t => t.remainingBalance > 0);
 
+  // Auto-allocate payment across unpaid charges (oldest first)
+  const calculateAutoAllocations = (paymentAmt) => {
+    if (!paymentAmt || paymentAmt <= 0) {
+      setAllocations({});
+      return;
+    }
+
+    let remainingPayment = paymentAmt;
+    const newAllocations = {};
+
+    // Sort charges oldest first
+    const sortedCharges = [...unpaidCharges].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    for (const charge of sortedCharges) {
+      if (remainingPayment <= 0) break;
+
+      const applyAmount = Math.min(charge.remainingBalance, remainingPayment);
+      newAllocations[charge.id] = applyAmount.toFixed(2);
+      remainingPayment -= applyAmount;
+    }
+
+    setAllocations(newAllocations);
+  };
+
   // Validation functions
   const isPaymentFormValid = () => {
     return paymentForm.date && 
@@ -113,18 +142,24 @@ export function PatientLedger({ patientId }) {
     return methods[t.code] || 'Payment';
   };
 
-  // Fetch transactions from API
-  const fetchTransactions = async () => {
+const fetchTransactions = async () => {
     if (patientId) {
       setLoading(true)
-      const data = await ledgerAPI.getPatientLedger(patientId);
       
-      if (data.transactions) {
-        setTransactions(data.transactions)
+      // Fetch ledger and distribution data concurrently
+      const [ledgerData, distData] = await Promise.all([
+        ledgerAPI.getPatientLedger(patientId),
+        ledgerAPI.getPaymentDistribution(patientId)
+      ]);
+      
+      if (ledgerData.transactions) {
+        setTransactions(ledgerData.transactions)
       }
-      if (data.financial) {
-        setFinancialData(data.financial)
+      if (ledgerData.financial) {
+        setFinancialData(ledgerData.financial)
       }
+      
+      setDistribution(distData)
       setLoading(false)
     }
   }
@@ -162,30 +197,69 @@ export function PatientLedger({ patientId }) {
     if (!isPaymentFormValid()) return
 
     const paymentAmount = parseFloat(paymentForm.amount);
-    const payload = {
-      ...paymentForm,
-      chargeId: selectedChargeId || null
-    };
+    const allocKeys = Object.keys(allocations).filter(k => parseFloat(allocations[k]) > 0);
 
-    const result = await ledgerAPI.addPayment(patientId, payload);
+    let allSuccessful = true;
+
+    if (allocKeys.length > 0) {
+      let totalAllocated = 0;
       
-    if (result.success) {
-      // Check if a charge was selected and determine whether its balance is now 0
-      if (selectedChargeId) {
-        const charge = transactions.find(t => String(t.id) === String(selectedChargeId));
-        if (charge) {
+      // Submit a separate payment record for each allocated charge
+      for (const chargeId of allocKeys) {
+        const allocAmount = parseFloat(allocations[chargeId]);
+        totalAllocated += allocAmount;
+        
+        const charge = unpaidCharges.find(t => String(t.id) === String(chargeId));
+        
+        const payload = {
+          ...paymentForm,
+          amount: allocAmount,
+          chargeId: chargeId,
+          appointmentId: charge?.appointmentId || null,
+          procedureId: charge?.procedureId || null,
+          provider_id: charge?.providerId || null
+        };
+        
+        const result = await ledgerAPI.addPayment(patientId, payload);
+        
+        if (result.success && charge) {
           const alreadyPaid = getPaymentsForCharge(charge, transactions);
           const currentBalance = charge.amount - alreadyPaid;
-          const remainingAfterPayment = currentBalance - paymentAmount;
+          const remainingAfterPayment = currentBalance - allocAmount;
 
-          // The payment status will ONLY be changed to PAID if the balance is 0 or less
-          if (remainingAfterPayment <= 0) {
-            await ledgerAPI.updateChargeStatus(selectedChargeId, 'PAID');
+          if (remainingAfterPayment <= 0.01) { 
+            await ledgerAPI.updateChargeStatus(chargeId, 'PAID');
           }
-          // If remainingAfterPayment > 0 (partial payment), status remains UNPAID
+        } else {
+          allSuccessful = false;
         }
       }
-
+      
+      // If the user overpaid (entered more than total unpaid), log the remainder as generic payment
+      const leftover = paymentAmount - totalAllocated;
+      if (leftover > 0.01) {
+         const payload = {
+           ...paymentForm,
+           amount: leftover,
+           chargeId: null,
+           appointmentId: null,
+           procedureId: null,
+           provider_id: null
+         };
+         await ledgerAPI.addPayment(patientId, payload);
+      }
+      
+    } else {
+      // Generic unallocated payment
+      const payload = {
+        ...paymentForm,
+        chargeId: null
+      };
+      const result = await ledgerAPI.addPayment(patientId, payload);
+      if (!result.success) allSuccessful = false;
+    }
+      
+    if (allSuccessful) {
       setIsPaymentDialogOpen(false)
       setPaymentForm({
         date: new Date().toISOString().split('T')[0],
@@ -197,10 +271,10 @@ export function PatientLedger({ patientId }) {
         procedureId: ''
       })
       setAllocations({})
-      setSelectedChargeId('')
-      fetchTransactions() // Refresh transactions
+      setSelectedChargeId('auto')
+      fetchTransactions() 
     } else {
-      alert("Failed to add payment: " + result.error);
+      alert("Failed to process some or all payment allocations.");
     }
   }
 
@@ -250,6 +324,44 @@ export function PatientLedger({ patientId }) {
 
   return (
     <div className="space-y-6">
+      {/* Payment Distribution Table */}
+      <Card className="mb-6 border-blue-100 shadow-sm">
+        <CardContent className="p-0">
+          <div className="bg-slate-50 px-4 py-3 border-b">
+            <h4 className="font-semibold text-slate-700">Payment Distribution</h4>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Total Balance</TableHead>
+                <TableHead>Insurance Portion</TableHead>
+                <TableHead>Patient Portion</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-center text-muted-foreground py-4">
+                    Calculating distribution...
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow className="font-medium">
+                  <TableCell className="text-blue-700 text-lg">
+                    ₱{distribution.totalBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </TableCell>
+                  <TableCell className="text-emerald-600 text-lg">
+                    ₱{distribution.insurancePortion.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </TableCell>
+                  <TableCell className="text-slate-900 text-lg">
+                    ₱{distribution.patientPortion.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
       {/* Actions Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -260,7 +372,7 @@ export function PatientLedger({ patientId }) {
             setIsPaymentDialogOpen(open)
             if (!open) {
               setAllocations({})
-              setSelectedChargeId('')
+              setSelectedChargeId('auto')
               setPaymentForm({
                 date: new Date().toISOString().split('T')[0],
                 amount: '',
@@ -305,9 +417,14 @@ export function PatientLedger({ patientId }) {
                         onChange={(e) => {
                           const val = e.target.value;
                           setPaymentForm(prev => ({ ...prev, amount: val }));
-                          // Automatically populate the applied column with the value in the amount field
-                          if (selectedChargeId) {
+                          
+                          const numVal = parseFloat(val) || 0;
+                          if (selectedChargeId && selectedChargeId !== 'auto') {
+                            // If a specific charge is targeted, dump the whole amount there
                             setAllocations({ [selectedChargeId]: val });
+                          } else {
+                            // Otherwise, run the waterfall allocation
+                            calculateAutoAllocations(numVal);
                           }
                         }}
                       />
@@ -344,45 +461,50 @@ export function PatientLedger({ patientId }) {
                 </div>
 
                 <div className="space-y-2 col-span-2">
-                  <Label>Apply to Unpaid Charge</Label>
+                  <Label>Allocation Method</Label>
                   <Select
-                    value={selectedChargeId}
+                    value={selectedChargeId || 'auto'}
                     onValueChange={(val) => {
-                      const charge = unpaidCharges.find(t => String(t.id) === String(val));
                       setSelectedChargeId(val);
+                      const currentAmt = parseFloat(paymentForm.amount) || 0;
 
-                      // If amount is already entered, keep it; otherwise default to remaining balance
-                      const amtToUse = paymentForm.amount && parseFloat(paymentForm.amount) > 0
-                        ? paymentForm.amount
-                        : (charge ? String(charge.remainingBalance) : '');
-
-                      setPaymentForm(prev => ({ 
-                        ...prev, 
-                        amount: amtToUse,
-                        appointmentId: charge?.appointmentId || '',
-                        procedureId: charge?.procedureId || '',
-                        provider_id: charge?.providerId || '' 
-                      }));
-
-                      if (amtToUse) {
-                        setAllocations({ [val]: amtToUse });
+                      if (val === 'auto') {
+                        // Re-run auto allocation
+                        calculateAutoAllocations(currentAmt);
+                        setPaymentForm(prev => ({ ...prev, appointmentId: '', procedureId: '', provider_id: '' }));
                       } else {
-                        setAllocations({});
+                        // Single charge allocation
+                        const charge = unpaidCharges.find(t => String(t.id) === String(val));
+                        const amtToUse = paymentForm.amount && parseFloat(paymentForm.amount) > 0
+                          ? paymentForm.amount
+                          : (charge ? String(charge.remainingBalance) : '');
+
+                        setPaymentForm(prev => ({ 
+                          ...prev, 
+                          amount: amtToUse,
+                          appointmentId: charge?.appointmentId || '',
+                          procedureId: charge?.procedureId || '',
+                          provider_id: charge?.providerId || '' 
+                        }));
+
+                        if (amtToUse) {
+                          setAllocations({ [val]: amtToUse });
+                        } else {
+                          setAllocations({});
+                        }
                       }
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select an outstanding procedure..." />
+                      <SelectValue placeholder="Select an allocation method..." />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="auto">Auto-allocate (Oldest First)</SelectItem>
                       {unpaidCharges.map((t) => (
                         <SelectItem key={t.id} value={String(t.id)}>
                           {t.date} - {t.description} (₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })})
                         </SelectItem>
                       ))}
-                      {unpaidCharges.length === 0 && (
-                        <SelectItem value="none" disabled>No unpaid charges</SelectItem>
-                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -582,7 +704,7 @@ export function PatientLedger({ patientId }) {
           </Dialog>
         </div>
       </div>
-
+                      
       {/* Ledger Table */}
       <Card>
         <CardContent className="p-0">
@@ -634,16 +756,7 @@ export function PatientLedger({ patientId }) {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {/* Total Row */}
-                  <TableRow className="bg-slate-50 border-t-2 border-slate-100 hover:bg-slate-50">
-                    <TableCell colSpan={5} className="text-right font-bold text-slate-700 uppercase text-xs tracking-wider pt-4">
-                      Total Balance
-                    </TableCell>
-                    <TableCell className={`text-right font-bold text-lg pt-4 ${financialData.balance.total < 0 ? "text-green-600" : "text-blue-700"}`}>
-                      {financialData.balance.total < 0 ? "(" : ""}₱{Math.abs(financialData.balance.total).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                      {financialData.balance.total < 0 ? ")" : ""}
-                    </TableCell>
-                  </TableRow>
+                  
                 </>
               )}
             </TableBody>
