@@ -143,6 +143,20 @@ export function PatientLedger({ patientId }) {
     loadProviders();
   }, [patientId])
 
+  // Auto-populate procedure amount based on provider's fee schedule
+  useEffect(() => {
+    const fetchProcedureFee = async () => {
+      if (procedureForm.provider && procedureForm.code) {
+        const fee = await ledgerAPI.getProcedureFee(procedureForm.provider, procedureForm.code);
+        if (fee) {
+          setProcedureForm(prev => ({ ...prev, amount: fee.toString() }));
+        }
+      }
+    };
+    
+    fetchProcedureFee();
+  }, [procedureForm.provider, procedureForm.code]);
+
   // Handle payment submission
   const handlePaymentSubmit = async () => {
     if (!isPaymentFormValid()) return

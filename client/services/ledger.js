@@ -241,7 +241,36 @@ export const ledgerAPI = {
       return { success: false, error: error.message };
     }
   },
+// Get specific procedure fee based on provider's fee schedule
+  async getProcedureFee(providerId, procedureCode) {
+    try {
+      // 1. Get the provider's assigned fee schedule
+      const { data: provider, error: providerError } = await supabase
+        .from('providers')
+        .select('schedule_id')
+        .eq('provider_id', providerId)
+        .single();
 
+      if (providerError) throw providerError;
+      if (!provider?.schedule_id) return ''; 
+
+      // 2. Get the fee from fee_schedule_items using the schedule_id and procedure code
+      const { data: feeItem, error: feeError } = await supabase
+        .from('fee_schedule_items')
+        .select('current_fee')
+        .eq('schedule_id', provider.schedule_id)
+        .eq('procedure_id', procedureCode)
+        .single();
+
+      // PGRST116 is the PostgREST error code for "no rows returned"
+      if (feeError && feeError.code !== 'PGRST116') throw feeError;
+
+      return feeItem?.current_fee || '';
+    } catch (error) {
+      console.error("Get Procedure Fee Error:", error.message);
+      return '';
+    }
+  },
   // Add Charge (Procedure)
   async addCharge(patientId, chargeData) {
     try {
