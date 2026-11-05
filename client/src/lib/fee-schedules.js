@@ -17,18 +17,75 @@ export function buildFeeForm(procedures, schedules, schedule, today = localDate(
   // Keep any stored procedure even if a catalog row is unavailable.
   const catalog = [...procedures]
   for (const item of schedule?.procedureFees || []) {
-    if (!catalog.some(p => String(p.id) === String(item.code))) catalog.push({ id: item.code, description: `Procedure ${item.code}`, price: 0, officeFee: 0 })
+    if (!catalog.some(p => String(p.id) === String(item.code))) {
+      catalog.push({ 
+        id: item.code, 
+        description: `Procedure #${item.code}`, 
+        phCaseRate: 0,
+        price: 0, 
+        officeFee: 0 
+      })
+    }
   }
   return {
-    id: schedule?.id ?? null, scheduleName: schedule?.scheduleName || '',
-    insuranceId: schedule?.insuranceId || '', effectiveFrom: schedule?.effectiveFrom || today,
+    id: schedule?.id ?? null, 
+    scheduleName: schedule?.scheduleName || '',
+    insuranceId: schedule?.insuranceId || '', 
+    effectiveFrom: schedule?.effectiveFrom || today,
     effectiveTo: schedule?.effectiveTo || '',
     procedureFees: catalog.map(p => {
-      const saved = schedule?.procedureFees.find(i => String(i.code) === String(p.id))
-      const standardPrice = standard?.procedureFees.find(i => String(i.code) === String(p.id))?.scheduleFee
-      const referenceFee = standardPrice ?? Number((Number(p.price) + Number(p.officeFee)).toFixed(2))
-      return { code: p.id, name: p.description, referenceFee,
-        included: schedule ? !!saved : true, scheduleFee: String(saved?.scheduleFee ?? referenceFee) }
+      const saved = schedule?.procedureFees?.find(i => String(i.code) === String(p.id))
+      const standardItem = standard?.procedureFees?.find(i => String(i.code) === String(p.id))
+      const standardPrice = standardItem?.scheduleFee ?? standardItem?.currentFee
+
+      // Reference Rate: based on the PHcase_rate column of procedures table (fallback to office/base if absent)
+      const phRate = p.phCaseRate ?? p.PHcase_rate ?? p.ph_case_rate
+      const referenceFee = phRate != null 
+        ? Number(phRate) 
+        : (standardPrice ?? Number((Number(p.price || 0) + Number(p.officeFee || 0)).toFixed(2)))
+
+      // Current Fee: based on current_fee column of fee_schedule_items table
+      let currentFeeVal = saved?.current_fee ?? saved?.currentFee ?? saved?.scheduleFee
+
+      // If not found in saved, check active standard schedule
+      if (currentFeeVal == null || Number(currentFeeVal) === 0) {
+        currentFeeVal = standardItem?.current_fee ?? standardItem?.currentFee ?? standardItem?.scheduleFee
+      }
+
+      // If not in active standard, look across any schedule for this procedure's current_fee
+      if (currentFeeVal == null || Number(currentFeeVal) === 0) {
+        for (const s of (schedules || [])) {
+          const match = s.procedureFees?.find(i => String(i.code) === String(p.id))
+          const fee = match?.current_fee ?? match?.currentFee ?? match?.scheduleFee
+          if (fee != null && Number(fee) > 0) {
+            currentFeeVal = fee
+            break
+          }
+        }
+      }
+
+      // If still not found, check procedure's own currentFee (from fee_schedule_items) or price
+      if (currentFeeVal == null || Number(currentFeeVal) === 0) {
+        const procFee = p.currentFee ?? p.current_fee ?? (p.price != null ? Number(p.price) + Number(p.officeFee || 0) : 0)
+        if (procFee != null && Number(procFee) > 0) {
+          currentFeeVal = procFee
+        }
+      }
+
+      const currentFee = Number(currentFeeVal || 0)
+      const desc = p.description || p.name || `Procedure #${p.id}`
+      const defaultNewFee = saved?.newFee ?? saved?.scheduleFee ?? standardPrice ?? (currentFee > 0 ? currentFee : referenceFee)
+
+      return { 
+        code: p.id, 
+        name: desc, 
+        referenceFee,
+        currentFee: Number(currentFee),
+        current_fee: Number(currentFee),
+        included: schedule ? !!saved : true, 
+        scheduleFee: String(defaultNewFee),
+        newFee: String(defaultNewFee)
+      }
     })
   }
 }
@@ -39,9 +96,19 @@ export function feeFormPayload(form) {
   const items = form.procedureFees.filter(p => p.included)
   if (!items.length) throw new Error('Include at least one procedure.')
   for (const item of items) {
-    if (!/^\d+(\.\d{1,2})?$/.test(String(item.scheduleFee)) || !Number.isFinite(Number(item.scheduleFee)) || Number(item.scheduleFee) > 9999999999.99) {
+    const feeVal = item.newFee ?? item.scheduleFee
+    if (!/^\d+(\.\d{1,2})?$/.test(String(feeVal)) || !Number.isFinite(Number(feeVal)) || Number(feeVal) > 9999999999.99) {
       throw new Error(`Enter a non-negative price with at most two decimal places for ${item.name}.`)
     }
   }
-  return { ...form, scheduleName: form.scheduleName.trim(), procedureFees: items.map(p => ({ code: p.code, scheduleFee: p.scheduleFee })) }
+  return { 
+    ...form, 
+    scheduleName: form.scheduleName.trim(), 
+    procedureFees: items.map(p => ({ 
+      code: p.code, 
+      scheduleFee: p.newFee ?? p.scheduleFee,
+      newFee: p.newFee ?? p.scheduleFee,
+      current_fee: parseFloat(p.newFee ?? p.scheduleFee)
+    })) 
+  }
 }

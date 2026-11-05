@@ -279,8 +279,9 @@ export const GabayAPI = {
         appointment_id,
         appointment_date,
         status,
+        procedure_id,
         patients ( full_name ), 
-        procedures ( name ),
+        procedures ( procedure_id ),
         providers ( name, specialization )
       `)
       .eq('facility_id', facilityId) 

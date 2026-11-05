@@ -139,59 +139,6 @@ export function SettingsTabs() {
     return name.substring(0, 2).toUpperCase()
   }
 
-  // Helper to format schedule for display
-  const formatScheduleDisplay = (schedule) => {
-    if (!schedule || typeof schedule !== 'object') return 'Not set'
-    const activeDays = Object.keys(schedule)
-    if (activeDays.length === 0) return 'Not set'
-    
-    // Check if all times are the same
-    const firstTime = schedule[activeDays[0]]
-    const allSame = activeDays.every(d => schedule[d] === firstTime)
-    
-    const dayNames = activeDays.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
-    
-    if (allSame) {
-      return `${dayNames} (${firstTime})`
-    }
-    return dayNames // Just list days if times differ
-  }
-
-  // Helper to parse schedule JSON to state
-  const parseScheduleToState = (scheduleJson) => {
-    const defaultState = {
-      mon: { active: false, start: '09:00', end: '17:00' },
-      tue: { active: false, start: '09:00', end: '17:00' },
-      wed: { active: false, start: '09:00', end: '17:00' },
-      thu: { active: false, start: '09:00', end: '17:00' },
-      fri: { active: false, start: '09:00', end: '17:00' },
-      sat: { active: false, start: '09:00', end: '12:00' },
-      sun: { active: false, start: '09:00', end: '12:00' }
-    }
-
-    if (!scheduleJson || typeof scheduleJson !== 'object') return defaultState
-
-    const newState = { ...defaultState }
-    Object.keys(scheduleJson).forEach(day => {
-      if (newState[day] && scheduleJson[day]) {
-        const [start, end] = scheduleJson[day].split('-')
-        newState[day] = { active: true, start: start || '09:00', end: end || '17:00' }
-      }
-    })
-    return newState
-  }
-
-  // Helper to format state to JSON for API
-  const formatScheduleForAPI = () => {
-    const scheduleJson = {}
-    daysOfWeek.forEach(day => {
-      if (scheduleData[day].active) {
-        scheduleJson[day] = `${scheduleData[day].start}-${scheduleData[day].end}`
-      }
-    })
-    return scheduleJson
-  }
-
   const formatRoleDisplay = (role) => {
     if (!role) return 'N/A';
 
@@ -281,10 +228,8 @@ export function SettingsTabs() {
     setCreatingProvider(false)
 
     if (result.success) {
-      // Add new user to the list
       setUsers(prev => [...prev, result.provider])
       
-      // Reset form and close dialog
       setUserFormData({
         name: '',
         email: '',
@@ -292,7 +237,7 @@ export function SettingsTabs() {
         licenseNo: '',
         specialization: ''
       })
-      setScheduleData(parseScheduleToState({})) // Reset schedule
+      setScheduleData(parseScheduleToState({}))
       setIsUserDialogOpen(false)
       setCreatedCredentials(result.credentials)
       setCopyMessage('')
@@ -301,10 +246,43 @@ export function SettingsTabs() {
     }
   }
 
+  // Helper to parse schedule JSON to state
+  const parseScheduleToState = (scheduleJson) => {
+    const defaultState = {
+      mon: { active: false, start: '09:00', end: '17:00' },
+      tue: { active: false, start: '09:00', end: '17:00' },
+      wed: { active: false, start: '09:00', end: '17:00' },
+      thu: { active: false, start: '09:00', end: '17:00' },
+      fri: { active: false, start: '09:00', end: '17:00' },
+      sat: { active: false, start: '09:00', end: '12:00' },
+      sun: { active: false, start: '09:00', end: '12:00' }
+    }
+
+    if (!scheduleJson || typeof scheduleJson !== 'object') return defaultState
+
+    const newState = { ...defaultState }
+    Object.keys(scheduleJson).forEach(day => {
+      if (newState[day] && scheduleJson[day]) {
+        const [start, end] = scheduleJson[day].split('-')
+        newState[day] = { active: true, start: start || '09:00', end: end || '17:00' }
+      }
+    })
+    return newState
+  }
+
+  // Helper to format state to JSON for API
+  const formatScheduleForAPI = () => {
+    const scheduleJson = {}
+    daysOfWeek.forEach(day => {
+      if (scheduleData[day].active) {
+        scheduleJson[day] = `${scheduleData[day].start}-${scheduleData[day].end}`
+      }
+    })
+    return scheduleJson
+  }
+
   // Handle edit user
   const handleEditUser = (user) => {
-    console.log("Editing provider:", user);
-
     setEditingUserId(user.id)
     setUserFormData({
       name: user.name || '',
@@ -332,12 +310,10 @@ export function SettingsTabs() {
     const result = await settingsAPI.updateProvider(editingUserId, payload);
 
     if (result.success) {
-      // Update user in the list
       setUsers(prev => prev.map(u => 
         u.id === editingUserId ? { ...u, ...payload, type: payload.role } : u
       ))
       
-      // Reset form and close dialog
       setUserFormData({
         name: '',
         email: '',
@@ -709,13 +685,13 @@ export function SettingsTabs() {
                 <TableBody>
                   {loadingUsers ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         Loading providers...
                       </TableCell>
                     </TableRow>
                   ) : users.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         {canAddProvider ? 'No providers found. Click Add New Provider to get started.' : 'No providers found.'}
                       </TableCell>
                     </TableRow>
@@ -887,7 +863,6 @@ export function SettingsTabs() {
   )
 }
 
-
 const emptyForm = { description: '', category: '', price: '', officeFee: '', phCaseRate: '', duration: '30' }
 const fields = [
   ['description', 'Description', 'text'], ['category', 'Category', 'text'],
@@ -1033,7 +1008,6 @@ function ProceduresTab({ procedures, setProcedures, loading, loadError }) {
   )
 }
 
-
 const money = value => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value)
 
 function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) {
@@ -1109,7 +1083,7 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-4">
         <div><CardTitle>Fee Schedules</CardTitle>
-          <CardDescription>Manage Standard and HMO prices for your clinic. All rates include the office fee.</CardDescription>
+          <CardDescription>Manage Standard and HMO prices for your clinic. Reference rates reflect PhilHealth case rates.</CardDescription>
         </div>
         <Button className="bg-blue-500" disabled={unavailable} onClick={() => openForm(null)}><Plus className="w-4 h-4 mr-2" />Add Fee Schedule</Button>
       </CardHeader>
@@ -1135,9 +1109,9 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
         </TableBody></Table>
       </CardContent>
       <Dialog open={form !== null} onOpenChange={value => { if (!value && !busy) setForm(null) }}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form?.id != null ? 'Edit Fee Schedule' : 'Add Fee Schedule'}</DialogTitle>
-            <DialogDescription>Choose the plan, effective dates, and complete procedure prices. HMO procedures without a rate fall back to Standard Rates.</DialogDescription>
+            <DialogDescription>Choose the plan, effective dates, and set procedure fees. The Reference Rate is based on the PhilHealth Case Rate.</DialogDescription>
           </DialogHeader>
           {form && <form onSubmit={save} className="space-y-6">
             <fieldset disabled={busy} className="space-y-6">
@@ -1155,12 +1129,22 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
                 <div className="space-y-2"><Label htmlFor="fee-from">Effective From *</Label><Input id="fee-from" type="date" required value={form.effectiveFrom} onChange={e => change('effectiveFrom', e.target.value)} /></div>
                 <div className="space-y-2"><Label htmlFor="fee-to">Effective To (exclusive)</Label><Input id="fee-to" type="date" min={form.effectiveFrom} value={form.effectiveTo} onChange={e => change('effectiveTo', e.target.value)} /></div>
               </div>
-              <p className="text-sm text-muted-foreground">New schedules start with the current Standard prices, or base price + office fee if no Standard price exists. Edit the complete amount below; office fees are already included. For future rate changes, add a new schedule version with a later start date.</p>
-              <Table><TableHeader><TableRow><TableHead>Include</TableHead><TableHead>Procedure Code</TableHead><TableHead>Description</TableHead><TableHead>Reference Rate</TableHead><TableHead>Schedule Price *</TableHead></TableRow></TableHeader>
+              <p className="text-sm text-muted-foreground">The Reference Rate reflects the PhilHealth Case Rate. Current Fee shows the existing rate from the fee schedule. Enter the New Fee for each procedure; when saved, it updates the fee schedule items.</p>
+              <Table><TableHeader><TableRow>
+                <TableHead>Include</TableHead>
+                <TableHead>Procedure Code</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Reference Rate</TableHead>
+                <TableHead>Current Fee</TableHead>
+                <TableHead>New Fee *</TableHead>
+              </TableRow></TableHeader>
                 <TableBody>{form.procedureFees.map(item => <TableRow key={item.code}>
                   <TableCell><input type="checkbox" aria-label={`Include ${item.name}`} checked={item.included} onChange={e => changeItem(item.code, { included: e.target.checked })} /></TableCell>
-                  <TableCell>{item.code}</TableCell><TableCell>{item.name}</TableCell><TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
-                  <TableCell><Input aria-label={`Price for ${item.name}`} type="number" min="0" max="9999999999.99" step="0.01" required={item.included} disabled={!item.included || busy} value={item.scheduleFee} onChange={e => changeItem(item.code, { scheduleFee: e.target.value })} /></TableCell>
+                  <TableCell className="font-mono">{item.code}</TableCell>
+                  <TableCell>{item.name}</TableCell>
+                  <TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
+                  <TableCell className="whitespace-nowrap font-medium text-slate-700">{money(item.currentFee ?? item.current_fee ?? 0)}</TableCell>
+                  <TableCell><Input aria-label={`New Fee for ${item.name}`} type="number" min="0" max="9999999999.99" step="0.01" required={item.included} disabled={!item.included || busy} value={item.scheduleFee} onChange={e => changeItem(item.code, { scheduleFee: e.target.value, newFee: e.target.value })} /></TableCell>
                 </TableRow>)}</TableBody>
               </Table>
               {form.procedureFees.length === 0 && <p>No procedures available. Add procedures first.</p>}

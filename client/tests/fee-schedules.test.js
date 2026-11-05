@@ -20,7 +20,7 @@ test('edit preserves partial HMO coverage and zero rates without enabling missin
   assert.equal(form.procedureFees[0].included, false)
   assert.equal(form.procedureFees[1].included, true)
   assert.equal(form.procedureFees[1].scheduleFee, '0')
-  assert.deepEqual(feeFormPayload(form).procedureFees, [{ code: 102, scheduleFee: '0' }])
+  assert.deepEqual(feeFormPayload(form).procedureFees, [{ code: 102, scheduleFee: '0', newFee: '0', current_fee: 0 }])
 })
 
 test('editing retains stored items missing from the available catalog', () => {
@@ -62,4 +62,57 @@ test('status distinguishes upcoming and superseded versions within the same clin
   assert.equal(feeScheduleStatus({ ...standard, effectiveFrom: '2027-01-01' }, [], today), 'Upcoming')
   assert.equal(feeScheduleStatus(standard, [{ ...newer, insuranceId: '5' }], today), 'Active')
   assert.equal(feeScheduleStatus(standard, [{ ...newer, facilityId: 'another' }], today), 'Active')
+})
+
+test('buildFeeForm respects PHcase_rate reference rate and current_fee', () => {
+  const customProcs = [
+    { id: 201, description: 'Consultation', PHcase_rate: 350 },
+    { id: 202, description: 'CBC', ph_case_rate: 150 }
+  ]
+  const customSched = {
+    id: 10,
+    facilityId: 'clinic',
+    insuranceId: '',
+    scheduleName: 'Custom Schedule',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '',
+    procedureFees: [
+      { code: 201, currentFee: 400, scheduleFee: 400 }
+    ]
+  }
+
+  const form = buildFeeForm(customProcs, [customSched], customSched, today)
+  assert.equal(form.procedureFees[0].referenceFee, 350)
+  assert.equal(form.procedureFees[0].currentFee, 400)
+  assert.equal(form.procedureFees[0].newFee, '400')
+
+  assert.equal(form.procedureFees[1].referenceFee, 150)
+  assert.equal(form.procedureFees[1].included, false)
+})
+
+test('Add Fee Schedule form populates currentFee from existing schedules or procedures', () => {
+  const customProcs = [
+    { id: 301, description: 'ECG', PHcase_rate: 250, currentFee: 500 },
+    { id: 302, description: 'X-Ray', PHcase_rate: 400, price: 600, officeFee: 50 }
+  ]
+  const existingSched = {
+    id: 11,
+    facilityId: 'clinic',
+    insuranceId: '',
+    scheduleName: 'Standard',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '',
+    procedureFees: [
+      { code: 301, currentFee: 500, scheduleFee: 500 }
+    ]
+  }
+
+  // When adding a new fee schedule (schedule argument is null)
+  const addForm = buildFeeForm(customProcs, [existingSched], null, today)
+  assert.equal(addForm.procedureFees[0].currentFee, 500)
+  assert.equal(addForm.procedureFees[0].referenceFee, 250)
+
+  // Falls back to procedure rate if not in standard schedule
+  assert.equal(addForm.procedureFees[1].currentFee, 650)
+  assert.equal(addForm.procedureFees[1].referenceFee, 400)
 })

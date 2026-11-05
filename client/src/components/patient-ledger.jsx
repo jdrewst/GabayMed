@@ -34,7 +34,12 @@ export function PatientLedger({ patientId }) {
     appointmentId: '', 
     procedureId: ''
   })
-  
+
+  // Allocation state: maps charge id -> applied amount string
+  const [allocations, setAllocations] = useState({})
+  // Track which charge was selected in the "Apply to Unpaid Charge" dropdown
+  const [selectedChargeId, setSelectedChargeId] = useState('')
+
   // Procedure form state
   const [procedureForm, setProcedureForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -46,6 +51,38 @@ export function PatientLedger({ patientId }) {
     amount: '',
     billToInsurance: false
   })
+
+  // Helper to calculate total payments already applied to a specific charge
+  const getPaymentsForCharge = (charge, allTransactions) => {
+    if (!charge) return 0;
+    return allTransactions
+      .filter(t => t.amount < 0 && (
+        // 1. Direct match by Charge ID tagged in payment description
+        (t.description && t.description.includes(`[Charge #${charge.id}]`)) ||
+        // 2. Or matching by appointmentId and procedureId
+        (charge.appointmentId && t.appointmentId && String(t.appointmentId) === String(charge.appointmentId) &&
+         (!charge.procedureId || !t.procedureId || String(t.procedureId) === String(charge.procedureId))) ||
+        // 3. Or matching by procedureId (if charge has no appointmentId)
+        (!charge.appointmentId && charge.procedureId && t.procedureId && String(t.procedureId) === String(charge.procedureId))
+      ))
+      .reduce((sum, p) => sum + Math.abs(p.amount), 0);
+  };
+
+  // Helper to calculate remaining balance for a charge
+  const getChargeRemainingBalance = (charge, allTransactions) => {
+    if (!charge) return 0;
+    const paid = getPaymentsForCharge(charge, allTransactions);
+    return Math.max(0, charge.amount - paid);
+  };
+
+  // Derived: only unpaid/outstanding charges that have remaining balance > 0
+  const unpaidCharges = transactions
+    .filter(t => t.amount > 0 && t.paymentStatus !== 'PAID')
+    .map(t => ({
+      ...t,
+      remainingBalance: getChargeRemainingBalance(t, transactions)
+    }))
+    .filter(t => t.remainingBalance > 0);
 
   // Validation functions
   const isPaymentFormValid = () => {
@@ -63,8 +100,8 @@ export function PatientLedger({ patientId }) {
            parseFloat(procedureForm.amount) > 0
   }
 
-  // Helper: Map payment codes to friendly descriptions
-  const getPaymentDescription = (code) => {
+  // Helper: Map payment codes/descriptions to friendly display names
+  const getPaymentDescription = (t) => {
     const methods = {
       'cash': 'Cash',
       'check': 'Check',
@@ -72,7 +109,8 @@ export function PatientLedger({ patientId }) {
       'ins_check': 'Insurance Check',
       'ins_eft': 'Insurance EFT'
     };
-    return methods[code] || code; // Fallback to raw code if not found
+    if (t.description) return t.description;
+    return methods[t.code] || 'Payment';
   };
 
   // Fetch transactions from API
@@ -93,10 +131,8 @@ export function PatientLedger({ patientId }) {
 
   useEffect(() => {
     fetchTransactions()
-    // Load providers and procedure codes for the dropdown specifically for this patient
     const loadProviders = async () => {
       if (patientId) {
-        // Change from appointmentAPI.getProviders() to the new ledgerAPI method
         const provs = await ledgerAPI.getPatientProviders(patientId);
         setProviders(provs);
 
@@ -111,16 +147,43 @@ export function PatientLedger({ patientId }) {
   const handlePaymentSubmit = async () => {
     if (!isPaymentFormValid()) return
 
-    const result = await ledgerAPI.addPayment(patientId, paymentForm);
+    const paymentAmount = parseFloat(paymentForm.amount);
+    const payload = {
+      ...paymentForm,
+      chargeId: selectedChargeId || null
+    };
+
+    const result = await ledgerAPI.addPayment(patientId, payload);
       
     if (result.success) {
+      // Check if a charge was selected and determine whether its balance is now 0
+      if (selectedChargeId) {
+        const charge = transactions.find(t => String(t.id) === String(selectedChargeId));
+        if (charge) {
+          const alreadyPaid = getPaymentsForCharge(charge, transactions);
+          const currentBalance = charge.amount - alreadyPaid;
+          const remainingAfterPayment = currentBalance - paymentAmount;
+
+          // The payment status will ONLY be changed to PAID if the balance is 0 or less
+          if (remainingAfterPayment <= 0) {
+            await ledgerAPI.updateChargeStatus(selectedChargeId, 'PAID');
+          }
+          // If remainingAfterPayment > 0 (partial payment), status remains UNPAID
+        }
+      }
+
       setIsPaymentDialogOpen(false)
       setPaymentForm({
         date: new Date().toISOString().split('T')[0],
         amount: '',
         method: '',
-        paidAtVisit: false
+        paidAtVisit: false,
+        provider: '',
+        appointmentId: '',
+        procedureId: ''
       })
+      setAllocations({})
+      setSelectedChargeId('')
       fetchTransactions() // Refresh transactions
     } else {
       alert("Failed to add payment: " + result.error);
@@ -173,15 +236,28 @@ export function PatientLedger({ patientId }) {
 
   return (
     <div className="space-y-6">
-      {/* REMOVED: Financial Summary Row (Aging and Balance Cards) */}
-
       {/* Actions Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-lg font-semibold">Transactions</h3>
         </div>
         <div className="flex items-center gap-2">
-          <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+          <Dialog open={isPaymentDialogOpen} onOpenChange={(open) => {
+            setIsPaymentDialogOpen(open)
+            if (!open) {
+              setAllocations({})
+              setSelectedChargeId('')
+              setPaymentForm({
+                date: new Date().toISOString().split('T')[0],
+                amount: '',
+                method: '',
+                paidAtVisit: false,
+                provider: '',
+                appointmentId: '',
+                procedureId: ''
+              })
+            }
+          }}>
             <DialogTrigger asChild>
               <Button variant="outline" className="border-blue-200 text-[#66BAFF] hover:bg-blue-50 bg-transparent">
                 <CreditCard className="w-4 h-4 mr-2" />
@@ -212,7 +288,14 @@ export function PatientLedger({ patientId }) {
                         type="number"
                         step="0.01"
                         value={paymentForm.amount}
-                        onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPaymentForm(prev => ({ ...prev, amount: val }));
+                          // Automatically populate the applied column with the value in the amount field
+                          if (selectedChargeId) {
+                            setAllocations({ [selectedChargeId]: val });
+                          }
+                        }}
                       />
                     </div>
                   </div>
@@ -245,39 +328,52 @@ export function PatientLedger({ patientId }) {
                     </div>
                   </div>
                 </div>
+
                 <div className="space-y-2 col-span-2">
                   <Label>Apply to Unpaid Charge</Label>
                   <Select
+                    value={selectedChargeId}
                     onValueChange={(val) => {
-                      // Safely convert types so the strict equality check succeeds
-                      const charge = transactions.find(t => String(t.id) === String(val));
-                      setPaymentForm({ 
-                        ...paymentForm, 
+                      const charge = unpaidCharges.find(t => String(t.id) === String(val));
+                      setSelectedChargeId(val);
+
+                      // If amount is already entered, keep it; otherwise default to remaining balance
+                      const amtToUse = paymentForm.amount && parseFloat(paymentForm.amount) > 0
+                        ? paymentForm.amount
+                        : (charge ? String(charge.remainingBalance) : '');
+
+                      setPaymentForm(prev => ({ 
+                        ...prev, 
+                        amount: amtToUse,
                         appointmentId: charge?.appointmentId || '',
                         procedureId: charge?.procedureId || '',
-                        // Ensure this matches what ledgerAPI.addPayment expects (paymentData.provider_id)
                         provider_id: charge?.providerId || '' 
-                      });
+                      }));
+
+                      if (amtToUse) {
+                        setAllocations({ [val]: amtToUse });
+                      } else {
+                        setAllocations({});
+                      }
                     }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select an outstanding procedure..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {transactions
-                        .filter(t => t.amount > 0 && t.paymentStatus === 'UNPAID')
-                        .map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.date} - {t.description} (₱{t.amount})
-                          </SelectItem>
-                        ))
-                      }
-                      {transactions.filter(t => t.amount > 0 && t.paymentStatus === 'UNPAID').length === 0 && (
+                      {unpaidCharges.map((t) => (
+                        <SelectItem key={t.id} value={String(t.id)}>
+                          {t.date} - {t.description} (₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })})
+                        </SelectItem>
+                      ))}
+                      {unpaidCharges.length === 0 && (
                         <SelectItem value="none" disabled>No unpaid charges</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Allocation Section presenting updated charge and auto-populated applied column */}
                 <div className="border rounded-lg p-4 mt-2 bg-slate-50">
                   <h4 className="font-medium mb-2 text-sm">Allocation</h4>
                   <Table>
@@ -285,22 +381,45 @@ export function PatientLedger({ patientId }) {
                       <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Code</TableHead>
-                        <TableHead>Charge</TableHead>
+                        <TableHead>Updated Charge</TableHead>
                         <TableHead>Applied</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {transactions.filter(t => t.amount > 0).map((t) => (
-                        <TableRow key={t.id}>
+                      {unpaidCharges.map((t) => (
+                        <TableRow 
+                          key={t.id} 
+                          className={String(t.id) === selectedChargeId ? 'bg-blue-50/80 font-medium' : ''}
+                        >
                           <TableCell>{t.date}</TableCell>
                           <TableCell>{t.code}</TableCell>
-                          <TableCell>₱{t.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</TableCell>
+                          <TableCell className="text-slate-900 font-medium">
+                            ₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </TableCell>
                           <TableCell>
-                            <Input className="h-8 w-24" placeholder="0.00" type="number" step="0.01" />
+                            <Input
+                              className="h-8 w-28 bg-white"
+                              placeholder="0.00"
+                              type="number"
+                              step="0.01"
+                              value={allocations[t.id] || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setAllocations({ [t.id]: val });
+                                setSelectedChargeId(String(t.id));
+                                setPaymentForm(prev => ({
+                                  ...prev,
+                                  amount: val,
+                                  appointmentId: t.appointmentId || '',
+                                  procedureId: t.procedureId || '',
+                                  provider_id: t.providerId || ''
+                                }));
+                              }}
+                            />
                           </TableCell>
                         </TableRow>
                       ))}
-                      {transactions.filter(t => t.amount > 0).length === 0 && (
+                      {unpaidCharges.length === 0 && (
                         <TableRow>
                           <TableCell colSpan={4} className="text-center text-muted-foreground text-sm">
                             No outstanding charges
@@ -321,7 +440,21 @@ export function PatientLedger({ patientId }) {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={isProcedureDialogOpen} onOpenChange={setIsProcedureDialogOpen}>
+          <Dialog open={isProcedureDialogOpen} onOpenChange={(open) => {
+            setIsProcedureDialogOpen(open);
+            if (!open) {
+              setProcedureForm({
+                date: new Date().toISOString().split('T')[0],
+                appointmentId: '',
+                procedureId: '',
+                provider: '',
+                code: '',
+                description: '',
+                amount: '',
+                billToInsurance: false
+              });
+            }
+          }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="w-4 h-4 mr-2" />
@@ -364,12 +497,14 @@ export function PatientLedger({ patientId }) {
                   <Select
                     value={procedureForm.code}
                     onValueChange={(val) => {
-                      // Find the specific object to extract both the code and appointmentId
-                      const selected = procedureCodes.find(c => c.code === val);
+                      const selected = procedureCodes.find(c => String(c.code) === String(val));
+                      const autoDesc = selected?.description || `Procedure #${val}`;
                       setProcedureForm({ 
                         ...procedureForm, 
                         code: val,
-                        appointmentId: selected?.appointmentId || '' 
+                        procedureId: val,
+                        appointmentId: selected?.appointmentId || '',
+                        description: autoDesc
                       });
                     }}
                   >
@@ -379,9 +514,10 @@ export function PatientLedger({ patientId }) {
                     <SelectContent>
                       {procedureCodes.length > 0 ? (
                         procedureCodes.map((item) => (
-                          // Use item.code for both the key and the value string
-                          <SelectItem key={item.code} value={item.code}>
-                            {item.code}
+                          <SelectItem key={item.code} value={String(item.code)}>
+                            {item.description && item.description !== String(item.code)
+                              ? `${item.code} - ${item.description}`
+                              : item.code}
                           </SelectItem>
                         ))
                       ) : (
@@ -467,14 +603,14 @@ export function PatientLedger({ patientId }) {
                       <TableCell>{t.date}</TableCell>
                       <TableCell className="text-muted-foreground text-xs">{t.created}</TableCell>
                       
-                      {/* Updated Code Column: Show 'PMT' for payments, otherwise show code */}
+                      {/* Code Column: Show 'PMT' for payments, otherwise show procedure code */}
                       <TableCell className="font-mono text-sm">
                         {t.amount < 0 ? "PMT" : t.code}
                       </TableCell>
                       
-                      {/* Updated Description Column: Show friendly payment name or original description */}
+                      {/* Description Column: Show friendly description */}
                       <TableCell>
-                        {t.amount < 0 ? getPaymentDescription(t.code) : t.description}
+                        {t.amount < 0 ? getPaymentDescription(t) : t.description}
                       </TableCell>
                       
                       <TableCell>{t.provider}</TableCell>
@@ -484,7 +620,7 @@ export function PatientLedger({ patientId }) {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {/* New Total Row */}
+                  {/* Total Row */}
                   <TableRow className="bg-slate-50 border-t-2 border-slate-100 hover:bg-slate-50">
                     <TableCell colSpan={5} className="text-right font-bold text-slate-700 uppercase text-xs tracking-wider pt-4">
                       Total Balance

@@ -17,12 +17,26 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 
 export const ledgerAPI = {
-  // Get unique procedure codes from a patient's appointments
+  // Get unique procedure codes from a patient's appointments (with descriptions)
   async getPatientProcedures(patientId) {
     try {
+      // 1. Fetch master procedures to resolve canonical descriptions
+      const { data: allProcedures } = await supabase
+        .from('procedures')
+        .select('*');
+
+      const procMap = new Map();
+      if (allProcedures) {
+        allProcedures.forEach(p => {
+          const desc = p.description || p.name || p.procedure_name || `Procedure #${p.procedure_id}`;
+          procMap.set(String(p.procedure_id), desc);
+        });
+      }
+
+      // 2. Fetch appointments for this patient
       const { data, error } = await supabase
         .from('appointments')
-        .select('appointment_id, procedure_id')
+        .select('appointment_id, procedure_id, notes')
         .eq('patient_id', patientId);
 
       if (error) throw error;
@@ -31,15 +45,29 @@ export const ledgerAPI = {
       const uniqueCodes = [];
       const seen = new Set();
       
-      data.forEach(apt => {
-        if (apt.procedure_id && !seen.has(apt.procedure_id)) {
-          seen.add(apt.procedure_id);
+      (data || []).forEach(apt => {
+        if (apt.procedure_id && !seen.has(String(apt.procedure_id))) {
+          seen.add(String(apt.procedure_id));
+          const desc = procMap.get(String(apt.procedure_id)) || apt.notes || `Procedure #${apt.procedure_id}`;
           uniqueCodes.push({
-            code: apt.procedure_id,
-            appointmentId: apt.appointment_id
+            code: String(apt.procedure_id),
+            appointmentId: apt.appointment_id,
+            description: desc
           });
         }
       });
+
+      // If patient has no prior appointment procedures, allow picking from master procedures
+      if (uniqueCodes.length === 0 && allProcedures) {
+        allProcedures.forEach(p => {
+          const desc = p.description || p.name || p.procedure_name || `Procedure #${p.procedure_id}`;
+          uniqueCodes.push({
+            code: String(p.procedure_id),
+            appointmentId: null,
+            description: desc
+          });
+        });
+      }
 
       return uniqueCodes;
     } catch (error) {
@@ -84,8 +112,6 @@ export const ledgerAPI = {
 
   // Get Transactions and Financial Summary
   async getPatientLedger(patientId) {
-    // Removed facilityId check as column does not exist
-    
     try {
       // Updated Query: Fetch provider, procedure id, and reason via appointments
       const { data, error } = await supabase
@@ -164,18 +190,30 @@ export const ledgerAPI = {
   // Add Payment
   async addPayment(patientId, paymentData) {
     try {
+      const methodLabels = {
+        'cash': 'Cash',
+        'check': 'Check',
+        'cc': 'Credit Card',
+        'ins_check': 'Insurance Check',
+        'ins_eft': 'Insurance EFT'
+      };
+      const methodText = methodLabels[paymentData.method] || paymentData.method;
+      const desc = paymentData.chargeId
+        ? `Payment - ${methodText} [Charge #${paymentData.chargeId}]`
+        : `Payment - ${methodText}`;
+
       const { error } = await supabase
         .from('ledger')
         .insert([{
           patient_id: patientId,
           appointment_id: paymentData.appointmentId || null,
-          provider_id: paymentData.provider_id,
+          provider_id: paymentData.provider_id || null,
           procedure_id: paymentData.procedureId || null,
           created_at: new Date().toISOString(),
           date: paymentData.date,
           type: 'PAYMENT',
           payment_method: paymentData.method,
-          description: `Payment - ${paymentData.method}`,
+          description: desc,
           total_bill_amount: -Math.abs(parseFloat(paymentData.amount)),
           payment_status: 'PAID'
         }]);
@@ -188,13 +226,28 @@ export const ledgerAPI = {
     }
   },
 
+  // Update a charge's payment_status (e.g. after applying a payment)
+  async updateChargeStatus(ledgerId, status) {
+    try {
+      const { error } = await supabase
+        .from('ledger')
+        .update({ payment_status: status })
+        .eq('ledger_id', ledgerId);
+
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error("Update Charge Status Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
   // Add Charge (Procedure)
   async addCharge(patientId, chargeData) {
     try {
       const { error } = await supabase
         .from('ledger')
         .insert([{
-          // facility_id: facilityId, // REMOVED
           patient_id: patientId,
           appointment_id: chargeData.appointmentId || null, // Link to appointment if provided
           date: chargeData.date,
@@ -204,7 +257,7 @@ export const ledgerAPI = {
           description: chargeData.description,
           provider_id: chargeData.provider,
           total_bill_amount: Math.abs(parseFloat(chargeData.amount)), // Store as positive
-          payment_status: 'UNPAID' // Updated column name and set logical default for new charge
+          payment_status: 'UNPAID' // Logical default for new charge
         }]);
 
       if (error) throw error;
