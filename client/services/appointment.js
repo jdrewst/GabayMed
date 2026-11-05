@@ -123,7 +123,7 @@ export const appointmentAPI = {
         .eq('facility_id', facilityId)
         .gte('appointment_date', start)
         .lte('appointment_date', end)
-        .neq('status', 'CANCELLED');
+        // .neq('status', 'CANCELLED');
 
       if (error) {
         console.error("Get Scheduler Appointments Supabase Error:", error);
@@ -173,14 +173,46 @@ export const appointmentAPI = {
       const { data, error } = await supabase
         .from('procedures')
         .select('*');
-      
+
       if (error) throw error;
-      return (data || []).map(p => ({ 
-        id: p.procedure_id, 
-        name: p.procedure_id ? `Procedure ${p.procedure_id}` : (p.description || p.name || 'Procedure') 
+      return data.map(p => ({  
+        code: p.procedure_id, 
+        name: p.procedure_id ? `Procedure ${p.procedure_id}` : (p.description || p.name || 'Procedure'), 
+        description: p.description, 
+        category: p.category, 
+        duration: p.duration 
       }));
     } catch (error) {
       console.error("Get Procedures Error:", error.message);
+      return [];
+    }
+  },
+
+  // 3.1 Search Procedures
+  async searchProcedures(query) {
+    const term = query?.trim();
+    if (!term) return [];
+    const escapedTerm = term.replace(/[\\%_,().]/g, '\\$&');
+    try{
+      const {data, error,} = await supabase
+        .from('procedures')
+        .select('*')
+        .or(
+          `procedure_id.ilike.%${escapedTerm}%,description.ilike.%${escapedTerm}%`
+        )
+        .order('procedure_id', { ascending: true })
+        .limit(10);
+      
+      if (error) throw error;
+      return data.map(p => ({ 
+        code: p.procedure_id, 
+        name: p.procedure_id ? `Procedure ${p.procedure_id}` : (p.description || p.name || 'Procedure'), 
+        description: p.description, 
+        category: p.category, 
+        duration: p.duration 
+      }));
+    } catch (error) {
+      console.error("Search Procedures Error:", error.message);
       return [];
     }
   },
