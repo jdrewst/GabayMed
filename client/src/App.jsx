@@ -98,11 +98,13 @@ function App() {
   // Handle client-side anchor clicks
   useEffect(() => {
     const handleClick = (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
       const anchor = e.target.closest('a')
-      if (anchor && anchor.href && anchor.href.startsWith(window.location.origin)) {
+      if (anchor && anchor.href && anchor.href.startsWith(window.location.origin) && !anchor.target && !anchor.hasAttribute('download')) {
         e.preventDefault()
-        const path = new URL(anchor.href).pathname
-        window.history.pushState({}, '', path)
+        const url = new URL(anchor.href)
+        const path = url.pathname
+        window.history.pushState({}, '', url.pathname + url.search + url.hash)
         
         if (path === '/login') setCurrentPage('login')
         else if (path === '/patients') setCurrentPage('patients')
@@ -113,6 +115,8 @@ function App() {
         else if (path === '/messages') setCurrentPage('messages')
         else if (path === '/notifications') setCurrentPage('notifications')
         else setCurrentPage('dashboard')
+
+        window.dispatchEvent(new PopStateEvent('popstate'))
       }
     }
 
