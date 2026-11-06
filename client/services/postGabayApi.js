@@ -34,7 +34,10 @@ export const POSTGabayAPI = {
 
     const {
       // Profile Fields
-      full_name,
+      //full_name,
+      first_name,
+      middle_name,
+      last_name,
       phone_number,
       address,
       email,
@@ -54,12 +57,15 @@ export const POSTGabayAPI = {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .insert([{
-          full_name,
+          //full_name,
+          first_name: first_name?.trim(),
+          middle_name: middle_name || null,
+          last_name: last_name?.trim(),
           phone_number,
           address,
           email
         }])
-        .select('id, full_name, phone_number, address')
+        .select('id, first_name, middle_name, last_name, phone_number, address')
         .single();
 
       if (profileError) throw profileError;
@@ -71,9 +77,12 @@ export const POSTGabayAPI = {
       const { error: patientError } = await supabase
         .from('patients')
         .insert({
-          full_name: full_name || profile.full_name,
-          phone_number: phone_number || profile.phone_number,
-          address: address || profile.address,
+          //full_name: full_name || profile.full_name,
+          first_name: profile.first_name,
+          middle_name: profile.middle_name,
+          last_name: profile.last_name,
+          phone_number: profile.phone_number,
+          address: profile.address,
           profile_id: profile.id,
           date_of_birth,
           gender,

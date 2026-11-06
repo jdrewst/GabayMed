@@ -19,6 +19,7 @@ export function AddPatientDialog({ open, onOpenChange }) {
   
   // Form State
   const [firstName, setFirstName] = useState("")
+  const [middleName, setMiddleName] = useState("")
   const [lastName, setLastName] = useState("")
   const [gender, setGender] = useState("")
   const [phone, setPhone] = useState("")
@@ -37,14 +38,17 @@ export function AddPatientDialog({ open, onOpenChange }) {
   }, [open]);
 
   const handleSave = async () => {
-    if (!firstName || !lastName || !dob || !gender || !phone) {
+    if (!firstName.trim() || !lastName.trim() || !dob || !gender || !phone.trim()) {
       alert("Please fill in all required fields.");
       return;
     }
 
     setLoading(true);
     const patientData = {
-      full_name: `${firstName} ${lastName}`.trim(),
+      // full_name: `${firstName} ${lastName}`.trim(),
+      first_name: firstName.trim(),
+      middle_name: middleName.trim() || null,
+      last_name: lastName.trim(),
       phone_number: phone,
       address: address,
       email: email,
@@ -77,7 +81,7 @@ export function AddPatientDialog({ open, onOpenChange }) {
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="firstName">First Name <span className="text-red-500">*</span></Label>
               <Input 
@@ -89,6 +93,15 @@ export function AddPatientDialog({ open, onOpenChange }) {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="middleName">Middle Name</Label>
+              <Input 
+                id="middleName" 
+                placeholder="Enter middle name" 
+                value={middleName}
+                onChange={(e) => setMiddleName(e.target.value)}
+              />
+            </div>
+             <div className="space-y-2">
               <Label htmlFor="lastName">Last Name <span className="text-red-500">*</span></Label>
               <Input 
                 id="lastName" 
