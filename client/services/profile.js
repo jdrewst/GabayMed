@@ -41,6 +41,9 @@ export const profileAPI = {
           date_of_birth,
           gender,
           profiles!inner (
+            first_name,
+            middle_name,
+            last_name,
             full_name,
             email,
             phone_number,
@@ -50,13 +53,25 @@ export const profileAPI = {
         .eq('patient_id', id)
         .single();
 
+        const profile = data.profiles;
+
+        const fullName = [
+          profile.first_name,
+          profile.middle_name,
+          profile.last_name
+        ]
+          .filter(Boolean)
+          .join(" ") || profile.full_name || "Unknown";
+
       if (error) throw error;
 
       // Flatten the structure for the UI
       return {
         id: data.patient_id,
         patientId: data.patient_id,
-        name: data.profiles.full_name,
+        first_name: profile.first_name,
+        middle_name: profile.middle_name,
+        last_name: profile.last_name,
         email: data.profiles.email,
         phone: data.profiles.phone_number,
         address: data.profiles.address,
