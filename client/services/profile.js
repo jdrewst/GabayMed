@@ -29,63 +29,83 @@ const API_BASE_URL = 'http://localhost:3000/api';
 
 export const profileAPI = {
 
-  // 1. Get Full Patient Details
-  async getPatientDetails(id) {
-    try {
-      // We join 'patients' with 'profiles' to get all info
-      // Assuming 'patient_id' in patients table is the FK to 'profiles.id'
-      const { data, error } = await supabase
-        .from('patients')
-        .select(`
-          patient_id,
-          date_of_birth,
-          gender,
-          profiles!inner (
-            first_name,
-            middle_name,
-            last_name,
-            full_name,
-            email,
-            phone_number,
-            address
-          )
-        `)
-        .eq('patient_id', id)
-        .single();
+  async getPatientDetails(patientId) {
+  try {
+    // 1. Retrieve the patient record
+    const { data: patient, error: patientError } = await supabase
+      .from("patients")
+      .select("patient_id, profile_id, date_of_birth, gender")
+      .eq("patient_id", patientId)
+      .single();
 
-        const profile = data.profiles;
+    if (patientError) throw patientError;
 
-        const fullName = [
-          profile.first_name,
-          profile.middle_name,
-          profile.last_name
-        ]
-          .filter(Boolean)
-          .join(" ") || profile.full_name || "Unknown";
-
-      if (error) throw error;
-
-      // Flatten the structure for the UI
-      return {
-        id: data.patient_id,
-        patientId: data.patient_id,
-        name: fullName, 
-        first_name: profile.first_name,
-        middle_name: profile.middle_name,
-        last_name: profile.last_name,
-        email: data.profiles.email,
-        phone: data.profiles.phone_number,
-        address: data.profiles.address,
-        birthDate: data.date_of_birth,
-        gender:data.gender,
-        sex: data.gender,
-        age: calculateAge(data.date_of_birth)
-      };
-    } catch (error) {
-      console.error("Get Patient Details Error:", error.message);
-      return null;
+    if (!patient?.profile_id) {
+      throw new Error("Patient profile ID was not found.");
     }
-  },
+
+    // 2. Retrieve the associated profile
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select(`
+        id,
+        first_name,
+        middle_name,
+        last_name,
+        full_name,
+        email,
+        phone_number,
+        address,
+        street_address,
+        barangay,
+        city_municipality,
+        province,
+        zip_code
+      `)
+      .eq("id", patient.profile_id)
+      .single();
+
+    if (profileError) throw profileError;
+
+    const fullName = [
+      profile.first_name,
+      profile.middle_name,
+      profile.last_name
+    ].filter(Boolean).join(" ") || profile.full_name || "Unknown";
+
+    return {
+      // Keep the two IDs separate
+      id: patient.patient_id,
+      patientId: patient.patient_id,
+      profileId: profile.id,
+
+      name: fullName,
+      first_name: profile.first_name,
+      middle_name: profile.middle_name,
+      last_name: profile.last_name,
+      email: profile.email,
+      phone: profile.phone_number,
+
+      // Structured address
+      street_address: profile.street_address || "",
+      barangay: profile.barangay || "",
+      city_municipality: profile.city_municipality || "",
+      province: profile.province || "",
+      zip_code: profile.zip_code || "",
+
+      address: profile.address || "",
+
+      birthDate: patient.date_of_birth,
+      gender: patient.gender,
+      sex: patient.gender,
+      age: calculateAge(patient.date_of_birth)
+    };
+
+  } catch (error) {
+    console.error("Get Patient Details Error:", error);
+    return null;
+  }
+},
 
   // 2. Get Insurance Plans
   async getInsurancePlans(patientId) {
@@ -130,62 +150,83 @@ export const profileAPI = {
   },
 
   // 3. Update Patient Profile
-  async updatePatient(id, updates) {
+  async updatePatient(patientId, updates) {
     try {
 
       //Calculate Age
       const calculateAge = (dateOfBirth) => {
         if (!dateOfBirth) return null;
-
         const today = new Date();
         const birthDate = new Date(`${dateOfBirth}T00:00:00`);
-
         let age = today.getFullYear() - birthDate.getFullYear();
-
         const monthDifference = today.getMonth() - birthDate.getMonth();
-
-        if (
-          monthDifference < 0 ||
-          (monthDifference === 0 && today.getDate() < birthDate.getDate())
-        ) {
+        if (monthDifference < 0 ||(monthDifference === 0 && today.getDate() < birthDate.getDate())) {
           age--;
         }
-
         return age;
       };
 
-      const profileUpdates = {
+      const { data: patient, error: fetchError } = await supabase
+        .from("patients")
+        .select("patient_id, profile_id")
+        .eq("patient_id", patientId)
+        .single();
+      if (fetchError) throw fetchError;
+      if (!patient?.profile_id) {
+        throw new Error("Associated profile was not found.");
+      }
+        
+      const address = [ updates.street_address, updates.barangay, updates.city_municipality, updates.province,updates.zip_code]
+        .filter(value => value && value.trim())
+        .join(", ");
+
+      const { data: updatedProfile, error: profileError } = await supabase
+      .from("profiles")
+      .update({
         first_name: updates.first_name,
         middle_name: updates.middle_name || null,
         last_name: updates.last_name,
         email: updates.email,
         phone_number: updates.phone,
-        address: updates.address
-      };
-        
-      // 1. Update Profile (Contact Info)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update(profileUpdates)
-        .eq('id', id);
+        street_address: updates.street_address || null,
+        barangay: updates.barangay || null,
+        city_municipality: updates.city_municipality || null,
+        province: updates.province || null,
+        zip_code: updates.zip_code || null,
+        address: address
+      })
+      .eq("id", patient.profile_id)
+      .select()
+      .single();
 
       if (profileError) throw profileError;
 
-      // Update Patient (Demographics)
-      const age = calculateAge(updates.birthDate);
+    const age = calculateAge(updates.birthDate);
 
-      const { error: patientError } = await supabase
-        .from('patients')
-        .update({
-          date_of_birth: updates.birthDate,
-          gender: updates.sex,
-          age: age
-        })
-        .eq('patient_id', id);
+    const { error: patientError } = await supabase
+      .from("patients")
+      .update({
+      full_name: [
+        updates.first_name,
+        updates.middle_name,
+        updates.last_name
+      ].filter(Boolean).join(" "),
+      first_name: updates.first_name,
+      middle_name: updates.middle_name || null,
+      last_name: updates.last_name,
+      date_of_birth: updates.birthDate,
+      gender: updates.sex,
+      age: age
+      })
+      .eq("patient_id", patientId);
 
-      if (patientError) throw patientError;
+    if (patientError) throw patientError;
 
-      return { success: true };
+    return {
+      success: true,
+      age: age,
+      data: updatedProfile
+    };
     } catch (error) {
       console.error("Update Patient Error:", error.message);
       return { success: false, error: error.message };

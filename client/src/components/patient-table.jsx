@@ -7,7 +7,7 @@ import { Search, Plus, Calendar, Eye, ArrowLeft } from "lucide-react"
 import { AddPatientDialog } from "@/components/add-patient-dialog"
 import { PatientProfile } from "@/pages/patient-profile"
 
-export function PatientsTable({ patients = [], loading = false }) {
+export function PatientsTable({ patients = [], loading = false, onPatientUpdated }) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -45,7 +45,10 @@ export function PatientsTable({ patients = [], loading = false }) {
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Patients
         </Button>
-        <PatientProfile patient={selectedPatient} />
+        <PatientProfile
+          patient={selectedPatient}
+          onPatientUpdated={onPatientUpdated}
+        />
       </div>
     )
   }

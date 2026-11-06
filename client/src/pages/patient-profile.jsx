@@ -15,7 +15,7 @@ import { profileAPI } from "../../services/profile"
 import { appointmentAPI } from "../../services/appointment"
 import { PatientLedger } from "../components/patient-ledger" // 1. Import the component
 
-export function PatientProfile({ patient }) {
+export function PatientProfile({ patient, onPatientUpdated }) {
   const [isAddPlanOpen, setIsAddPlanOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   
@@ -43,7 +43,12 @@ export function PatientProfile({ patient }) {
     patientId: patient?.user_id || "N/A",
     phone: patient?.phone_number || "+63 912 345 6789",
     email: patient?.email || "no-email@example.com",
-    address: patient?.address || "No address provided",
+    street_address: patient?.street_address || "",
+    barangay: patient?.barangay || "",
+    city_municipality: patient?.city_municipality || "",
+    province: patient?.province || "",
+    zip_code: patient?.zip_code || "",
+    address: patient?.address || "",
     birthDate: patient?.date_of_birth || "2000-01-01",
     emergencyContact: "",
     emergencyPhone: ""
@@ -54,14 +59,54 @@ export function PatientProfile({ patient }) {
   // 1. Load All Patient Data
   useEffect(() => {
     const loadData = async () => {
+      const patientId = patient?.user_id || patient?.id;
       if (!patientData.id) return;
+
+      // Immediately initialize using the selected patient
+      setPatientData(prev => ({...prev, id: patientId, patientId: patientId}));
 
       // A. Fetch Profile Details
       const profile = await profileAPI.getPatientDetails(patientData.id);
-      if (profile) {
-        setPatientData(prev => ({ ...prev, ...profile, sex: profile.gender || ""}));
-        setEditFormData(prev => ({ ...prev, ...profile, sex: profile.gender || "" }));
+      if (!profile) {
+        console.error("Unable to load selected patient's profile.");
+        return;
       }
+      // if (profile) { const updatedData = { ...patientData, ...profile, sex: profile.gender || profile.sex || "" };
+      //   setPatientData(updatedData);
+      //   setEditFormData(updatedData);
+      // }
+      const databaseGender = profile.sex || profile.gender || "";
+      const formGender = databaseGender === "Male" ? "M" : databaseGender === "Female" ? "F" : databaseGender;
+
+      const updatedData = {
+        id: patientId,
+        patientId: patientId,
+
+        name: profile.name || "",
+        first_name: profile.first_name || "",
+        middle_name: profile.middle_name || "",
+        last_name: profile.last_name || "",
+
+        age: profile.age || "",
+        sex: formGender,
+        phone: profile.phone || "",
+        email: profile.email || "",
+
+        street_address: profile.street_address || "",
+        barangay: profile.barangay || "",
+        city_municipality: profile.city_municipality || "",
+        province: profile.province || "",
+        zip_code: profile.zip_code || "",
+        address: profile.address || "",
+
+        birthDate: profile.birthDate || "",
+
+        emergencyContact: "",
+        emergencyPhone: ""
+      };
+
+      setPatientData(updatedData);
+      setEditFormData(updatedData);
 
       // B. Fetch Insurance
       setLoadingPlans(true);
@@ -85,7 +130,7 @@ export function PatientProfile({ patient }) {
     };
 
     loadData();
-  }, [patientData.id]);
+  }, [patient?.user_id, patient?.id]);
 
   // Refresh helper for Insurance
   const refreshInsurance = async () => {
@@ -104,15 +149,24 @@ export function PatientProfile({ patient }) {
     };
 
     const fullName = [updates.first_name, updates.middle_name, updates.last_name].filter(Boolean).join(" ");
+    const address = [updates.street_address, updates.barangay, updates.city_municipality, updates.province, updates.zip_code].filter(value => value?.trim()).join(", ");
     const result = await profileAPI.updatePatient(patientData.id, updates);
     
     if (result.success) {
-      setPatientData({ ...updates, name: fullName,  age: result.age });
-      setEditFormData({ ...updates, name: fullName, age: result.age});
-
-    setIsEditDialogOpen(false);
-    alert("Patient profile updated successfully!");
-  } else {
+      const savedData = { ...updates, name: fullName, address, age: result.age };
+      setPatientData(prev => ({ ...prev, ...savedData }));
+      setEditFormData(savedData);
+      onPatientUpdated?.({
+        user_id: patientData.id,
+        full_name: fullName,
+        first_name: updates.first_name,
+        middle_name: updates.middle_name,
+        last_name: updates.last_name,
+        age: result.age
+      });
+      setIsEditDialogOpen(false);
+      alert("Patient profile updated successfully!");
+    } else {
       alert('Failed to update patient profile: ' + result.error);
     }
   }
@@ -121,7 +175,12 @@ export function PatientProfile({ patient }) {
     return editFormData.first_name?.trim().length >= 2 &&
            editFormData.last_name?.trim().length >= 2 &&
            editFormData.birthDate &&
-           editFormData.sex
+           editFormData.sex &&
+           editFormData.street_address?.trim() &&
+           editFormData.barangay?.trim() &&
+           editFormData.city_municipality?.trim() &&
+           editFormData.province?.trim() &&
+           editFormData.zip_code?.trim()
   }
 
   const getInitials = (name) => {
@@ -168,7 +227,7 @@ export function PatientProfile({ patient }) {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setIsEditDialogOpen(true)}>
+                  <Button variant="outline" size="sm" onClick={() => {setEditFormData({ ...patientData }); setIsEditDialogOpen(true);}}>
                     <Edit2 className="w-4 h-4 mr-2" />
                     Edit Profile
                   </Button>
@@ -479,15 +538,105 @@ export function PatientProfile({ patient }) {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="address">Address</Label>
-              <Input
-                id="address"
-                value={editFormData.address || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, address: e.target.value })}
-                placeholder="Full address"
-              />
-            </div>
+            <div className="space-y-4">
+  <h3 className="font-semibold text-sm text-gray-900">
+    Address Information
+  </h3>
+
+  {/* House / Unit / Building / Street */}
+  <div className="space-y-2">
+    <Label htmlFor="streetAddress">
+      House/Unit No., Bldg, Street <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="streetAddress"
+      placeholder="House/Unit No., Building, Street"
+      value={editFormData.street_address || ""}
+      onChange={(e) =>
+        setEditFormData({
+          ...editFormData,
+          street_address: e.target.value
+        })
+      }
+    />
+  </div>
+
+  {/* Barangay */}
+  <div className="space-y-2">
+    <Label htmlFor="barangay">
+      Barangay <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="barangay"
+      placeholder="Enter barangay"
+      value={editFormData.barangay || ""}
+      onChange={(e) =>
+        setEditFormData({
+          ...editFormData,
+          barangay: e.target.value
+        })
+      }
+    />
+  </div>
+
+  {/* City and Province */}
+  <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-2">
+      <Label htmlFor="cityMunicipality">
+        City/Municipality <span className="text-red-500">*</span>
+      </Label>
+      <Input
+        id="cityMunicipality"
+        placeholder="Enter city/municipality"
+        value={editFormData.city_municipality || ""}
+        onChange={(e) =>
+          setEditFormData({
+            ...editFormData,
+            city_municipality: e.target.value
+          })
+        }
+      />
+    </div>
+
+    <div className="space-y-2">
+      <Label htmlFor="province">
+        Province <span className="text-red-500">*</span>
+      </Label>
+      <Input
+        id="province"
+        placeholder="Enter province"
+        value={editFormData.province || ""}
+        onChange={(e) =>
+          setEditFormData({
+            ...editFormData,
+            province: e.target.value
+          })
+        }
+      />
+    </div>
+  </div>
+
+  {/* ZIP Code */}
+  <div className="space-y-2">
+    <Label htmlFor="zipCode">
+      ZIP Code <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="zipCode"
+      placeholder="Enter ZIP code"
+      type="text"
+      inputMode="numeric"
+      maxLength={4}
+      value={editFormData.zip_code || ""}
+      onChange={(e) =>
+        setEditFormData({
+          ...editFormData,
+          zip_code: e.target.value.replace(/\D/g, "")
+        })
+      }
+    />
+  </div>
+</div>
 
             <div className="flex gap-2 justify-end mt-4">
               <Button variant="outline" onClick={() => {
