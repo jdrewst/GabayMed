@@ -69,6 +69,7 @@ export const profileAPI = {
       return {
         id: data.patient_id,
         patientId: data.patient_id,
+        name: fullName, 
         first_name: profile.first_name,
         middle_name: profile.middle_name,
         last_name: profile.last_name,
@@ -76,6 +77,7 @@ export const profileAPI = {
         phone: data.profiles.phone_number,
         address: data.profiles.address,
         birthDate: data.date_of_birth,
+        gender:data.gender,
         sex: data.gender,
         age: calculateAge(data.date_of_birth)
       };
@@ -130,25 +132,54 @@ export const profileAPI = {
   // 3. Update Patient Profile
   async updatePatient(id, updates) {
     try {
-      // Update Profile (Contact Info)
+
+      //Calculate Age
+      const calculateAge = (dateOfBirth) => {
+        if (!dateOfBirth) return null;
+
+        const today = new Date();
+        const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+
+        let age = today.getFullYear() - birthDate.getFullYear();
+
+        const monthDifference = today.getMonth() - birthDate.getMonth();
+
+        if (
+          monthDifference < 0 ||
+          (monthDifference === 0 && today.getDate() < birthDate.getDate())
+        ) {
+          age--;
+        }
+
+        return age;
+      };
+
+      const profileUpdates = {
+        first_name: updates.first_name,
+        middle_name: updates.middle_name || null,
+        last_name: updates.last_name,
+        email: updates.email,
+        phone_number: updates.phone,
+        address: updates.address
+      };
+        
+      // 1. Update Profile (Contact Info)
       const { error: profileError } = await supabase
         .from('profiles')
-        .update({
-          full_name: updates.name,
-          email: updates.email,
-          phone_number: updates.phone,
-          address: updates.address
-        })
+        .update(profileUpdates)
         .eq('id', id);
 
       if (profileError) throw profileError;
 
       // Update Patient (Demographics)
+      const age = calculateAge(updates.birthDate);
+
       const { error: patientError } = await supabase
         .from('patients')
         .update({
           date_of_birth: updates.birthDate,
-          gender: updates.sex
+          gender: updates.sex,
+          age: age
         })
         .eq('patient_id', id);
 

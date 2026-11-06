@@ -35,6 +35,9 @@ export function PatientProfile({ patient }) {
   const [patientData, setPatientData] = useState({
     id: patient?.user_id || patient?.id, 
     name: patient?.full_name || patient?.name || "Unknown Patient",
+    first_name: patient?.first_name || "",
+    middle_name: patient?.middle_name || "",
+    last_name: patient?.last_name || "",
     age: patient?.age || "N/A",
     sex: patient?.gender || patient?.sex || "N/A",
     patientId: patient?.user_id || "N/A",
@@ -56,8 +59,8 @@ export function PatientProfile({ patient }) {
       // A. Fetch Profile Details
       const profile = await profileAPI.getPatientDetails(patientData.id);
       if (profile) {
-        setPatientData(prev => ({ ...prev, ...profile }));
-        setEditFormData(prev => ({ ...prev, ...profile }));
+        setPatientData(prev => ({ ...prev, ...profile, sex: profile.gender || ""}));
+        setEditFormData(prev => ({ ...prev, ...profile, sex: profile.gender || "" }));
       }
 
       // B. Fetch Insurance
@@ -94,19 +97,29 @@ export function PatientProfile({ patient }) {
 
   // 2. Handle Profile Update
   const handleEditSave = async () => {
-    const result = await profileAPI.updatePatient(patientData.id, editFormData);
+    const updates = {...editFormData, 
+      first_name: editFormData.first_name.trim(),
+      middle_name: editFormData.middle_name.trim(),
+      last_name: editFormData.last_name.trim()
+    };
+
+    const fullName = [updates.first_name, updates.middle_name, updates.last_name].filter(Boolean).join(" ");
+    const result = await profileAPI.updatePatient(patientData.id, updates);
     
     if (result.success) {
-      setPatientData({ ...editFormData });
-      setIsEditDialogOpen(false);
-    } else {
+      setPatientData({ ...updates, name: fullName,  age: result.age });
+      setEditFormData({ ...updates, name: fullName, age: result.age});
+
+    setIsEditDialogOpen(false);
+    alert("Patient profile updated successfully!");
+  } else {
       alert('Failed to update patient profile: ' + result.error);
     }
   }
   
   const isEditFormValid = () => {
-    return editFormData.name && 
-           editFormData.name.trim().length >= 2 &&
+    return editFormData.first_name?.trim().length >= 2 &&
+           editFormData.last_name?.trim().length >= 2 &&
            editFormData.birthDate &&
            editFormData.sex
   }
@@ -119,6 +132,17 @@ export function PatientProfile({ patient }) {
       .join("")
       .substring(0, 2)
   }
+
+  const calculateCurrentAge = (dateOfBirth) => {
+    if (!dateOfBirth) return "";
+    const today = new Date();
+    const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    if (today.getMonth() < birthDate.getMonth() || ( today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age >= 0 ? age : "";
+  };
 
   return (
     <div className="space-y-6">
@@ -376,25 +400,27 @@ export function PatientProfile({ patient }) {
             <DialogTitle>Edit Patient Profile</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name <span className="text-red-500">*</span></Label>
-                <Input
-                  id="name"
-                  value={editFormData.name || ''}
-                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="patientId">Patient ID</Label>
-                <Input
-                  id="patientId"
-                  value={editFormData.patientId || ''}
-                  disabled
-                  className="bg-gray-50"
-                />
-              </div>
+           <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="firstName">First Name <span className="text-red-500">*</span></Label>
+              <Input id="firstName" placeholder="First name" value={editFormData.first_name || ""}
+                onChange={(e) =>  setEditFormData({ ...editFormData,first_name: e.target.value})}/>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="middleName">Middle Name</Label>
+              <Input id="middleName" placeholder="Middle name" value={editFormData.middle_name || ""}
+                onChange={(e) => setEditFormData({ ...editFormData, middle_name: e.target.value })}/>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lastName"> Last Name <span className="text-red-500">*</span> </Label>
+              <Input id="lastName" placeholder="Last name"  value={editFormData.last_name || ""}
+                onChange={(e) =>  setEditFormData({ ...editFormData, last_name: e.target.value})}/>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="patientId">Patient ID</Label>
+            <Input id="patientId" value={editFormData.patientId || ""} disabled className="bg-gray-50"/>
+          </div>
 
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
@@ -410,14 +436,14 @@ export function PatientProfile({ patient }) {
                 <Label htmlFor="age">Age</Label>
                 <Input
                   id="age"
-                  value={editFormData.age || ''}
+                  value={editFormData.birthDate ? calculateCurrentAge(editFormData.birthDate): ""}
                   onChange={(e) => setEditFormData({ ...editFormData, age: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="sex">Sex <span className="text-red-500">*</span></Label>
                 <Select
-                  value={editFormData.sex || ''}
+                  value={editFormData.sex || ""}
                   onValueChange={(value) => setEditFormData({ ...editFormData, sex: value })}
                 >
                   <SelectTrigger id="sex">
