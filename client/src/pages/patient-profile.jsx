@@ -14,22 +14,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { profileAPI } from "../../services/profile"
 import { appointmentAPI } from "../../services/appointment"
 import { PatientLedger } from "../components/patient-ledger" // 1. Import the component
+import { claimsAPI } from "../../services/claims"
 
 export function PatientProfile({ patient, onPatientUpdated }) {
   const [isAddPlanOpen, setIsAddPlanOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  
+  const [isClaimDialogOpen, setIsClaimDialogOpen] = useState(false)
+
   // Data States
   const [insurancePlans, setInsurancePlans] = useState([])
   // const [ledgerData, setLedgerData] = useState([]) // 2. Remove old ledger state
   const [clinicalNotes, setClinicalNotes] = useState([])
   const [upcomingAppointments, setUpcomingAppointments] = useState([]) // New State
-  
+  const [claimableRecords, setClaimableRecords] = useState([]) // New state for ledger records
+  const [selectedClaimId, setSelectedClaimId] = useState(null) // Track selected claim
+
   // Loading States
   const [loadingPlans, setLoadingPlans] = useState(true)
   // const [loadingLedger, setLoadingLedger] = useState(true) // 3. Remove old loading state
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [loadingAppointments, setLoadingAppointments] = useState(true) // New State
+  const [loadingClaims, setLoadingClaims] = useState(false)
 
   // Initialize state safely mapping from the Table's data structure
   const [patientData, setPatientData] = useState({
@@ -203,6 +208,39 @@ export function PatientProfile({ patient, onPatientUpdated }) {
     return age >= 0 ? age : "";
   };
 
+  // Handle opening the claim dialog and fetching ledger records
+  const handleOpenClaimDialog = async () => {
+    setIsClaimDialogOpen(true);
+    setLoadingClaims(true);
+    const records = await claimsAPI.getEligibleClaims(patientData.id);
+    setClaimableRecords(records);
+    setLoadingClaims(false);
+  }
+
+  // Handle the submission of the selected claim
+  const handleSendClaimSubmit = async () => {
+    if (!selectedClaimId) return;
+    
+    const selectedRecord = claimableRecords.find(r => r.ledger_id === selectedClaimId);
+    if (!selectedRecord) return;
+
+    // Extract the insurance ID from the nested relationship
+    const insuranceId = selectedRecord.patients?.insurance_id || null;
+
+    const result = await claimsAPI.submitClaim({
+      ledger_id: selectedRecord.ledger_id,
+      patient_id: patientData.id,
+      insurance_id: insuranceId
+    });
+
+    if (result.success) {
+      alert("Claim submitted successfully.");
+      setIsClaimDialogOpen(false);
+      setSelectedClaimId(null);
+    } else {
+      alert("Failed to submit claim: " + result.error);
+    }
+  }
   return (
     <div className="space-y-6">
       {/* Profile Header */}
@@ -326,11 +364,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
                 <CardTitle>Quick Actions</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">
-                <Button variant="outline" className="justify-start bg-transparent">
-                  <Wallet className="w-4 h-4 mr-2" />
-                  Walkout Statement
-                </Button>
-                <Button variant="outline" className="justify-start bg-transparent">
+                <Button variant="outline" className="justify-start bg-transparent" onClick = {handleOpenClaimDialog}>
                   <ArrowRightFromLine className="w-4 h-4 mr-2" />
                   Send Claim
                 </Button>
@@ -338,6 +372,93 @@ export function PatientProfile({ patient, onPatientUpdated }) {
             </Card>
           </div>
         </TabsContent>
+
+      {/* Send Claim Dialog */}
+      <Dialog open={isClaimDialogOpen} onOpenChange={(open) => {
+        setIsClaimDialogOpen(open);
+        if (!open) setSelectedClaimId(null); // reset selection on close
+      }}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Send Claims</DialogTitle>
+          </DialogHeader>
+          
+          <div className="grid gap-4 py-4">
+            <div className="border rounded-md">
+              <Table>
+                <TableHeader className="bg-slate-100">
+                  <TableRow>
+                    <TableHead className="w-12 text-center">Att.</TableHead>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Service Date</TableHead>
+                    <TableHead>Created On</TableHead>
+                    <TableHead>CProcedure</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>Carrier</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loadingClaims ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        Loading eligible claims...
+                      </TableCell>
+                    </TableRow>
+                  ) : claimableRecords.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        No pending charges available for claims.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    claimableRecords.map((record) => (
+                      <TableRow key={record.ledger_id} className="cursor-pointer" onClick={() => setSelectedClaimId(record.ledger_id)}>
+                        <TableCell className="text-center">
+                          <input 
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer"
+                            checked={selectedClaimId === record.ledger_id}
+                            onChange={() => setSelectedClaimId(record.ledger_id)}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium text-black-500">
+                          {record.patients?.full_name || 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.date ? new Date(record.date).toLocaleDateString() : 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.procedures ? `[${record.procedures.procedure_id}] ${record.procedures.description}` : 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.providers?.name || 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.patients?.insurance_plans?.carrier?.name || 'No Carrier'}
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-red-500">
+                          ${parseFloat(record.total_bill_amount || 0).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          
+          <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
+            <Button variant="outline" onClick={() => setIsClaimDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSendClaimSubmit} disabled={!selectedClaimId}>
+              Send Claim
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
         {/* 4. Replace the entire Ledger Tab content */}
         <TabsContent value="ledger">

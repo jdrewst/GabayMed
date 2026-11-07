@@ -233,10 +233,8 @@ export const ledgerAPI = {
       const { data: ledgerData, error: ledgerError } = await supabase
         .from('ledger')
         .select('total_bill_amount, type')
-        .eq('patient_id', patientId)
-        .neq('type', 'PMT')
-        .neq('type', 'PAYMENT');
-
+        .eq('patient_id', patientId);
+        
       if (ledgerError) throw ledgerError;
 
       const totalBalance = ledgerData.reduce((sum, item) => sum + parseFloat(item.total_bill_amount || 0), 0);
