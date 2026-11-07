@@ -268,9 +268,10 @@ export const ledgerAPI = {
         const copay = parseFloat(plan.copay_amount || 0);
 
         if (maxLimit > totalBalance) {
-          insurancePortion = deductible + copay;
+          insurancePortion = 0;
         } else {
           insurancePortion = maxLimit;
+          patientPortion = totalBalance - insurancePortion;
         }
         
         // Prevent negative patient portion if insurance portion exceeds balance
