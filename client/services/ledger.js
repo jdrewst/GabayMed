@@ -267,9 +267,13 @@ export const ledgerAPI = {
         const deductible = parseFloat(plan.deductible || 0);
         const copay = parseFloat(plan.copay_amount || 0);
 
-        if (maxLimit > totalBalance) {
+        if (totalBalance <= deductible) {
           insurancePortion = 0;
-        } else {
+        } else if (totalBalance > deductible) {
+          insurancePortion = totalBalance - deductible;
+          patientPortion = deductible;
+        }
+        else if (totalBalance > maxLimit) {
           insurancePortion = maxLimit;
           patientPortion = totalBalance - insurancePortion;
         }
