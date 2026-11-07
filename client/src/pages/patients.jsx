@@ -10,6 +10,14 @@ export default function PatientsPage() {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const handlePatientUpdated = (updatedPatient) => {
+    setPatients(currentPatients => currentPatients.map(patient =>
+      patient.user_id === updatedPatient.user_id
+        ? { ...patient, ...updatedPatient }
+        : patient
+    ));
+  };
+
   useEffect(() => {
     const loadPatients = async () => {
       try {
@@ -32,7 +40,11 @@ export default function PatientsPage() {
       <main className="container mx-auto px-6 py-6">
         <DateDisplay />
         {/* Pass the fetched data to the table */}
-        <PatientsTable patients={patients} loading={loading}/>
+        <PatientsTable
+          patients={patients}
+          loading={loading}
+          onPatientUpdated={handlePatientUpdated}
+        />
       </main>
     </div>
   )
