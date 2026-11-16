@@ -302,8 +302,9 @@ export const GabayAPI = {
         appointment_id,
         appointment_date,
         status,
+        procedure_id,
         patients ( full_name ), 
-        procedures ( name ),
+        procedures ( procedure_id ),
         providers ( name, specialization )
       `)
       .eq('facility_id', facilityId) 
@@ -368,6 +369,9 @@ export const GabayAPI = {
         .select(`
           patient_id,
           full_name,
+          first_name,
+          middle_name,
+          last_name,
           age,
           date_of_birth,
           gender,
@@ -383,7 +387,16 @@ export const GabayAPI = {
       // 2. Process data
       const patientsList = data.map(patient => {
         
-        // A. Calculate Age
+        // A. Construct Full Name
+        const fullName = [
+          patient.first_name,
+          patient.middle_name,
+          patient.last_name
+        ]
+          .filter(Boolean)
+          .join(" ") || patient.full_name || "Unknown";
+
+        // B. Calculate Age
         let age = patient.age || 'N/A';
         if (patient.date_of_birth) {
             const dob = new Date(patient.date_of_birth);
@@ -408,7 +421,10 @@ export const GabayAPI = {
 
         return {
           user_id: patient.patient_id,
-          full_name: patient.full_name || 'Unknown',
+          full_name: fullName,
+          first_name: patient.first_name,
+          middle_name: patient.middle_name,
+          last_name: patient.last_name,
           age: age,
           gender: patient.gender || 'N/A',
           date_of_birth: patient.date_of_birth,

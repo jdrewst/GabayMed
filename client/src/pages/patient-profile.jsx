@@ -14,33 +14,46 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { profileAPI } from "../../services/profile"
 import { appointmentAPI } from "../../services/appointment"
 import { PatientLedger } from "../components/patient-ledger" // 1. Import the component
+import { claimsAPI } from "../../services/claims"
 
-export function PatientProfile({ patient }) {
+export function PatientProfile({ patient, onPatientUpdated }) {
   const [isAddPlanOpen, setIsAddPlanOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  
+  const [isClaimDialogOpen, setIsClaimDialogOpen] = useState(false)
+
   // Data States
   const [insurancePlans, setInsurancePlans] = useState([])
   // const [ledgerData, setLedgerData] = useState([]) // 2. Remove old ledger state
   const [clinicalNotes, setClinicalNotes] = useState([])
   const [upcomingAppointments, setUpcomingAppointments] = useState([]) // New State
-  
+  const [claimableRecords, setClaimableRecords] = useState([]) // New state for ledger records
+  const [selectedClaimId, setSelectedClaimId] = useState(null) // Track selected claim
+
   // Loading States
   const [loadingPlans, setLoadingPlans] = useState(true)
   // const [loadingLedger, setLoadingLedger] = useState(true) // 3. Remove old loading state
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [loadingAppointments, setLoadingAppointments] = useState(true) // New State
+  const [loadingClaims, setLoadingClaims] = useState(false)
 
   // Initialize state safely mapping from the Table's data structure
   const [patientData, setPatientData] = useState({
     id: patient?.user_id || patient?.id, 
     name: patient?.full_name || patient?.name || "Unknown Patient",
+    first_name: patient?.first_name || "",
+    middle_name: patient?.middle_name || "",
+    last_name: patient?.last_name || "",
     age: patient?.age || "N/A",
     sex: patient?.gender || patient?.sex || "N/A",
     patientId: patient?.user_id || "N/A",
     phone: patient?.phone_number || "+63 912 345 6789",
     email: patient?.email || "no-email@example.com",
-    address: patient?.address || "No address provided",
+    street_address: patient?.street_address || "",
+    barangay: patient?.barangay || "",
+    city_municipality: patient?.city_municipality || "",
+    province: patient?.province || "",
+    zip_code: patient?.zip_code || "",
+    address: patient?.address || "",
     birthDate: patient?.date_of_birth || "2000-01-01",
     emergencyContact: "",
     emergencyPhone: ""
@@ -51,14 +64,54 @@ export function PatientProfile({ patient }) {
   // 1. Load All Patient Data
   useEffect(() => {
     const loadData = async () => {
+      const patientId = patient?.user_id || patient?.id;
       if (!patientData.id) return;
+
+      // Immediately initialize using the selected patient
+      setPatientData(prev => ({...prev, id: patientId, patientId: patientId}));
 
       // A. Fetch Profile Details
       const profile = await profileAPI.getPatientDetails(patientData.id);
-      if (profile) {
-        setPatientData(prev => ({ ...prev, ...profile }));
-        setEditFormData(prev => ({ ...prev, ...profile }));
+      if (!profile) {
+        console.error("Unable to load selected patient's profile.");
+        return;
       }
+      // if (profile) { const updatedData = { ...patientData, ...profile, sex: profile.gender || profile.sex || "" };
+      //   setPatientData(updatedData);
+      //   setEditFormData(updatedData);
+      // }
+      const databaseGender = profile.sex || profile.gender || "";
+      const formGender = databaseGender === "Male" ? "M" : databaseGender === "Female" ? "F" : databaseGender;
+
+      const updatedData = {
+        id: patientId,
+        patientId: patientId,
+
+        name: profile.name || "",
+        first_name: profile.first_name || "",
+        middle_name: profile.middle_name || "",
+        last_name: profile.last_name || "",
+
+        age: profile.age || "",
+        sex: formGender,
+        phone: profile.phone || "",
+        email: profile.email || "",
+
+        street_address: profile.street_address || "",
+        barangay: profile.barangay || "",
+        city_municipality: profile.city_municipality || "",
+        province: profile.province || "",
+        zip_code: profile.zip_code || "",
+        address: profile.address || "",
+
+        birthDate: profile.birthDate || "",
+
+        emergencyContact: "",
+        emergencyPhone: ""
+      };
+
+      setPatientData(updatedData);
+      setEditFormData(updatedData);
 
       // B. Fetch Insurance
       setLoadingPlans(true);
@@ -82,7 +135,7 @@ export function PatientProfile({ patient }) {
     };
 
     loadData();
-  }, [patientData.id]);
+  }, [patient?.user_id, patient?.id]);
 
   // Refresh helper for Insurance
   const refreshInsurance = async () => {
@@ -94,21 +147,45 @@ export function PatientProfile({ patient }) {
 
   // 2. Handle Profile Update
   const handleEditSave = async () => {
-    const result = await profileAPI.updatePatient(patientData.id, editFormData);
+    const updates = {...editFormData, 
+      first_name: editFormData.first_name.trim(),
+      middle_name: editFormData.middle_name.trim(),
+      last_name: editFormData.last_name.trim()
+    };
+
+    const fullName = [updates.first_name, updates.middle_name, updates.last_name].filter(Boolean).join(" ");
+    const address = [updates.street_address, updates.barangay, updates.city_municipality, updates.province, updates.zip_code].filter(value => value?.trim()).join(", ");
+    const result = await profileAPI.updatePatient(patientData.id, updates);
     
     if (result.success) {
-      setPatientData({ ...editFormData });
+      const savedData = { ...updates, name: fullName, address, age: result.age };
+      setPatientData(prev => ({ ...prev, ...savedData }));
+      setEditFormData(savedData);
+      onPatientUpdated?.({
+        user_id: patientData.id,
+        full_name: fullName,
+        first_name: updates.first_name,
+        middle_name: updates.middle_name,
+        last_name: updates.last_name,
+        age: result.age
+      });
       setIsEditDialogOpen(false);
+      alert("Patient profile updated successfully!");
     } else {
       alert('Failed to update patient profile: ' + result.error);
     }
   }
   
   const isEditFormValid = () => {
-    return editFormData.name && 
-           editFormData.name.trim().length >= 2 &&
+    return editFormData.first_name?.trim().length >= 2 &&
+           editFormData.last_name?.trim().length >= 2 &&
            editFormData.birthDate &&
-           editFormData.sex
+           editFormData.sex &&
+           editFormData.street_address?.trim() &&
+           editFormData.barangay?.trim() &&
+           editFormData.city_municipality?.trim() &&
+           editFormData.province?.trim() &&
+           editFormData.zip_code?.trim()
   }
 
   const getInitials = (name) => {
@@ -120,6 +197,50 @@ export function PatientProfile({ patient }) {
       .substring(0, 2)
   }
 
+  const calculateCurrentAge = (dateOfBirth) => {
+    if (!dateOfBirth) return "";
+    const today = new Date();
+    const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    if (today.getMonth() < birthDate.getMonth() || ( today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age >= 0 ? age : "";
+  };
+
+  // Handle opening the claim dialog and fetching ledger records
+  const handleOpenClaimDialog = async () => {
+    setIsClaimDialogOpen(true);
+    setLoadingClaims(true);
+    const records = await claimsAPI.getEligibleClaims(patientData.id);
+    setClaimableRecords(records);
+    setLoadingClaims(false);
+  }
+
+  // Handle the submission of the selected claim
+  const handleSendClaimSubmit = async () => {
+    if (!selectedClaimId) return;
+    
+    const selectedRecord = claimableRecords.find(r => r.ledger_id === selectedClaimId);
+    if (!selectedRecord) return;
+
+    // Extract the insurance ID from the nested relationship
+    const insuranceId = selectedRecord.patients?.insurance_id || null;
+
+    const result = await claimsAPI.submitClaim({
+      ledger_id: selectedRecord.ledger_id,
+      patient_id: patientData.id,
+      insurance_id: insuranceId
+    });
+
+    if (result.success) {
+      alert("Claim submitted successfully.");
+      setIsClaimDialogOpen(false);
+      setSelectedClaimId(null);
+    } else {
+      alert("Failed to submit claim: " + result.error);
+    }
+  }
   return (
     <div className="space-y-6">
       {/* Profile Header */}
@@ -144,7 +265,7 @@ export function PatientProfile({ patient }) {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setIsEditDialogOpen(true)}>
+                  <Button variant="outline" size="sm" onClick={() => {setEditFormData({ ...patientData }); setIsEditDialogOpen(true);}}>
                     <Edit2 className="w-4 h-4 mr-2" />
                     Edit Profile
                   </Button>
@@ -243,11 +364,7 @@ export function PatientProfile({ patient }) {
                 <CardTitle>Quick Actions</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">
-                <Button variant="outline" className="justify-start bg-transparent">
-                  <Wallet className="w-4 h-4 mr-2" />
-                  Walkout Statement
-                </Button>
-                <Button variant="outline" className="justify-start bg-transparent">
+                <Button variant="outline" className="justify-start bg-transparent" onClick = {handleOpenClaimDialog}>
                   <ArrowRightFromLine className="w-4 h-4 mr-2" />
                   Send Claim
                 </Button>
@@ -255,6 +372,93 @@ export function PatientProfile({ patient }) {
             </Card>
           </div>
         </TabsContent>
+
+      {/* Send Claim Dialog */}
+      <Dialog open={isClaimDialogOpen} onOpenChange={(open) => {
+        setIsClaimDialogOpen(open);
+        if (!open) setSelectedClaimId(null); // reset selection on close
+      }}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Send Claims</DialogTitle>
+          </DialogHeader>
+          
+          <div className="grid gap-4 py-4">
+            <div className="border rounded-md">
+              <Table>
+                <TableHeader className="bg-slate-100">
+                  <TableRow>
+                    <TableHead className="w-12 text-center">Att.</TableHead>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Service Date</TableHead>
+                    <TableHead>Created On</TableHead>
+                    <TableHead>CProcedure</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>Carrier</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loadingClaims ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        Loading eligible claims...
+                      </TableCell>
+                    </TableRow>
+                  ) : claimableRecords.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        No pending charges available for claims.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    claimableRecords.map((record) => (
+                      <TableRow key={record.ledger_id} className="cursor-pointer" onClick={() => setSelectedClaimId(record.ledger_id)}>
+                        <TableCell className="text-center">
+                          <input 
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer"
+                            checked={selectedClaimId === record.ledger_id}
+                            onChange={() => setSelectedClaimId(record.ledger_id)}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium text-black-500">
+                          {record.patients?.full_name || 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.date ? new Date(record.date).toLocaleDateString() : 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.procedures ? `[${record.procedures.procedure_id}] ${record.procedures.description}` : 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.providers?.name || 'N/A'}
+                        </TableCell>
+                        <TableCell className="text-black-500">
+                          {record.patients?.insurance_plans?.carrier?.name || 'No Carrier'}
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-red-500">
+                          ${parseFloat(record.total_bill_amount || 0).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          
+          <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
+            <Button variant="outline" onClick={() => setIsClaimDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSendClaimSubmit} disabled={!selectedClaimId}>
+              Send Claim
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
         {/* 4. Replace the entire Ledger Tab content */}
         <TabsContent value="ledger">
@@ -376,25 +580,27 @@ export function PatientProfile({ patient }) {
             <DialogTitle>Edit Patient Profile</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name <span className="text-red-500">*</span></Label>
-                <Input
-                  id="name"
-                  value={editFormData.name || ''}
-                  onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="patientId">Patient ID</Label>
-                <Input
-                  id="patientId"
-                  value={editFormData.patientId || ''}
-                  disabled
-                  className="bg-gray-50"
-                />
-              </div>
+           <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="firstName">First Name <span className="text-red-500">*</span></Label>
+              <Input id="firstName" placeholder="First name" value={editFormData.first_name || ""}
+                onChange={(e) =>  setEditFormData({ ...editFormData,first_name: e.target.value})}/>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="middleName">Middle Name</Label>
+              <Input id="middleName" placeholder="Middle name" value={editFormData.middle_name || ""}
+                onChange={(e) => setEditFormData({ ...editFormData, middle_name: e.target.value })}/>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lastName"> Last Name <span className="text-red-500">*</span> </Label>
+              <Input id="lastName" placeholder="Last name"  value={editFormData.last_name || ""}
+                onChange={(e) =>  setEditFormData({ ...editFormData, last_name: e.target.value})}/>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="patientId">Patient ID</Label>
+            <Input id="patientId" value={editFormData.patientId || ""} disabled className="bg-gray-50"/>
+          </div>
 
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
@@ -410,14 +616,14 @@ export function PatientProfile({ patient }) {
                 <Label htmlFor="age">Age</Label>
                 <Input
                   id="age"
-                  value={editFormData.age || ''}
+                  value={editFormData.birthDate ? calculateCurrentAge(editFormData.birthDate): ""}
                   onChange={(e) => setEditFormData({ ...editFormData, age: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="sex">Sex <span className="text-red-500">*</span></Label>
                 <Select
-                  value={editFormData.sex || ''}
+                  value={editFormData.sex || ""}
                   onValueChange={(value) => setEditFormData({ ...editFormData, sex: value })}
                 >
                   <SelectTrigger id="sex">
@@ -453,15 +659,105 @@ export function PatientProfile({ patient }) {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="address">Address</Label>
-              <Input
-                id="address"
-                value={editFormData.address || ''}
-                onChange={(e) => setEditFormData({ ...editFormData, address: e.target.value })}
-                placeholder="Full address"
-              />
-            </div>
+            <div className="space-y-4">
+  <h3 className="font-semibold text-sm text-gray-900">
+    Address Information
+  </h3>
+
+  {/* House / Unit / Building / Street */}
+  <div className="space-y-2">
+    <Label htmlFor="streetAddress">
+      House/Unit No., Bldg, Street <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="streetAddress"
+      placeholder="House/Unit No., Building, Street"
+      value={editFormData.street_address || ""}
+      onChange={(e) =>
+        setEditFormData({
+          ...editFormData,
+          street_address: e.target.value
+        })
+      }
+    />
+  </div>
+
+  {/* Barangay */}
+  <div className="space-y-2">
+    <Label htmlFor="barangay">
+      Barangay <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="barangay"
+      placeholder="Enter barangay"
+      value={editFormData.barangay || ""}
+      onChange={(e) =>
+        setEditFormData({
+          ...editFormData,
+          barangay: e.target.value
+        })
+      }
+    />
+  </div>
+
+  {/* City and Province */}
+  <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-2">
+      <Label htmlFor="cityMunicipality">
+        City/Municipality <span className="text-red-500">*</span>
+      </Label>
+      <Input
+        id="cityMunicipality"
+        placeholder="Enter city/municipality"
+        value={editFormData.city_municipality || ""}
+        onChange={(e) =>
+          setEditFormData({
+            ...editFormData,
+            city_municipality: e.target.value
+          })
+        }
+      />
+    </div>
+
+    <div className="space-y-2">
+      <Label htmlFor="province">
+        Province <span className="text-red-500">*</span>
+      </Label>
+      <Input
+        id="province"
+        placeholder="Enter province"
+        value={editFormData.province || ""}
+        onChange={(e) =>
+          setEditFormData({
+            ...editFormData,
+            province: e.target.value
+          })
+        }
+      />
+    </div>
+  </div>
+
+  {/* ZIP Code */}
+  <div className="space-y-2">
+    <Label htmlFor="zipCode">
+      ZIP Code <span className="text-red-500">*</span>
+    </Label>
+    <Input
+      id="zipCode"
+      placeholder="Enter ZIP code"
+      type="text"
+      inputMode="numeric"
+      maxLength={4}
+      value={editFormData.zip_code || ""}
+      onChange={(e) =>
+        setEditFormData({
+          ...editFormData,
+          zip_code: e.target.value.replace(/\D/g, "")
+        })
+      }
+    />
+  </div>
+</div>
 
             <div className="flex gap-2 justify-end mt-4">
               <Button variant="outline" onClick={() => {

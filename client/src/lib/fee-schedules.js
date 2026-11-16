@@ -17,18 +17,33 @@ export function buildFeeForm(procedures, schedules, schedule, today = localDate(
   // Keep any stored procedure even if a catalog row is unavailable.
   const catalog = [...procedures]
   for (const item of schedule?.procedureFees || []) {
-    if (!catalog.some(p => String(p.id) === String(item.code))) catalog.push({ id: item.code, description: `Procedure ${item.code}`, price: 0, officeFee: 0 })
+    if (!catalog.some(p => String(p.id) === String(item.code))) {
+      catalog.push({ 
+        id: item.code, 
+        description: `Procedure #${item.code}`, 
+        price: 0, 
+        officeFee: 0 
+      })
+    }
   }
   return {
-    id: schedule?.id ?? null, scheduleName: schedule?.scheduleName || '',
-    insuranceId: schedule?.insuranceId || '', effectiveFrom: schedule?.effectiveFrom || today,
+    id: schedule?.id ?? null, 
+    scheduleName: schedule?.scheduleName || '',
+    insuranceId: schedule?.insuranceId || '', 
+    effectiveFrom: schedule?.effectiveFrom || today,
     effectiveTo: schedule?.effectiveTo || '',
     procedureFees: catalog.map(p => {
       const saved = schedule?.procedureFees.find(i => String(i.code) === String(p.id))
       const standardPrice = standard?.procedureFees.find(i => String(i.code) === String(p.id))?.scheduleFee
-      const referenceFee = standardPrice ?? Number((Number(p.price) + Number(p.officeFee)).toFixed(2))
-      return { code: p.id, name: p.description, referenceFee,
-        included: schedule ? !!saved : true, scheduleFee: String(saved?.scheduleFee ?? referenceFee) }
+      const referenceFee = standardPrice ?? Number((Number(p.price || 0) + Number(p.officeFee || 0)).toFixed(2))
+      const desc = p.description || p.name || `Procedure #${p.id}`
+      return { 
+        code: p.id, 
+        name: desc, 
+        referenceFee,
+        included: schedule ? !!saved : true, 
+        scheduleFee: String(saved?.scheduleFee ?? referenceFee) 
+      }
     })
   }
 }
@@ -43,5 +58,12 @@ export function feeFormPayload(form) {
       throw new Error(`Enter a non-negative price with at most two decimal places for ${item.name}.`)
     }
   }
-  return { ...form, scheduleName: form.scheduleName.trim(), procedureFees: items.map(p => ({ code: p.code, scheduleFee: p.scheduleFee })) }
+  return { 
+    ...form, 
+    scheduleName: form.scheduleName.trim(), 
+    procedureFees: items.map(p => ({ 
+      code: p.code, 
+      scheduleFee: p.scheduleFee 
+    })) 
+  }
 }

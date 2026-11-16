@@ -19,7 +19,8 @@ export function AppointmentsList({ appointments = [], loading = false }) {
               minute: '2-digit' 
             });
             const patientName = apt.patients?.full_name || "Unknown Patient";
-            const procedureName = apt.procedures?.name || "General Consultation";
+            const procId = apt.procedure_id || apt.procedures?.procedure_id;
+            const procedureName = procId ? `Procedure #${procId}` : "General Consultation";
             const doctorName = apt.providers?.name; // Using doctor name instead of Room
 
             return (

@@ -19,11 +19,16 @@ export function AddPatientDialog({ open, onOpenChange }) {
   
   // Form State
   const [firstName, setFirstName] = useState("")
+  const [middleName, setMiddleName] = useState("")
   const [lastName, setLastName] = useState("")
   const [gender, setGender] = useState("")
   const [phone, setPhone] = useState("")
   const [email, setEmail] = useState("")
-  const [address, setAddress] = useState("")
+  const [streetAddress, setStreetAddress] = useState("")
+  const [barangay, setBarangay] = useState("")
+  const [cityMunicipality, setCityMunicipality] = useState("")
+  const [province, setProvince] = useState("")
+  const [zipCode, setZipCode] = useState("")
   const [insuranceId, setInsuranceId] = useState("")
 
   // Load Plans on Mount
@@ -37,20 +42,40 @@ export function AddPatientDialog({ open, onOpenChange }) {
   }, [open]);
 
   const handleSave = async () => {
-    if (!firstName || !lastName || !dob || !gender || !phone) {
+    if (
+      !firstName.trim() ||
+      !lastName.trim() ||
+      !dob ||
+      !gender ||
+      !phone.trim() ||
+      !streetAddress.trim() ||
+      !barangay.trim() ||
+      !cityMunicipality.trim() ||
+      !province.trim() ||
+      !zipCode.trim()
+    ) {
       alert("Please fill in all required fields.");
       return;
     }
 
     setLoading(true);
     const patientData = {
-      full_name: `${firstName} ${lastName}`.trim(),
+      // full_name: `${firstName} ${lastName}`.trim(),
+      first_name: firstName.trim(),
+      middle_name: middleName.trim() || null,
+      last_name: lastName.trim(),
       phone_number: phone,
-      address: address,
       email: email,
+      street_address: streetAddress.trim(),
+      barangay: barangay.trim(),
+      city_municipality: cityMunicipality.trim(),
+      province: province.trim(),
+      zip_code: zipCode.trim(),
+      address: [streetAddress.trim(), barangay.trim(), cityMunicipality.trim(), province.trim(),zipCode.trim() ].filter(Boolean).join(", "),
       date_of_birth: format(dob, "yyyy-MM-dd"),
       gender: gender,
       insurance_id: insuranceId || null // Optional
+      
     };
 
     const result = await POSTGabayAPI.createPatient(patientData);
@@ -60,8 +85,8 @@ export function AddPatientDialog({ open, onOpenChange }) {
       alert("Patient added successfully!");
       onOpenChange(false);
       // Reset Form
-      setFirstName(""); setLastName(""); setDob(null); setGender("");
-      setPhone(""); setEmail(""); setAddress(""); setInsuranceId("");
+      setFirstName(""); setMiddleName(""); setLastName(""); setDob(null); setGender(""); setPhone(""); setEmail("");
+      setStreetAddress(""); setBarangay(""); setCityMunicipality(""); setProvince(""); setZipCode(""); setInsuranceId("");
       // Ideally, trigger a refresh of the patient list here
       window.location.reload(); // Simple reload to show new data
     } else {
@@ -77,7 +102,7 @@ export function AddPatientDialog({ open, onOpenChange }) {
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="firstName">First Name <span className="text-red-500">*</span></Label>
               <Input 
@@ -89,6 +114,15 @@ export function AddPatientDialog({ open, onOpenChange }) {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="middleName">Middle Name</Label>
+              <Input 
+                id="middleName" 
+                placeholder="Enter middle name" 
+                value={middleName}
+                onChange={(e) => setMiddleName(e.target.value)}
+              />
+            </div>
+             <div className="space-y-2">
               <Label htmlFor="lastName">Last Name <span className="text-red-500">*</span></Label>
               <Input 
                 id="lastName" 
@@ -152,14 +186,68 @@ export function AddPatientDialog({ open, onOpenChange }) {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="address">Address</Label>
-            <Textarea 
-              id="address" 
-              placeholder="Enter full address" 
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
+          <div className="space-y-4">
+            <h3 className="font-semibold text-sm text-gray-900"> Address Information</h3>
+            {/* House / Unit / Building / Street */}
+            <div className="space-y-2">
+              <Label htmlFor="streetAddress"> House/Unit No., Bldg, Street <span className="text-red-500">*</span></Label>
+              <Input
+                id="streetAddress"
+                placeholder="House/Unit No., Building, Street"
+                value={streetAddress}
+                onChange={(e) => setStreetAddress(e.target.value)}
+              />
+            </div>
+
+            {/* Barangay */}
+            <div className="space-y-2">
+              <Label htmlFor="barangay">Barangay <span className="text-red-500">*</span></Label>
+              <Input
+                id="barangay"
+                placeholder="Enter barangay"
+                value={barangay}
+                onChange={(e) => setBarangay(e.target.value)}
+              />
+            </div>
+
+            {/* City and Province */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="cityMunicipality"> City/Municipality <span className="text-red-500">*</span></Label>
+                <Input
+                  id="cityMunicipality"
+                  placeholder="Enter city/municipality"
+                  value={cityMunicipality}
+                  onChange={(e) => setCityMunicipality(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="province">Province <span className="text-red-500">*</span></Label>
+                <Input
+                  id="province"
+                  placeholder="Enter province"
+                  value={province}
+                  onChange={(e) => setProvince(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* ZIP Code */}
+            <div className="space-y-2">
+              <Label htmlFor="zipCode"> ZIP Code <span className="text-red-500">*</span></Label>
+              <Input
+                id="zipCode"
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="Enter ZIP code"
+                value={zipCode}
+                onChange={(e) =>
+                  setZipCode(e.target.value.replace(/\D/g, ""))
+                }
+              />
+            </div>
           </div>
 
           <div className="space-y-2">

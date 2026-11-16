@@ -7,14 +7,30 @@ import { Search, Plus, Calendar, Eye, ArrowLeft } from "lucide-react"
 import { AddPatientDialog } from "@/components/add-patient-dialog"
 import { PatientProfile } from "@/pages/patient-profile"
 
-export function PatientsTable({ patients = [], loading = false }) {
+export function PatientsTable({ patients = [], loading = false, onPatientUpdated }) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [searchQuery, setSearchQuery] = useState("")
 
+  const getFullName = (patient) => {
+  // Support existing full_name records
+    if (patient.full_name && patient.full_name !== "Unknown") {
+      return patient.full_name;
+    }
+
+    // Support new name structure
+    return [
+      patient.first_name,
+      patient.middle_name,
+      patient.last_name
+    ]
+      .filter(Boolean)
+      .join(" ") || "Unknown";
+  };
+
   // Filter patients based on search input
-  const filteredPatients = patients.filter(patient => 
-    patient.full_name?.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredPatients = patients.filter(patient =>
+    getFullName(patient).toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // If a patient is selected, show their profile
@@ -29,10 +45,15 @@ export function PatientsTable({ patients = [], loading = false }) {
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Patients
         </Button>
-        <PatientProfile patient={selectedPatient} />
+        <PatientProfile
+          patient={selectedPatient}
+          onPatientUpdated={onPatientUpdated}
+        />
       </div>
     )
   }
+
+  console.log("Patients received:", patients);
 
   return (
     <div>
@@ -41,7 +62,7 @@ export function PatientsTable({ patients = [], loading = false }) {
           <h2 className="text-sm font-semibold text-[#4B6368]">
             {loading ? "Loading..." : `${filteredPatients.length} Patients in Total`}
           </h2>
-
+    
           <div className="flex items-center gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#4B6368]" />
@@ -92,16 +113,14 @@ export function PatientsTable({ patients = [], loading = false }) {
                       <div className="flex items-center gap-3">
                         <Avatar className="h-8 w-8 flex-shrink-0">
                           <AvatarImage 
-                            src={`https://api.dicebear.com/7.x/initials/svg?seed=${patient.full_name}`} 
-                            alt={patient.full_name} 
+                            src={`https://api.dicebear.com/7.x/initials/svg?seed=${getFullName(patient)}`} 
+                            alt={getFullName(patient)} 
                           />
                           <AvatarFallback>
-                            {patient.full_name
-                              ? patient.full_name.split(" ").map((n) => n[0]).join("").substring(0, 2)
-                              : "P"}
+                            {patient.first_name?.[0] || "p"}
                           </AvatarFallback>
                         </Avatar>
-                        <span className="font-medium truncate">{patient.full_name}</span>
+                        <span className="font-medium truncate">{getFullName(patient)}</span>
                       </div>
                     </td>
                     <td className="py-4 text-sm">

@@ -111,12 +111,24 @@ function SettingsContent() {
   useEffect(() => { if (account?.facility_id) loadBranches() }, [account?.facility_id])
   // Check URL for tab parameter
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search)
-    const tabParam = urlParams.get('tab')
-    if (tabParam) {
-      setActiveTab(tabParam)
+    const syncTabFromUrl = () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const tabParam = urlParams.get('tab')
+      if (tabParam && ['users', 'location', 'rooms', 'procedures', 'fees'].includes(tabParam)) {
+        setActiveTab(tabParam)
+      }
     }
+    syncTabFromUrl()
+    window.addEventListener('popstate', syncTabFromUrl)
+    return () => window.removeEventListener('popstate', syncTabFromUrl)
   }, [])
+
+  const handleTabChange = (nextTab) => {
+    setActiveTab(nextTab)
+    const url = new URL(window.location.href)
+    url.searchParams.set('tab', nextTab)
+    window.history.replaceState({}, '', url.pathname + url.search)
+  }
 
   // Fetch users (providers) from database
   useEffect(() => {
@@ -379,7 +391,7 @@ function SettingsContent() {
         </DialogContent>
       </Dialog>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 lg:w-[820px] h-auto gap-1">
           <TabsTrigger value="users">Providers</TabsTrigger>
           <TabsTrigger value="location">Locations</TabsTrigger>

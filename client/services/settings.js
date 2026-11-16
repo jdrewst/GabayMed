@@ -346,55 +346,183 @@ export const settingsAPI = {
 
   // --- FEE SCHEDULES ---
   async getFeeSchedules() {
-    const { data: facilityId, error: facilityError } = await supabase.rpc('fee_current_facility_id');
-    if (facilityError) throw settingsRequestError(facilityError);
-    if (!facilityId) throw new Error('Your account has no clinic assignment. Sign in with a clinic account.');
-    const { data, error } = await supabase.from('fee_schedules')
-      .select(`schedule_id, facility_id, schedule_name, insurance_id, effective_from, effective_to,
-        insurance_plans (plan_name), fee_schedule_items (procedure_id, custom_price)`)
-      .eq('facility_id', facilityId).order('effective_from', { ascending: false }).order('schedule_id');
-    if (error) throw settingsRequestError(error);
-    return data.map(s => ({
-      id: s.schedule_id, facilityId: s.facility_id, scheduleName: s.schedule_name,
-      insuranceId: s.insurance_id == null ? '' : String(s.insurance_id),
-      planName: s.insurance_plans?.plan_name || '',
-      effectiveFrom: s.effective_from, effectiveTo: s.effective_to || '',
-      procedureFees: (s.fee_schedule_items || []).map(i => ({ code: i.procedure_id, scheduleFee: i.custom_price }))
-    }));
+    let facilityId = Session.getFacilityId();
+    if (!facilityId) {
+      try {
+        const { data: rpcFacId } = await supabase.rpc('fee_current_facility_id');
+        facilityId = rpcFacId;
+      } catch (_) {}
+    }
+
+    if (!facilityId) {
+      throw new Error('Your account has no clinic assignment. Sign in with a clinic account.');
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('fee_schedules')
+        .select(`
+          schedule_id, 
+          facility_id, 
+          schedule_name, 
+          insurance_id, 
+          effective_from, 
+          effective_to,
+          insurance_plans ( plan_name ), 
+          fee_schedule_items ( * )
+        `)
+        .eq('facility_id', facilityId)
+        .order('effective_from', { ascending: false })
+        .order('schedule_id');
+
+      if (error) throw error;
+
+      return (data || []).map(s => ({
+        id: s.schedule_id,
+        facilityId: s.facility_id,
+        scheduleName: s.schedule_name,
+        insuranceId: s.insurance_id == null ? '' : String(s.insurance_id),
+        planName: s.insurance_plans?.plan_name || '',
+        effectiveFrom: s.effective_from,
+        effectiveTo: s.effective_to || '',
+        procedureFees: (s.fee_schedule_items || []).map(i => ({
+          code: i.procedure_id,
+          scheduleFee: i.custom_price ?? i.price ?? i.fee ?? i.amount ?? 0
+        }))
+      }));
+    } catch (error) {
+      console.error("Get Fee Schedules Error:", error.message);
+      throw error;
+    }
   },
 
   async getFeeSchedulePlans() {
-    const { data, error } = await supabase.from('insurance_plans')
-      .select('insurance_id, plan_name').order('plan_name');
-    if (error) throw settingsRequestError(error);
-    return data;
+    try {
+      const { data, error } = await supabase
+        .from('insurance_plans')
+        .select('insurance_id, plan_name')
+        .order('plan_name');
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error("Get Fee Schedule Plans Error:", error.message);
+      return [];
+    }
   },
 
   async saveFeeSchedule(id, form) {
-    const { data, error } = await supabase.rpc('save_fee_schedule', {
-      p_schedule_id: id,
-      p_schedule_name: form.scheduleName.trim(),
-      p_insurance_id: form.insuranceId || null,
-      p_effective_from: form.effectiveFrom,
-      p_effective_to: form.effectiveTo || null,
-      p_items: form.procedureFees.map(p => ({ procedure_id: p.code, custom_price: p.scheduleFee }))
-    });
-    if (error) {
-      if (error.code === 'PGRST202') throw settingsRequestError(error, 'Fee schedules are temporarily unavailable. Please try again later.');
-      if (error.code === '23505') throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
-      throw settingsRequestError(error);
+    const facilityId = Session.getFacilityId();
+
+    const formattedItems = form.procedureFees.map(p => ({
+      procedure_id: isNaN(Number(p.code)) ? p.code : parseInt(p.code, 10),
+      custom_price: parseFloat(p.scheduleFee)
+    }));
+
+    // 1. Try RPC save_fee_schedule first if available in Supabase
+    try {
+      const { data, error } = await supabase.rpc('save_fee_schedule', {
+        p_schedule_id: id ? parseInt(id, 10) : null,
+        p_schedule_name: form.scheduleName.trim(),
+        p_insurance_id: form.insuranceId ? parseInt(form.insuranceId, 10) : null,
+        p_effective_from: form.effectiveFrom,
+        p_effective_to: form.effectiveTo || null,
+        p_items: formattedItems
+      });
+
+      if (!error) return data;
+      // If error is other than function not found, throw it
+      if (error.code !== 'PGRST202' && !error.message?.includes('save_fee_schedule')) {
+        if (error.code === '23505') {
+          throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
+        }
+        throw error;
+      }
+    } catch (rpcErr) {
+      if (rpcErr.code !== 'PGRST202' && !rpcErr.message?.includes('save_fee_schedule')) {
+        throw rpcErr;
+      }
     }
-    return data;
+
+    // 2. Direct table fallback (works directly via Supabase client without custom RPC)
+    let savedScheduleId = id;
+    const schedulePayload = {
+      facility_id: facilityId,
+      schedule_name: form.scheduleName.trim(),
+      insurance_id: form.insuranceId ? parseInt(form.insuranceId, 10) : null,
+      effective_from: form.effectiveFrom,
+      effective_to: form.effectiveTo || null
+    };
+
+    if (id) {
+      const { error: updateErr } = await supabase
+        .from('fee_schedules')
+        .update(schedulePayload)
+        .eq('schedule_id', id);
+
+      if (updateErr) throw updateErr;
+
+      // Delete old items before reinserting
+      await supabase
+        .from('fee_schedule_items')
+        .delete()
+        .eq('schedule_id', id);
+    } else {
+      const { data: newSchedule, error: insertErr } = await supabase
+        .from('fee_schedules')
+        .insert([schedulePayload])
+        .select()
+        .single();
+
+      if (insertErr) throw insertErr;
+      savedScheduleId = newSchedule.schedule_id;
+    }
+
+    // Insert fee schedule items
+    if (formattedItems.length > 0) {
+      const itemsToInsert = formattedItems.map(item => ({
+        schedule_id: savedScheduleId,
+        procedure_id: item.procedure_id,
+        custom_price: item.custom_price
+      }));
+
+      const { error: itemsErr } = await supabase
+        .from('fee_schedule_items')
+        .insert(itemsToInsert);
+
+      if (itemsErr) throw itemsErr;
+    }
+
+    return savedScheduleId;
   },
 
   async deleteFeeSchedule(id) {
-    const { data, error } = await supabase.from('fee_schedules')
-      .delete().eq('schedule_id', id).select('schedule_id').single();
-    if (error) {
-      if (error.code === '23503') throw new Error('This schedule is referenced by other records and cannot be deleted.');
-      throw settingsRequestError(error);
+    try {
+      // Delete child items first to maintain FK integrity
+      await supabase
+        .from('fee_schedule_items')
+        .delete()
+        .eq('schedule_id', id);
+
+      const { data, error } = await supabase
+        .from('fee_schedules')
+        .delete()
+        .eq('schedule_id', id)
+        .select('schedule_id')
+        .single();
+
+      if (error) {
+        if (error.code === '23503') {
+          throw new Error('This schedule is referenced by other records and cannot be deleted.');
+        }
+        throw error;
+      }
+
+      return data?.schedule_id ?? id;
+    } catch (error) {
+      console.error("Delete Fee Schedule Error:", error.message);
+      throw error;
     }
-    return data.schedule_id;
   }
 
 };
