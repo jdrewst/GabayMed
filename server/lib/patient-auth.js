@@ -2,6 +2,7 @@ const { randomBytes } = require('node:crypto');
 const { RequestError } = require('./provider-accounts');
 const { login, rejected } = require('./login');
 const { verifiedFactors, requirePatientMfa } = require('./patient-mfa');
+const { purgeAccountFiles } = require('./health-records');
 const {
   OTP_TTL_SECONDS, generateOtpCode, challengeKey, codeHash, tokenHash, maskEmail, defaultSendMail,
 } = require('./otp');
@@ -653,6 +654,9 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
         .update({ profile_id: null })
         .eq('profile_id', user.id);
     } catch {}
+
+    // Health Record Vault files are removed with the account (rows cascade with the profile).
+    try { await purgeAccountFiles(admin, user.id); } catch {}
 
     const delProfile = await admin.from('profiles').delete().eq('id', user.id);
     if (delProfile.error) {

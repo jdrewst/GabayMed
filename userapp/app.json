@@ -37,6 +37,13 @@
         {
           "locationWhenInUsePermission": "Allow GabayMed to access your location so we can show nearby hospitals and clinics and guide you there."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow GabayMed to access your photos so you can upload medical records and a profile picture.",
+          "cameraPermission": "Allow GabayMed to use your camera so you can photograph paper medical records."
+        }
       ]
     ]
   }

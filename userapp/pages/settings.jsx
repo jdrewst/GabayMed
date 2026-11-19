@@ -8,6 +8,7 @@ import {
   User, History, HelpCircle, LogOut, ChevronRight, ArrowLeft, Mail,
   Heart, Plus, Trash2, Camera, ShieldCheck, Droplets, AlertTriangle, Stethoscope, ImagePlus,
   Building2, MapPin, Bell, FileText, Lock, Globe, Sun, Moon, Type, Eye, Calendar, CreditCard, MessageCircle, Gift, Receipt,
+  FolderLock,
 } from 'lucide-react-native';
 import { AppHeader } from '../components/app-header';
 import { PatientAvatar, AVATAR_PRESETS, resolveAvatarPreset } from '../components/patient-avatar';
@@ -1079,6 +1080,7 @@ export function SettingsPage({
   onOpenProfile,
   onOpenBilling,
   onOpenClaims,
+  onOpenRecordVault,
   onSignOut,
 }) {
   const cachedPerms = ProfileAPI.getCachedPermissions();
@@ -1415,6 +1417,14 @@ export function SettingsPage({
   const fs = size => Math.round(size * display.fontScale * 10) / 10;
 
   const menuItems = [
+    ...(onOpenRecordVault
+      ? [{
+          id: 'health_vault',
+          icon: FolderLock,
+          label: t.healthVault || 'Health Record Vault',
+          action: onOpenRecordVault,
+        }]
+      : []),
     ...(onOpenBilling
       ? [{
           id: 'billing',

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Calendar, Clock, Plus, ChevronRight } from 'lucide-react-native';
+import { Calendar, Clock, Plus, ChevronRight, FolderLock } from 'lucide-react-native';
 import GeoAltFill from 'react-native-bootstrap-icons/icons/geo-alt-fill';
 import { AppHeader } from '../components/app-header';
 import { MapViewSection } from '../components/map-view-section';
 import { BrowseServices } from '../components/browse-services';
 import HomeAPI from '../services/homeApi';
+import HealthRecordsAPI, { formatDate } from '../services/healthRecordsApi';
 
 export function HomePage({
   isActive = true,
@@ -15,14 +16,29 @@ export function HomePage({
   onOpenAppointmentBooking,
   onNavigateToCases,
   onOpenMyAppointments,
+  onOpenRecordVault,
+  vaultRefreshTrigger,
   refreshTrigger,
 }) {
   const [upcomingAppointment, setUpcomingAppointment] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [vaultSummary, setVaultSummary] = useState(null);
 
   useEffect(() => {
     fetchAppointmentData();
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    let active = true;
+    HealthRecordsAPI.list()
+      .then(data => {
+        if (!active) return;
+        const records = Array.isArray(data.records) ? data.records : [];
+        setVaultSummary({ total: records.length, latest: records[0] || null });
+      })
+      .catch(() => active && setVaultSummary(null));
+    return () => { active = false; };
+  }, [vaultRefreshTrigger]);
 
   const fetchAppointmentData = async () => {
     try {
@@ -114,6 +130,29 @@ export function HomePage({
           </View>
         )}
       </View>
+
+      {/* Health Record Vault shortcut (US-3.7) */}
+      {onOpenRecordVault && (
+        <View style={styles.section}>
+          <TouchableOpacity style={[styles.card, styles.vaultCard]} onPress={onOpenRecordVault} activeOpacity={0.85}>
+            <View style={styles.vaultIcon}>
+              <FolderLock size={24} color="#0284c7" />
+            </View>
+            <View style={styles.cardContent}>
+              <Text style={styles.cardTitle}>Health Record Vault</Text>
+              <Text style={styles.cardSubtitle} numberOfLines={1}>
+                {vaultSummary?.total
+                  ? `${vaultSummary.total} ${vaultSummary.total === 1 ? 'file' : 'files'} · Latest: ${vaultSummary.latest?.title || ''}`
+                  : 'Keep lab results, prescriptions and scans in one place'}
+              </Text>
+              {!!vaultSummary?.latest && (
+                <Text style={styles.vaultMeta}>Updated {formatDate(vaultSummary.latest.createdAt)}</Text>
+              )}
+            </View>
+            <ChevronRight size={20} color="#0ea5e9" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Seek Medical Care Section */}
       <View style={styles.section}>
@@ -301,6 +340,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
+  },
+  vaultCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 16,
+  },
+  vaultIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#f0f9ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vaultMeta: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 2,
   },
   secondaryOutlineButtonText: {
     color: '#0284c7',

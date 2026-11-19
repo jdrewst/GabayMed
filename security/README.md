@@ -38,3 +38,6 @@ Removing an authenticator from a session that still needs MFA prompts for a code
 The same screen supports signed-in password changes and an optional six-digit, device-local app PIN. Password changes require the current password. The PIN is requested when GabayMed restores a saved session after an app restart. A fresh sign-in uses the account password and any enrolled MFA factor. To reset a forgotten PIN, the patient verifies their account with the same sign-in checks and sets a replacement PIN.
 
 Verify enrollment, removal, and sign-in with a test patient. Check that a password-only token for an enrolled account cannot read or write protected data through the GabayMed API or Supabase Data API. Test an unenrolled account and an already verified session as well.
+## Health Record Vault (US-3.7)
+
+Run `security/health-records.sql` once in the SQL Editor, then restart the backend. It creates `public.health_records` (patients can only SELECT their own rows; all writes go through `/api/patient-health-records`) and a private `health-records` Storage bucket limited to PDF/JPG/PNG/HEIC/WEBP files up to 10 MB. Files are only reachable through 5-minute signed URLs. Records with `can_delete = false` (clinic-issued) cannot be deleted from the app. Deleting a patient account also removes their vault files.
