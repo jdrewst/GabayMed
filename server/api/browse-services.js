@@ -28,15 +28,19 @@ module.exports = async function handler(req, res) {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false }
     });
-    const { data: facilities, error } = await supabase.from('facilities').select('*');
-    if (error) throw error;
+    const [facilityResult, branchResult] = await Promise.all([
+      supabase.from('facilities').select('*'),
+      supabase.from('clinic_branches').select('*')
+    ]);
+    if (facilityResult.error) throw facilityResult.error;
+    if (branchResult.error) throw branchResult.error;
 
     const searchParams = new URL(req.url, 'http://localhost').searchParams;
-    const result = filterFacilities(facilities || [], {
+    const result = filterFacilities(facilityResult.data || [], {
       category: searchParams.get('category'),
       name: searchParams.get('name'),
       location: searchParams.get('location')
-    });
+    }, branchResult.data || []);
     return res.status(200).json(result);
   } catch (error) {
     console.error('Browse Facilities Error:', error.message);

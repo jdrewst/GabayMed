@@ -26,6 +26,52 @@ import {
 import AppointmentAPI, { STANDARD_MEDICAL_SERVICES } from '../services/appointmentApi';
 import MapAPI from '../services/mapApi';
 
+export const serviceUIConfig = {
+  "General Check-up": { icon: Hospital, colors: ['#66BAFF', '#83BFF0'] },
+  "General Physician": { icon: Stethoscope, colors: ['#66BAFF', '#83BFF0'] },
+  "Neurologist": { icon: Brain, colors: ['#66BAFF', '#83BFF0'] },
+  "Psychiatric": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
+  "Cardiologist": { icon: HeartPulse, colors: ['#66BAFF', '#83BFF0'] },
+  "Orthopedic": { icon: Bone, colors: ['#66BAFF', '#83BFF0'] },
+  "Dermatologist": { icon: Droplet, colors: ['#66BAFF', '#83BFF0'] },
+  "Pediatrician": { icon: Baby, colors: ['#66BAFF', '#83BFF0'] },
+  "Ophthalmologist": { icon: Eye, colors: ['#66BAFF', '#83BFF0'] },
+  "ENT Specialist": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
+  "Pulmonologist": { icon: Wind, colors: ['#66BAFF', '#83BFF0'] },
+  "Dentist": { icon: Pill, colors: ['#66BAFF', '#83BFF0'] },
+  "Hematologist": { icon: Activity, colors: ['#66BAFF', '#83BFF0'] },
+  "default": { icon: Stethoscope, colors: ['#66BAFF', '#83BFF0'] }
+};
+
+const serviceAliases = {
+  cardiology: 'Cardiologist',
+  pediatrics: 'Pediatrician',
+  orthopedics: 'Orthopedic',
+  psychiatry: 'Psychiatric',
+  ophthalmology: 'Ophthalmologist',
+  dentistry: 'Dentist'
+};
+
+export function getServiceDisplayName(name) {
+  const displayName = String(name || '').trim();
+  return serviceAliases[displayName.toLocaleLowerCase()] || displayName;
+}
+
+export function getServiceUI(name) {
+  const displayName = getServiceDisplayName(name);
+  const normalizedName = displayName.toLocaleLowerCase();
+  if (!normalizedName) return serviceUIConfig.default;
+
+  if (serviceUIConfig[displayName]) return serviceUIConfig[displayName];
+
+  const key = Object.keys(serviceUIConfig).find(
+    serviceName => serviceName !== 'default' &&
+      (normalizedName.includes(serviceName.toLocaleLowerCase()) ||
+        serviceName.toLocaleLowerCase().includes(normalizedName))
+  );
+  return key ? serviceUIConfig[key] : serviceUIConfig.default;
+}
+
 // ─── Helper: format "YYYY-MM-DD" → "Thursday, Nov 27, 2026"
 function formatDateFriendly(dateString) {
   const [y, m, d] = dateString.split('-').map(Number);
@@ -76,24 +122,6 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
   
   // Confirmation state
   const [bookingResult, setBookingResult] = useState(null); // null | { success, data }
-
-  // Static UI Config for Services
-  const serviceUIConfig = {
-    "General Check-up": { icon: Hospital, colors: ['#66BAFF', '#83BFF0'] },
-    "General Physician": { icon: Stethoscope, colors: ['#66BAFF', '#83BFF0'] },
-    "Neurologist": { icon: Brain, colors: ['#66BAFF', '#83BFF0'] },
-    "Psychiatric": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
-    "Cardiologist": { icon: HeartPulse, colors: ['#66BAFF', '#83BFF0'] },
-    "Orthopedic": { icon: Bone, colors: ['#66BAFF', '#83BFF0'] },
-    "Dermatologist": { icon: Droplet, colors: ['#66BAFF', '#83BFF0'] },
-    "Pediatrician": { icon: Baby, colors: ['#66BAFF', '#83BFF0'] },
-    "Ophthalmologist": { icon: Eye, colors: ['#66BAFF', '#83BFF0'] },
-    "ENT Specialist": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
-    "Pulmonologist": { icon: Wind, colors: ['#66BAFF', '#83BFF0'] },
-    "Dentist": { icon: Pill, colors: ['#66BAFF', '#83BFF0'] },
-    "Hematologist": { icon: Activity, colors: ['#66BAFF', '#83BFF0'] },
-    "default": { icon: Stethoscope, colors: ['#66BAFF', '#83BFF0'] }
-  };
 
   // Static Time Slots Definition
   const baseTimeSlots = [
@@ -409,12 +437,6 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
   const handleDone = () => {
     setBookingResult(null);
     onClose();
-  };
-
-  const getServiceUI = (name) => {
-    if (serviceUIConfig[name]) return serviceUIConfig[name];
-    const key = Object.keys(serviceUIConfig).find(k => name.includes(k) || k.includes(name));
-    return key ? serviceUIConfig[key] : serviceUIConfig["default"];
   };
 
   const goToPrevMonth = () => {

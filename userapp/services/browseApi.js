@@ -1,4 +1,32 @@
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3000/api';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
+function resolveApiBaseUrl() {
+  const configuredBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL;
+  const configuredUrl = configuredBaseUrl || configuredApiUrl;
+  if (configuredUrl) {
+    const trimmedUrl = configuredUrl.replace(/\/+$/, '');
+    return trimmedUrl.endsWith('/api') ? trimmedUrl : `${trimmedUrl}/api`;
+  }
+
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.manifest2?.extra?.expoGo?.debuggerHost ||
+    Constants.manifest?.debuggerHost;
+  if (hostUri) {
+    const host = hostUri.split(':')[0];
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      return `http://${host}:3000/api`;
+    }
+  }
+
+  return Platform.OS === 'android'
+    ? 'http://10.0.2.2:3000/api'
+    : 'http://localhost:3000/api';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 // Helper: Haversine Formula for distance
 function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
@@ -56,6 +84,9 @@ const BrowseAPI = {
 
         return {
           id: facility.id,
+          facilityId: facility.facilityId || facility.id,
+          branchId: facility.branchId || null,
+          type: facility.type || 'facility',
           name: facility.name,
           address: facility.address,
           rating: 4.5,
@@ -63,6 +94,8 @@ const BrowseAPI = {
           isGabay: facility.isGabay,
           distance,
           distValue,
+          latitude: facility.latitude,
+          longitude: facility.longitude,
           services: facility.services || [],
           imageUrl: facility.imageUrl
         };
