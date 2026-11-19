@@ -117,7 +117,9 @@ export default function App() {
   }
 
   const lock = screen => (
-    <UnlockPatientApp key={session.profile.id} patientId={session.profile.id}>{screen}</UnlockPatientApp>
+    <UnlockPatientApp key={session.profile.id} patientId={session.profile.id} requiresPin={session.requiresPin}>
+      {screen}
+    </UnlockPatientApp>
   );
 
   // 2. First-time user: Onboarding walkthrough + care profile setup

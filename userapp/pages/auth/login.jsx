@@ -128,7 +128,7 @@ export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notic
         {needsMfa ? (
           <OutlineButton title="Back to sign in" onPress={() => {
             setNeedsMfa(false); setPassword(''); setCode(''); setErrors({}); setError('');
-          }} disabled={loading} />
+          }} disabled={loading} style={styles.backToSignIn} />
         ) : <View style={styles.signupRow}>
           <Text style={authText.small}>Don't have an account? </Text>
           <TouchableOpacity onPress={onSignUp} hitSlop={8} accessibilityRole="link">
@@ -168,5 +168,6 @@ const styles = StyleSheet.create({
   },
   highlight: { color: COLORS.accent },
   forgotBtn: { alignSelf: 'flex-end', marginTop: -4, marginBottom: 8 },
+  backToSignIn: { marginTop: 12 },
   signupRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 22 },
 });

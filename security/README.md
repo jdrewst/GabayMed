@@ -35,6 +35,6 @@ Patients can set up and remove an authenticator under **Settings → Password, a
 
 Removing an authenticator from a session that still needs MFA prompts for a code before removing the factor. If the patient lost their only copy, a project admin can verify their identity, look up their enrolled factor, and use Supabase Auth's [admin factor removal](https://supabase.com/docs/reference/javascript/auth-admin-deletefactor). Removing a verified factor signs out active sessions. The patient can then sign in and enroll a replacement.
 
-The same screen supports signed-in password changes and an optional six-digit, device-local app PIN. Password changes require the current password. The PIN is requested when opening GabayMed after a restart or sign-in on that device.
+The same screen supports signed-in password changes and an optional six-digit, device-local app PIN. Password changes require the current password. The PIN is requested when GabayMed restores a saved session after an app restart. A fresh sign-in uses the account password and any enrolled MFA factor. To reset a forgotten PIN, the patient verifies their account with the same sign-in checks and sets a replacement PIN.
 
 Verify enrollment, removal, and sign-in with a test patient. Check that a password-only token for an enrolled account cannot read or write protected data through the GabayMed API or Supabase Data API. Test an unenrolled account and an already verified session as well.

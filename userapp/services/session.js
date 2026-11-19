@@ -13,12 +13,13 @@ function notify() {
   listeners.forEach(listener => listener(current));
 }
 
-async function store(result) {
+async function store(result, requiresPin = false) {
   current = {
     accessToken: result.access_token,
     refreshToken: result.refresh_token,
     expiresAt: Number(result.expires_at) || Math.floor(Date.now() / 1000) + 3600,
     profile: result.profile,
+    requiresPin,
   };
   await SecureStore.setItemAsync(REFRESH_KEY, result.refresh_token);
   notify();
@@ -32,10 +33,10 @@ async function forget() {
 }
 
 // Refresh once at a time; a 401 means the session is gone and the user must log in again.
-async function refresh(refreshToken) {
+async function refresh(refreshToken, requiresPin = current?.requiresPin ?? false) {
   if (!refreshing) {
     refreshing = AuthAPI.refresh(refreshToken)
-      .then(store)
+      .then(result => store(result, requiresPin))
       .catch(async error => {
         if (error.status === 401) await forget();
         throw error;
@@ -62,7 +63,7 @@ const Session = {
   async restore() {
     const saved = await SecureStore.getItemAsync(REFRESH_KEY);
     if (!saved) return null;
-    return refresh(saved);
+    return refresh(saved, true);
   },
 
   /** Save the result of a successful login. */
@@ -93,10 +94,8 @@ const Session = {
   },
 
   /** Sign out on this device and revoke the session on the server. */
-  async signOut({ requireLocalRemoval = false } = {}) {
-    if (requireLocalRemoval && refreshing) await refreshing.catch(() => {});
+  async signOut() {
     const token = current?.accessToken;
-    if (requireLocalRemoval) await SecureStore.deleteItemAsync(REFRESH_KEY);
     await forget();
     if (token) { try { await AuthAPI.logout(token); } catch {} }
   },

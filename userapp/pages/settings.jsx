@@ -1414,6 +1414,12 @@ export function SettingsPage({
 
   const menuItems = [
     {
+      id: 'account_security',
+      icon: ShieldCheck,
+      label: t.accountSecurity,
+      action: onOpenMfaSettings,
+    },
+    {
       id: 'terms',
       icon: FileText,
       label: t.terms,
@@ -1776,7 +1782,6 @@ export function SettingsPage({
         </View>
 
         {/* 3. Onboarding Permissions & Privacy Toggles */}
-        <OutlineButton title="Password, app PIN and MFA" onPress={onOpenMfaSettings} style={{ marginBottom: 12 }} />
         <Text style={[styles.sectionHeader, { color: display.textSecondary, fontSize: fs(13) }]}>
           {t.permissionsHeader}
         </Text>
