@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Lock } from 'lucide-react-native';
 import {
-  AuthScreen, AuthLogo, TextField, PrimaryButton, ErrorBanner, Popup, authText, COLORS,
+  AuthScreen, AuthLogo, TextField, PrimaryButton, OutlineButton, ErrorBanner, Popup, authText, COLORS,
 } from '../../components/auth/auth-ui';
 import AuthAPI from '../../services/authApi';
 import Session from '../../services/session';
@@ -18,6 +18,8 @@ function formatWait(seconds) {
 export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notice = '' }) {
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [needsMfa, setNeedsMfa] = useState(false);
   const [errors, setErrors] = useState({});
   const [error, setError] = useState(notice);
   const [loading, setLoading] = useState(false);
@@ -32,20 +34,28 @@ export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notic
   }, [lockSeconds > 0]);
 
   const handleLogin = async () => {
+    if (loading || lockSeconds > 0) return;
     const next = {};
     if (!EMAIL.test(email.trim())) next.email = 'Enter a valid email address.';
     if (!password) next.password = 'Enter your password.';
+    if (needsMfa && !/^\d{6}$/.test(code)) next.code = 'Enter your six-digit authenticator code.';
     setErrors(next);
     setError('');
     if (Object.keys(next).length) return;
 
     setLoading(true);
     try {
-      const result = await AuthAPI.login(email.trim(), password);
+      const result = await AuthAPI.login(email.trim(), password, needsMfa ? code : undefined);
       setPassword('');
       await Session.start(result);
     } catch (err) {
-      setPassword('');
+      if (err.code === 'mfa_required' || err.code === 'mfa_invalid') {
+        setNeedsMfa(true);
+        setCode('');
+        if (err.code === 'mfa_invalid') setError(err.message);
+        return;
+      }
+      if (!needsMfa) setPassword('');
       if (err.status === 429 && err.retryAfter > 0) {
         setLockSeconds(err.retryAfter);
         setShowLock(true);
@@ -69,52 +79,62 @@ export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notic
 
         <View style={{ marginTop: 28 }}>
           <ErrorBanner message={error} />
-          <TextField
-            label="Email"
-            required
-            value={email}
-            onChangeText={text => { setEmail(text); setErrors(e => ({ ...e, email: '' })); }}
-            error={errors.email}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-            textContentType="emailAddress"
-            returnKeyType="next"
-            onSubmitEditing={() => passwordRef.current?.focus()}
-          />
-          <TextField
-            label="Password"
-            required
-            inputRef={passwordRef}
-            value={password}
-            onChangeText={text => { setPassword(text); setErrors(e => ({ ...e, password: '' })); }}
-            error={errors.password}
-            secure
-            autoCapitalize="none"
-            autoComplete="current-password"
-            textContentType="password"
-            returnKeyType="go"
-            onSubmitEditing={handleLogin}
-          />
-          <TouchableOpacity onPress={onForgotPassword} style={styles.forgotBtn} hitSlop={8} accessibilityRole="link">
-            <Text style={[authText.small, authText.link]}>Forgot Password</Text>
-          </TouchableOpacity>
+          {needsMfa ? (
+            <TextField label="Authenticator code" value={code} onChangeText={setCode}
+              error={errors.code} keyboardType="number-pad" maxLength={6} autoFocus
+              onSubmitEditing={handleLogin} />
+          ) : <>
+            <TextField
+              label="Email"
+              required
+              value={email}
+              onChangeText={text => { setEmail(text); setErrors(e => ({ ...e, email: '' })); }}
+              error={errors.email}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+            />
+            <TextField
+              label="Password"
+              required
+              inputRef={passwordRef}
+              value={password}
+              onChangeText={text => { setPassword(text); setErrors(e => ({ ...e, password: '' })); }}
+              error={errors.password}
+              secure
+              autoCapitalize="none"
+              autoComplete="current-password"
+              textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
+            />
+            <TouchableOpacity onPress={onForgotPassword} style={styles.forgotBtn} hitSlop={8} accessibilityRole="link">
+              <Text style={[authText.small, authText.link]}>Forgot Password</Text>
+            </TouchableOpacity>
+          </>}
         </View>
 
         <PrimaryButton
-          title={locked ? `Try again in ${formatWait(lockSeconds)}` : loading ? 'Logging in...' : 'Log In'}
+          title={locked ? `Try again in ${formatWait(lockSeconds)}` : loading ? 'Logging in...' : needsMfa ? 'Verify and log in' : 'Log In'}
           onPress={handleLogin}
           loading={loading}
           disabled={locked}
           style={{ marginTop: 8 }}
         />
 
-        <View style={styles.signupRow}>
+        {needsMfa ? (
+          <OutlineButton title="Back to sign in" onPress={() => {
+            setNeedsMfa(false); setPassword(''); setCode(''); setErrors({}); setError('');
+          }} disabled={loading} style={styles.backToSignIn} />
+        ) : <View style={styles.signupRow}>
           <Text style={authText.small}>Don't have an account? </Text>
           <TouchableOpacity onPress={onSignUp} hitSlop={8} accessibilityRole="link">
             <Text style={[authText.small, authText.link]}>Sign up</Text>
           </TouchableOpacity>
-        </View>
+        </View>}
       </View>
 
       <Popup
@@ -148,5 +168,6 @@ const styles = StyleSheet.create({
   },
   highlight: { color: COLORS.accent },
   forgotBtn: { alignSelf: 'flex-end', marginTop: -4, marginBottom: 8 },
+  backToSignIn: { marginTop: 12 },
   signupRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 22 },
 });

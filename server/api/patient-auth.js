@@ -68,5 +68,7 @@ module.exports = {
     { headers: 'Authorization, Content-Type', unavailable: 'Profile service is temporarily unavailable. Please try again later.' }),
   resetPassword: endpoint(req => patient.resetPatientPassword(client(), req.body, { secret: process.env.SUPABASE_SERVICE_ROLE_KEY }),
     { unavailable: 'Password reset is temporarily unavailable. Please try again later.' }),
+  security: endpoint(req => patient.changePatientPassword({ admin: client(), auth: client() }, bearer(req), req.body),
+    { headers: 'Authorization, Content-Type', unavailable: 'Password changes are temporarily unavailable.' }),
   logout: endpoint(req => patient.logoutPatient(client(), bearer(req)), { headers: 'Authorization, Content-Type' })
 };

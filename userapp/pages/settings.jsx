@@ -1073,6 +1073,7 @@ export function ProfilePage({ onBack }) {
  * Legal (Terms & Conditions, Privacy Policy), History, Help & Support, and Sign Out.
  */
 export function SettingsPage({
+  onOpenMfaSettings,
   onOpenMessages,
   onOpenNotifications,
   onOpenProfile,
@@ -1430,6 +1431,12 @@ export function SettingsPage({
           action: onOpenClaims,
         }]
       : []),
+    {
+      id: 'account_security',
+      icon: ShieldCheck,
+      label: t.accountSecurity,
+      action: onOpenMfaSettings,
+    },
     {
       id: 'terms',
       icon: FileText,

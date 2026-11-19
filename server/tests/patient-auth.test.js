@@ -35,6 +35,7 @@ function admin(state = {}) {
     auth: {
       getUser: async token => token === 'good' ? { data: { user: { id: 'user-id' } } } : { error: {} },
       admin: {
+        mfa: { listFactors: async () => ({ data: { factors: state.factors || [] } }) },
         createUser: async args => { state.created.push(args);
           return state.exists ? { error: { code: 'email_exists' } } : { data: { user: { id: 'user-id' } } }; },
         deleteUser: async id => { state.deleted.push(id); return {}; },
@@ -224,3 +225,71 @@ test('profile CRUD validates input, updates profile, syncs patients, and support
 });
 
 
+
+test('MFA login withholds password-only tokens and returns only verified tokens', async () => {
+  const factor = { id: 'authenticator-id', factor_type: 'totp', status: 'verified' };
+  const a = admin({ factors: [factor] });
+  a.rpc = async name => ({ data: name === 'mobile_begin_login' ? { allowed: true } : { accepted: true } });
+  const upgradedToken = 'header.' + Buffer.from(JSON.stringify({ aal: 'aal2' })).toString('base64url') + '.signature';
+  const auth = { auth: {
+    signInWithPassword: async () => ({ data: {
+      user: { id: 'user-id' },
+      session: { access_token: 'password-only', refresh_token: 'password-refresh' }
+    } }),
+    mfa: { challengeAndVerify: async ({ factorId, code }) => {
+      assert.equal(factorId, factor.id);
+      return code === '123456'
+        ? { data: { access_token: upgradedToken, refresh_token: 'verified-refresh', expires_in: 3600 } }
+        : { error: { status: 422 } };
+    } }
+  } };
+  const deps = { admin: a, auth, secret: 'secret' };
+  const creds = { email: 'juan@example.com', password: 'password' };
+  await assert.rejects(patient.loginPatient(deps, creds), { code: 'mfa_required' });
+  await assert.rejects(patient.loginPatient(deps, { ...creds, code: '123457' }), { code: 'mfa_invalid' });
+  const result = await patient.loginPatient(deps, { ...creds, code: '123456' });
+  assert.equal(result.access_token, upgradedToken);
+  assert.equal(result.refresh_token, 'verified-refresh');
+});
+
+test('a password-only session for an enrolled patient cannot refresh or change sharing', async () => {
+  const a = admin({ factors: [{ status: 'verified' }] });
+  const auth = { auth: { refreshSession: async () => ({ data: {
+    user: { id: 'user-id' }, session: { access_token: 'good', refresh_token: 'renewed' }
+  } }) } };
+  await assert.rejects(patient.refreshPatientSession({ admin: a, auth }, { refresh_token: 'old' }), { code: 'mfa_required' });
+  await assert.rejects(patient.managePatientProfile(a, 'good', {
+    action: 'update_consents', data_sharing_consent: true
+  }), { code: 'mfa_required' });
+  assert.deepEqual(a.state.updates, []);
+});
+
+test('signed-in password changes check the current password and reject password-only MFA sessions', async () => {
+  const a = admin();
+  const changes = [];
+  a.auth.admin.updateUserById = async (id, patch) => { changes.push({ id, patch }); return {}; };
+  const auth = { auth: { signInWithPassword: async ({ password }) => password === 'current'
+    ? { data: { user: { id: 'user-id' }, session: { access_token: 'temporary-session' } } }
+    : { error: { code: 'invalid_credentials' } }
+  } };
+  const input = { current_password: 'current', password: valid.password };
+  await assert.rejects(patient.changePatientPassword({ admin: a, auth }, 'good', {
+    ...input, current_password: 'wrong'
+  }), { status: 401 });
+  await assert.rejects(patient.changePatientPassword({
+    admin: admin({ factors: [{ status: 'verified' }] }), auth
+  }, 'good', input), { code: 'mfa_required' });
+  assert.deepEqual(changes, []);
+  await patient.changePatientPassword({ admin: a, auth }, 'good', input);
+  assert.deepEqual(changes, [{ id: 'user-id', patch: { password: valid.password } }]);
+});
+
+test('the password change route is mounted locally and in the deployment wrapper', async () => {
+  const { createServer } = require('../backend');
+  const dispatch = createServer().listeners('request')[0];
+  const req = { headers: {}, url: '/api/patient-security', method: 'OPTIONS', async *[Symbol.asyncIterator]() {} };
+  const res = { setHeader() {}, end() {} };
+  await dispatch(req, res);
+  assert.equal(res.statusCode, 204);
+  assert.equal(require('../../api/patient-security'), require('../api/patient-auth').security);
+});

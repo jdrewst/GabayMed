@@ -63,7 +63,7 @@ const AuthAPI = {
   sendOtp: payload => post('patient-otp', { ...payload, action: 'send' }),
   verifyOtp: payload => post('patient-otp', { ...payload, action: 'verify' }),
   register: details => post('patient-register', details),
-  login: (email, password) => post('patient-login', { email, password }),
+  login: (email, password, code) => post('patient-login', { email, password, code }),
   refresh: refreshToken => post('patient-session', { refresh_token: refreshToken }),
   completeOnboarding: (token, consents) => post('patient-onboarding', consents, token),
   getProfile: token => post('patient-profile', { action: 'get' }, token),
@@ -74,6 +74,7 @@ const AuthAPI = {
   deleteAccount: (token, payload) => post('patient-profile', { ...payload, action: 'delete_account' }, token),
   clearMedicalField: (token, field) => post('patient-profile', { action: 'clear_medical', field }, token),
   resetPassword: payload => post('patient-reset-password', payload),
+  changePassword: (token, payload) => post('patient-security', payload, token),
   logout: token => post('patient-logout', {}, token),
 };
 

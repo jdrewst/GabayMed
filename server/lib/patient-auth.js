@@ -1,6 +1,7 @@
 const { randomBytes } = require('node:crypto');
 const { RequestError } = require('./provider-accounts');
 const { login, rejected } = require('./login');
+const { verifiedFactors, requirePatientMfa } = require('./patient-mfa');
 const {
   OTP_TTL_SECONDS, generateOtpCode, challengeKey, codeHash, tokenHash, maskEmail, defaultSendMail,
 } = require('./otp');
@@ -325,11 +326,37 @@ async function resetPatientPassword(admin, body, { secret } = {}) {
 async function patientAccount(admin, user, session) {
   const profile = await loadProfile(admin, user.id);
   if (!profile) return null;
+  requirePatientMfa(await verifiedFactors(admin, user.id), session.access_token);
   return { expires_at: session.expires_at, profile };
 }
 
 function loginPatient(deps, body) {
-  return login({ ...deps, authorize: patientAccount }, body);
+  return login({ ...deps, authorize: async (admin, user, session) => {
+    const profile = await loadProfile(admin, user.id);
+    if (!profile) return null;
+    const factors = await verifiedFactors(admin, user.id);
+    if (!factors.length) return { expires_at: session.expires_at, profile };
+    const factor = factors.find(item => item.factor_type === 'totp');
+    if (!factor) throw rejected(403, 'Contact support to use your enrolled authentication method.');
+    if (typeof body.code !== 'string' || !/^\d{6}$/.test(body.code)) {
+      throw rejected(401, 'Enter the six-digit code from your authenticator app.', 0, 'mfa_required');
+    }
+    const { data, error } = await deps.auth.auth.mfa.challengeAndVerify({
+      factorId: factor.id, code: body.code
+    });
+    if (error?.status === 429) throw rejected(429, 'Too many verification requests. Try again shortly.', 60);
+    if (error && error.status >= 500) throw rejected(503, 'Verification is temporarily unavailable.');
+    if (error || !data?.access_token || !data?.refresh_token) {
+      throw rejected(401, 'Could not verify the authenticator code. Try a new code.', 0, 'mfa_invalid');
+    }
+    requirePatientMfa(factors, data.access_token);
+    return {
+      profile,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: data.expires_at || Math.floor(Date.now() / 1000) + data.expires_in
+    };
+  } }, body);
 }
 
 async function refreshPatientSession({ admin, auth }, body) {
@@ -349,7 +376,31 @@ async function verifiedUser(admin, token) {
   if (!token) throw new RequestError(401, 'Please log in again.');
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data?.user) throw new RequestError(401, 'Your session expired. Please log in again.');
+  requirePatientMfa(await verifiedFactors(admin, data.user.id), token);
   return data.user;
+}
+
+async function changePatientPassword({ admin, auth }, token, body) {
+  const user = await verifiedUser(admin, token);
+  if (!await loadProfile(admin, user.id)) throw new RequestError(403, 'This account is not a patient account.');
+  const problem = passwordProblem(body?.password);
+  if (problem) throw new RequestError(400, problem);
+  const current = body?.current_password;
+  if (typeof current !== 'string' || !current || current.length > 4096 || current === body.password) {
+    throw new RequestError(400, 'Enter your current password and a different new password.');
+  }
+  const { data, error } = await auth.auth.signInWithPassword({ email: user.email, password: current });
+  if (error?.status === 429) throw rejected(429, 'Too many attempts. Try again shortly.', 60);
+  if (error && error.code !== 'invalid_credentials') throw new RequestError(503, 'Could not verify your password.');
+  if (error || data?.user?.id !== user.id) throw new RequestError(401, 'Your current password is incorrect.');
+
+  try {
+    const updated = await admin.auth.admin.updateUserById(user.id, { password: body.password });
+    if (updated.error) throw new RequestError(503, 'Could not update your password. Please try again.');
+  } finally {
+    await logoutPatient(admin, data.session?.access_token);
+  }
+  return { success: true };
 }
 
 async function completeOnboarding(admin, token, body) {
@@ -733,5 +784,5 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
 module.exports = {
   registrationInput, normalizeMobile, passwordProblem, handlePatientOtp, registerPatient,
   resetPatientPassword, loginPatient, refreshPatientSession, completeOnboarding,
-  validateProfileUpdateInput, managePatientProfile, logoutPatient, patientAccount, rejected
+  validateProfileUpdateInput, managePatientProfile, logoutPatient, patientAccount, verifiedUser, changePatientPassword, rejected
 };
