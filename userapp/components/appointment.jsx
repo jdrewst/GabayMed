@@ -57,6 +57,15 @@ export function getServiceDisplayName(name) {
   return serviceAliases[displayName.toLocaleLowerCase()] || displayName;
 }
 
+export function getServiceSearchTerms(name) {
+  const displayName = getServiceDisplayName(name);
+  const normalizedDisplayName = displayName.toLocaleLowerCase();
+  const aliases = Object.entries(serviceAliases)
+    .filter(([, canonicalName]) => canonicalName.toLocaleLowerCase() === normalizedDisplayName)
+    .map(([alias]) => alias);
+  return [displayName, ...aliases];
+}
+
 export function getServiceUI(name) {
   const displayName = getServiceDisplayName(name);
   const normalizedName = displayName.toLocaleLowerCase();

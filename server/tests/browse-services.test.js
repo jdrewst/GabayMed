@@ -84,6 +84,19 @@ test('configured specialty names match equivalent facility service labels', () =
   assert.deepEqual(result.facilities.map(facility => facility.id), ['facility-1']);
 });
 
+test('facility and location search tolerate minor typing errors', () => {
+  const result = filterFacilities([
+    {
+      facility_id: 'facility-1',
+      name: 'Central Medical Center',
+      location: 'Makati',
+      services_offered: 'Cardiology'
+    }
+  ], { name: 'medcal', location: 'makiti' });
+
+  assert.deepEqual(result.facilities.map(facility => facility.id), ['facility-1']);
+});
+
 test('facilities offering everything expose and match all configured specialties', () => {
   const result = filterFacilities([
     {

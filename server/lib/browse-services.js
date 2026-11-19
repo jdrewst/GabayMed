@@ -2,6 +2,51 @@ function normalizedText(value) {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase() : '';
 }
 
+function normalizeSearchValue(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex++) {
+    let diagonal = previous[0];
+    previous[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex++) {
+      const above = previous[rightIndex];
+      previous[rightIndex] = Math.min(
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + 1,
+        diagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function matchesSearchTerm(query, value) {
+  const normalizedQuery = normalizeSearchValue(query);
+  const normalizedValue = normalizeSearchValue(value);
+  if (!normalizedQuery || normalizedValue.includes(normalizedQuery)) return true;
+
+  const queryTerms = normalizedQuery.split(' ');
+  const valueTerms = normalizedValue.split(' ');
+  return queryTerms.every(queryTerm => valueTerms.some(valueTerm => {
+    if (valueTerm.includes(queryTerm) || queryTerm.includes(valueTerm)) return true;
+    if (queryTerm.length < 3 || valueTerm.length < 3) {
+      return valueTerm.startsWith(queryTerm) || queryTerm.startsWith(valueTerm);
+    }
+    const allowedDistance = Math.max(queryTerm.length, valueTerm.length) >= 8 ? 2 : 1;
+    return Math.abs(queryTerm.length - valueTerm.length) <= allowedDistance &&
+      editDistance(queryTerm, valueTerm) <= allowedDistance;
+  }));
+}
+
 const STANDARD_SERVICES = [
   'General Check-up',
   'General Physician',
@@ -103,8 +148,8 @@ function matchesSearchFilters(record, { name, location }) {
     record.facility.location
   ].filter(Boolean).join(' '));
 
-  return (!normalizedName || facilityName.includes(normalizedName)) &&
-    (!normalizedLocation || facilityLocation.includes(normalizedLocation));
+  return matchesSearchTerm(normalizedName, facilityName) &&
+    matchesSearchTerm(normalizedLocation, facilityLocation);
 }
 
 function matchesCategory(record, category) {
