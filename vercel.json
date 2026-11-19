@@ -16,6 +16,10 @@
       "continue": true
     },
     {
+      "src": "/api/(.*)",
+      "dest": "/api/index.js?__route=$1"
+    },
+    {
       "handle": "filesystem"
     },
     {

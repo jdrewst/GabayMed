@@ -52,4 +52,4 @@ const host = process.env.HOST || '0.0.0.0';
 if (require.main === module) createServer().listen(Number(process.env.PORT || 3000), host, () => {
   console.log('Gabay API listening on http://' + host + ':' + (process.env.PORT || 3000));
 });
-module.exports = { createServer };
+module.exports = { createServer, routes };
