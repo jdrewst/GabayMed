@@ -19,15 +19,18 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/LogoName.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/Logo.png"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "15d1e91e-371e-4937-9d0d-ab38415867f8"
-      }
     },
     "plugins": [
       "expo-status-bar",
@@ -45,6 +48,18 @@
           "cameraPermission": "Allow GabayMed to use your camera so you can photograph paper medical records."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5604c40f-7a99-4eb8-987b-cedd27951253"
+      }
+    },
+    "owner": "jdrews",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/5604c40f-7a99-4eb8-987b-cedd27951253"
+    }
   }
 }
