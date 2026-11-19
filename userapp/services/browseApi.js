@@ -1,74 +1,82 @@
-import MapAPI from './mapApi';
-import { STANDARD_MEDICAL_SERVICES } from './appointmentApi';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3000/api';
+
+// Helper: Haversine Formula for distance
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in km
+  return d;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
 
 const BrowseAPI = {
   /**
    * Fetches all healthcare facilities for the Seek Medical Care page using real user location if permitted,
    * and enables all medical services (Neurologist, Cardiologist, General Check-up, etc.).
    */
-  async getSeekCareData() {
+  async getSeekCareData(filters = {}) {
     try {
-      // 1. Request or check user location permission
-      const locRes = await MapAPI.requestUserLocation();
-      const userCoords = locRes.granted ? locRes.coords : null;
+      const searchParams = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (typeof value === 'string' && value.trim()) searchParams.set(key, value.trim());
+      });
+      const query = searchParams.toString();
+      const response = await fetch(`${API_BASE_URL}/browse-services${query ? `?${query}` : ''}`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || `Facility search failed (${response.status}).`);
+      }
 
-      // 2. Fetch facilities with resolved coordinates & distance
-      const facilities = await MapAPI.getFacilitiesLocations(userCoords);
+      const result = await response.json();
+      const USER_LAT = 14.5977;
+      const USER_LONG = 121.0112;
+      const facilities = result.facilities.map(facility => {
+        let distance = 'N/A';
+        let distValue = 99999;
 
-      // 3. Format for SeekMedicalCare cards and enable all specialty services
-      const processedFacilities = (facilities || []).map((f, idx) => {
-        const customServices = (Array.isArray(f.services) ? f.services : [])
-          .map(s => String(s || '').trim())
-          .filter(s => s && !/^(everything|all|all services|none|n\/a)$/i.test(s));
-
-        const mergedServices = Array.from(new Set([...customServices, ...STANDARD_MEDICAL_SERVICES]));
+        if (facility.latitude != null && facility.longitude != null) {
+          const km = getDistanceFromLatLonInKm(
+            USER_LAT,
+            USER_LONG,
+            parseFloat(facility.latitude),
+            parseFloat(facility.longitude)
+          );
+          distValue = km;
+          distance = km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(1)} km`;
+        }
 
         return {
-          id: String(f.id ?? (f.branchId ? `branch-${f.branchId}` : `facility-${f.facilityId || idx}`)),
-          facilityId: f.facilityId ?? f.id,
-          branchId: f.branchId ?? null,
-          type: f.type || 'facility',
-          name: f.name || 'Healthcare Facility',
-          address: f.address || f.location || 'Metro Manila, Philippines',
-          phone: f.phone || '',
-          email: f.email || '',
-          rating: 4.8,
+          id: facility.id,
+          name: facility.name,
+          address: facility.address,
+          rating: 4.5,
           isOpen: true,
-          isGabay: true,
-          distance: f.distanceLabel || 'View on map',
-          distValue: f.distanceKm ?? 99999,
-          services: mergedServices,
-          imageUrl: f.imageUrl,
-          latitude: f.latitude,
-          longitude: f.longitude,
+          isGabay: facility.isGabay,
+          distance,
+          distValue,
+          services: facility.services || [],
+          imageUrl: facility.imageUrl
         };
       });
 
-      // 4. Extract distinct services (always including all standard medical specialties)
-      const allServices = new Set(STANDARD_MEDICAL_SERVICES);
-      processedFacilities.forEach(f => {
-        if (Array.isArray(f.services)) {
-          f.services.forEach(s => {
-            if (s && typeof s === 'string') allServices.add(s.trim());
-          });
-        }
-      });
-      const distinctServices = Array.from(allServices);
+      facilities.sort((a, b) => a.distValue - b.distValue);
 
       return {
-        facilities: processedFacilities,
-        services: distinctServices,
-        userCoords,
-        locationGranted: locRes.granted,
+        facilities,
+        services: result.services
       };
     } catch (error) {
       console.error('Get Seek Care Data Error:', error);
-      return {
-        facilities: [],
-        services: [...STANDARD_MEDICAL_SERVICES],
-        userCoords: null,
-        locationGranted: false,
-      };
+      throw error;
     }
   },
 };

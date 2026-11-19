@@ -17,6 +17,9 @@ export function SeekMedicalCare({
   const [bookingFacility, setBookingFacility] = useState(null); // ADD THIS: Separate state for booking
   const [showAppointmentBooking, setShowAppointmentBooking] = useState(false);
   const [selectedService, setSelectedService] = useState(null);
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const [facilityNameQuery, setFacilityNameQuery] = useState('');
+  const [locationQuery, setLocationQuery] = useState('');
   const [showAllHospitals, setShowAllHospitals] = useState(false);
   const [showAllServices, setShowAllServices] = useState(false); // Controls Modal now
  
@@ -30,29 +33,31 @@ export function SeekMedicalCare({
     loadData();
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (filters = {}) => {
     setLoading(true);
-    const data = await BrowseAPI.getSeekCareData();
-    setAllFacilities(data.facilities);
-    setDisplayedFacilities(data.facilities);
-    setAvailableServices(data.services);
-    setLoading(false);
+    try {
+      const data = await BrowseAPI.getSeekCareData(filters);
+      if (!filters.category && !filters.name && !filters.location) {
+        setAllFacilities(data.facilities);
+      }
+      setDisplayedFacilities(data.facilities);
+      setAvailableServices(data.services);
+    } catch (error) {
+      Alert.alert('Unable to search facilities', error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleServiceSelect = (service) => {
     setShowAllServices(false); // Close modal if selecting from there
-    if (selectedService === service) {
-      // Deselect
-      setSelectedService(null);
-      setDisplayedFacilities(allFacilities);
-    } else {
-      // Select
-      setSelectedService(service);
-      const filtered = allFacilities.filter(f =>
-        f.services && f.services.includes(service)
-      );
-      setDisplayedFacilities(filtered);
-    }
+    const category = selectedService === service ? '' : service;
+    setSelectedService(category || null);
+    loadData({
+      category,
+      name: facilityNameQuery,
+      location: locationQuery
+    });
   };
 
   const handleFacilityClick = (facility) => {
@@ -60,6 +65,34 @@ export function SeekMedicalCare({
       setSelectedFacility(facility.id);
     }
     // No else needed as button is disabled
+  };
+
+  const filteredServices = availableServices.filter(service =>
+    service.toLocaleLowerCase().includes(serviceSearchQuery.trim().toLocaleLowerCase())
+  );
+
+  const clearServiceSearch = () => {
+    setServiceSearchQuery('');
+    setSelectedService(null);
+    loadData({ name: facilityNameQuery, location: locationQuery });
+  };
+
+  const handleServiceSearchChange = (query) => {
+    setServiceSearchQuery(query);
+  };
+
+  const handleFacilitySearch = () => {
+    loadData({
+      category: selectedService || '',
+      name: facilityNameQuery,
+      location: locationQuery
+    });
+  };
+
+  const clearFacilitySearch = () => {
+    setFacilityNameQuery('');
+    setLocationQuery('');
+    loadData({ category: selectedService || '' });
   };
 
   const gabayPerks = [
@@ -80,17 +113,162 @@ export function SeekMedicalCare({
         </View>
 
         <View style={styles.section}>
+          <View style={styles.serviceBrowseHeader}>
+            <Text style={styles.sectionTitle}>Browse Services</Text>
+            <TouchableOpacity onPress={() => setShowAllServices(true)}>
+              <Text style={styles.seeAllButton}>See All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.serviceSearchContainer}>
+            <Search size={18} color="#6b7280" />
+            <TextInput
+              style={styles.serviceSearchInput}
+              value={serviceSearchQuery}
+              onChangeText={handleServiceSearchChange}
+              placeholder="Search services (e.g., Cardiology)"
+              returnKeyType="search"
+            />
+            {serviceSearchQuery.length > 0 && (
+              <TouchableOpacity onPress={clearServiceSearch} accessibilityLabel="Clear service search">
+                <X size={18} color="#6b7280" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.serviceList}>
+            {filteredServices.map((service) => (
+              <TouchableOpacity
+                key={service}
+                style={[styles.serviceCard, selectedService === service && styles.serviceCardSelected]}
+                onPress={() => handleServiceSelect(service)}
+              >
+                <View style={styles.serviceIconContainer}>
+                  <Stethoscope size={24} color={selectedService === service ? "#fff" : "#0ea5e9"} />
+                </View>
+                <Text style={[styles.serviceLabel, selectedService === service && styles.serviceLabelSelected]}>
+                  {service}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {filteredServices.length === 0 && (
+              <Text style={styles.noServicesText}>No services match your search.</Text>
+            )}
+          </ScrollView>
+
+          <Modal
+            visible={showAllServices}
+            animationType="slide"
+            onRequestClose={() => setShowAllServices(false)}
+          >
+            <View style={styles.fullScreenModalContainer}>
+              <View style={styles.fullScreenModalHeader}>
+                <Text style={styles.fullScreenModalTitle}>All Services</Text>
+                <TouchableOpacity
+                  onPress={() => setShowAllServices(false)}
+                  style={styles.closeButton}
+                >
+                  <X size={24} color="#1f2937" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={[styles.serviceSearchContainer, styles.modalServiceSearch]}>
+                <Search size={18} color="#6b7280" />
+                <TextInput
+                  style={styles.serviceSearchInput}
+                  value={serviceSearchQuery}
+                  onChangeText={handleServiceSearchChange}
+                  placeholder="Search services"
+                  returnKeyType="search"
+                />
+                {serviceSearchQuery.length > 0 && (
+                  <TouchableOpacity onPress={clearServiceSearch} accessibilityLabel="Clear service search">
+                    <X size={18} color="#6b7280" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <ScrollView contentContainerStyle={styles.modalScrollContent}>
+                <View style={styles.serviceGrid}>
+                  {filteredServices.map((service) => (
+                    <TouchableOpacity
+                      key={service}
+                      style={[styles.serviceCardGrid, selectedService === service && styles.serviceCardSelected]}
+                      onPress={() => handleServiceSelect(service)}
+                    >
+                      <View style={styles.serviceIconContainer}>
+                        <Stethoscope size={24} color={selectedService === service ? "#fff" : "#0ea5e9"} />
+                      </View>
+                      <Text style={[styles.serviceLabel, selectedService === service && styles.serviceLabelSelected]}>
+                        {service}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {filteredServices.length === 0 && (
+                    <Text style={styles.noServicesText}>No services match your search.</Text>
+                  )}
+                </View>
+              </ScrollView>
+            </View>
+          </Modal>
+
+          {selectedService && (
+            <Text style={styles.serviceDescription}>
+              Showing facilities that offer {selectedService}.
+            </Text>
+          )}
+        </View>
+
+        <View style={[styles.section, styles.lastSection]}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>
-              {selectedService ? `Facilities for ${selectedService}` : 'Browse by Proximity'}
+              {selectedService ? `Facilities for ${selectedService}` : 'Search Facilities'}
             </Text>
             <TouchableOpacity onPress={() => setShowAllHospitals(!showAllHospitals)}>
               <Text style={styles.seeAllButton}>{showAllHospitals ? 'Show Less' : 'See All'}</Text>
             </TouchableOpacity>
           </View>
 
+          <View style={styles.facilitySearchPanel}>
+            <View style={styles.serviceSearchContainer}>
+              <Search size={18} color="#6b7280" />
+              <TextInput
+                style={styles.serviceSearchInput}
+                value={facilityNameQuery}
+                onChangeText={setFacilityNameQuery}
+                placeholder="Search facility name"
+                returnKeyType="search"
+                onSubmitEditing={handleFacilitySearch}
+              />
+            </View>
+            <View style={styles.serviceSearchContainer}>
+              <MapPin size={18} color="#6b7280" />
+              <TextInput
+                style={styles.serviceSearchInput}
+                value={locationQuery}
+                onChangeText={setLocationQuery}
+                placeholder="Search city or location"
+                returnKeyType="search"
+                onSubmitEditing={handleFacilitySearch}
+              />
+            </View>
+            <View style={styles.facilitySearchActions}>
+              <TouchableOpacity style={styles.searchButton} onPress={handleFacilitySearch}>
+                <Search size={16} color="#fff" />
+                <Text style={styles.searchButtonText}>Search Facilities</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={clearFacilitySearch} style={styles.clearSearchButton}>
+                <Text style={styles.clearSearchText}>Clear</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {loading ? (
             <ActivityIndicator size="large" color="#0ea5e9" style={{ marginTop: 20 }} />
+          ) : displayedFacilities.length === 0 ? (
+            <Text style={styles.noServicesText}>
+              {selectedService ? `No facilities offer ${selectedService}.` : 'No facilities found.'}
+            </Text>
           ) : !showAllHospitals ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.hospitalList}>
               {displayedFacilities.map((hospital, idx) => (
@@ -186,78 +364,6 @@ export function SeekMedicalCare({
           )}
         </View>
 
-        <View style={[styles.section, styles.lastSection]}>
-          <View style={styles.serviceBrowseHeader}>
-            <Text style={styles.sectionTitle}>Browse Services</Text>
-            <TouchableOpacity onPress={() => setShowAllServices(true)}>
-              <Text style={styles.seeAllButton}>See All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Horizontal Scroll - Always visible on main screen */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.serviceList}>
-            {availableServices.map((service, index) => (
-              <TouchableOpacity
-                key={service}
-                style={[styles.serviceCard, selectedService === service && styles.serviceCardSelected]}
-                onPress={() => handleServiceSelect(service)}
-              >
-                <View style={styles.serviceIconContainer}>
-                  <Stethoscope size={24} color={selectedService === service ? "#fff" : "#0ea5e9"} />
-                </View>
-                <Text style={[styles.serviceLabel, selectedService === service && styles.serviceLabelSelected]}>
-                  {service}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          {/* Full Screen Modal for All Services */}
-          <Modal
-            visible={showAllServices}
-            animationType="slide"
-            onRequestClose={() => setShowAllServices(false)}
-          >
-            <View style={styles.fullScreenModalContainer}>
-              <View style={styles.fullScreenModalHeader}>
-                <Text style={styles.fullScreenModalTitle}>All Services</Text>
-                <TouchableOpacity 
-                  onPress={() => setShowAllServices(false)}
-                  style={styles.closeButton}
-                >
-                  <X size={24} color="#1f2937" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView contentContainerStyle={styles.modalScrollContent}>
-                <View style={styles.serviceGrid}>
-                  {availableServices.map((service, index) => (
-                    <TouchableOpacity
-                      key={service}
-                      style={[styles.serviceCardGrid, selectedService === service && styles.serviceCardSelected]}
-                      onPress={() => handleServiceSelect(service)}
-                    >
-                      <View style={styles.serviceIconContainer}>
-                        <Stethoscope size={24} color={selectedService === service ? "#fff" : "#0ea5e9"} />
-                      </View>
-                      <Text style={[styles.serviceLabel, selectedService === service && styles.serviceLabelSelected]}>
-                        {service}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
-            </View>
-          </Modal>
-
-          <View style={styles.serviceDescriptionContainer}>
-            {selectedService && (
-              <Text style={styles.serviceDescription}>
-                You have selected the "{selectedService}" service. Please choose a facility to proceed.
-              </Text>
-            )}
-          </View>
-        </View>
       </ScrollView>
 
       {/* GABAY Partner Modal */}
@@ -601,6 +707,62 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  serviceSearchContainer: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    backgroundColor: '#fff',
+  },
+  facilitySearchPanel: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  facilitySearchActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  searchButton: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#0ea5e9',
+  },
+  searchButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  clearSearchButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  clearSearchText: {
+    color: '#4b5563',
+    fontWeight: '500',
+  },
+  serviceSearchInput: {
+    flex: 1,
+    minHeight: 44,
+    color: '#1f2937',
+  },
+  modalServiceSearch: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  noServicesText: {
+    paddingVertical: 16,
+    color: '#6b7280',
+    textAlign: 'center',
   },
   serviceList: {
     marginTop: 12,
