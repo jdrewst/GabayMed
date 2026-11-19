@@ -1,18 +1,28 @@
 require('dotenv').config({ path: require('node:path').join(__dirname, '.env') });
 const http = require('node:http');
 const providerHandler = require('./api/providers');
-const browseServicesHandler = require('./api/browse-services');
+const firstPasswordHandler = require('./api/first-password');
+const loginHandler = require('./api/login');
+const patientAuth = require('./api/patient-auth');
+const facilitiesMapHandler = require('./api/facilities-map');
+const patientAppointmentsHandler = require('./api/patient-appointments');
+
+const routes = {
+  '/api/providers': providerHandler, '/api/first-password': firstPasswordHandler, '/api/login': loginHandler,
+  '/api/patient-otp': patientAuth.otp, '/api/patient-register': patientAuth.register,
+  '/api/patient-login': patientAuth.login, '/api/patient-session': patientAuth.session,
+  '/api/patient-onboarding': patientAuth.onboarding, '/api/patient-profile': patientAuth.profile,
+  '/api/patient-reset-password': patientAuth.resetPassword, '/api/patient-logout': patientAuth.logout,
+  '/api/facilities-map': facilitiesMapHandler,
+  '/api/patient-appointments': patientAppointmentsHandler
+};
 
 function createServer() {
   return http.createServer(async (req, res) => {
     res.status = code => { res.statusCode = code; return res; };
     res.json = value => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
     const pathname = new URL(req.url, 'http://localhost').pathname;
-    const handler = pathname === '/api/providers'
-      ? providerHandler
-      : pathname === '/api/browse-services'
-        ? browseServicesHandler
-        : null;
+    const handler = routes[pathname];
     if (!handler) return res.status(404).json({ error: 'Not found.' });
     try {
       let body = '';
