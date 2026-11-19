@@ -176,7 +176,7 @@ export function SeekMedicalCare({
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Search Facilities</Text>
+          <Text style={[styles.sectionTitle, styles.facilitySearchTitle]}>Search Facilities</Text>
           <View style={styles.facilitySearchPanel}>
             <View style={styles.serviceSearchContainer}>
               <Search size={18} color="#6b7280" />
@@ -341,10 +341,13 @@ export function SeekMedicalCare({
 
         <View style={[styles.section, styles.lastSection]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>
+            <Text style={[styles.sectionTitle, styles.facilityResultsTitle]}>
               {selectedService ? `Facilities for ${selectedService}` : 'Facility Results'}
             </Text>
-            <TouchableOpacity onPress={() => setShowAllHospitals(!showAllHospitals)}>
+            <TouchableOpacity
+              style={styles.sectionHeaderAction}
+              onPress={() => setShowAllHospitals(!showAllHospitals)}
+            >
               <Text style={styles.seeAllButton}>{showAllHospitals ? 'Show Less' : 'See All'}</Text>
             </TouchableOpacity>
           </View>
@@ -558,11 +561,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1f2937',
   },
+  facilitySearchTitle: {
+    marginBottom: 12,
+  },
+  facilityResultsTitle: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 12,
+  },
+  sectionHeaderAction: {
+    flexShrink: 0,
+    paddingTop: 6,
   },
   seeAllButton: {
     color: '#0ea5e9',
