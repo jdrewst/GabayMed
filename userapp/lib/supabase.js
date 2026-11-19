@@ -17,3 +17,9 @@ export function setAccessTokenProvider(provider) {
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   accessToken: () => tokenProvider(),
 });
+
+export function createPatientAuthClient() {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}

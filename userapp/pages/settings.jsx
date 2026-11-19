@@ -1073,6 +1073,7 @@ export function ProfilePage({ onBack }) {
  * Legal (Terms & Conditions, Privacy Policy), History, Help & Support, and Sign Out.
  */
 export function SettingsPage({
+  onOpenMfaSettings,
   onOpenMessages,
   onOpenNotifications,
   onOpenProfile,
@@ -1775,6 +1776,7 @@ export function SettingsPage({
         </View>
 
         {/* 3. Onboarding Permissions & Privacy Toggles */}
+        <OutlineButton title="Password, app PIN and MFA" onPress={onOpenMfaSettings} style={{ marginBottom: 12 }} />
         <Text style={[styles.sectionHeader, { color: display.textSecondary, fontSize: fs(13) }]}>
           {t.permissionsHeader}
         </Text>

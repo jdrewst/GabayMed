@@ -93,8 +93,10 @@ const Session = {
   },
 
   /** Sign out on this device and revoke the session on the server. */
-  async signOut() {
+  async signOut({ requireLocalRemoval = false } = {}) {
+    if (requireLocalRemoval && refreshing) await refreshing.catch(() => {});
     const token = current?.accessToken;
+    if (requireLocalRemoval) await SecureStore.deleteItemAsync(REFRESH_KEY);
     await forget();
     if (token) { try { await AuthAPI.logout(token); } catch {} }
   },

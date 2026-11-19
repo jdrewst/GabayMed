@@ -4,6 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { HomePage } from './pages/home';
 import { SettingsPage, ProfilePage } from './pages/settings';
+import { MfaSettingsPage } from './pages/mfa-settings';
+import { UnlockPatientApp } from './components/patient-pin';
 import { MessagesPage } from './pages/message';
 import { SeekMedicalCare } from './pages/seekmedicalcare';
 import { MyFacilities } from './pages/facilities';
@@ -25,6 +27,7 @@ export default function App() {
   const [authScreen, setAuthScreen] = useState('login'); // 'login' | 'register'
   const [prefillEmail, setPrefillEmail] = useState('');
   const [activeTab, setActiveTab] = useState('home');
+  const [showMfaSettings, setShowMfaSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -48,6 +51,7 @@ export default function App() {
         ProfileAPI.getProfile().catch(() => {});
         ProfileAPI.getPermissions().catch(() => {});
       } else {
+        setShowMfaSettings(false);
         setShowProfile(false);
         setShowMessages(false);
         setShowNotifications(false);
@@ -112,9 +116,13 @@ export default function App() {
     );
   }
 
+  const lock = screen => (
+    <UnlockPatientApp key={session.profile.id} patientId={session.profile.id}>{screen}</UnlockPatientApp>
+  );
+
   // 2. First-time user: Onboarding walkthrough + care profile setup
   if (!session.profile?.onboardingCompleted) {
-    return (
+    return lock(
       <View style={styles.container}>
         <OnboardingPage
           onComplete={() => {
@@ -127,15 +135,16 @@ export default function App() {
   }
 
   // 3. Authenticated & onboarded: Main patient app
+  if (showMfaSettings) return lock(<MfaSettingsPage onBack={() => setShowMfaSettings(false)} />);
   if (showMessages) {
-    return <MessagesPage onBack={() => setShowMessages(false)} />;
+    return lock(<MessagesPage onBack={() => setShowMessages(false)} />);
   }
 
   if (showNotifications) {
-    return <NotificationsPage onBack={() => setShowNotifications(false)} />;
+    return lock(<NotificationsPage onBack={() => setShowNotifications(false)} />);
   }
 
-  return (
+  return lock(
     <View style={styles.container}>
       {showProfile ? (
         <ProfilePage onBack={() => setShowProfile(false)} />
@@ -179,6 +188,7 @@ export default function App() {
               onOpenMessages={() => setShowMessages(true)}
               onOpenNotifications={() => setShowNotifications(true)}
               onOpenProfile={handleOpenProfilePage}
+              onOpenMfaSettings={() => setShowMfaSettings(true)}
               onSignOut={() => setAuthScreen('login')}
             />
           </View>

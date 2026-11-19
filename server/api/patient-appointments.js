@@ -1,6 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const appointments = require('../lib/patient-appointments');
-const { RequestError } = require('../lib/provider-accounts');
+const { verifiedUser } = require('../lib/patient-auth');
 
 function client() {
   const url = process.env.SUPABASE_URL;
@@ -14,13 +14,6 @@ function client() {
 
 function bearer(req) {
   return /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
-}
-
-async function verifiedUser(admin, token) {
-  if (!token) throw new RequestError(401, 'Please log in again.');
-  const { data, error } = await admin.auth.getUser(token);
-  if (error || !data?.user) throw new RequestError(401, 'Your session expired. Please log in again.');
-  return data.user;
 }
 
 module.exports = async function handler(req, res) {

@@ -13,6 +13,7 @@ const routes = {
   '/api/patient-otp': patientAuth.otp, '/api/patient-register': patientAuth.register,
   '/api/patient-login': patientAuth.login, '/api/patient-session': patientAuth.session,
   '/api/patient-onboarding': patientAuth.onboarding, '/api/patient-profile': patientAuth.profile,
+  '/api/patient-security': require('./api/patient-security'),
   '/api/patient-reset-password': patientAuth.resetPassword, '/api/patient-logout': patientAuth.logout,
   '/api/browse-services': browseServicesHandler,
   '/api/facilities-map': facilitiesMapHandler,
