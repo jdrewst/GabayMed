@@ -1,174 +1,1311 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  Linking,
-  TextInput,
-  ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, Modal, Linking, TextInput, ScrollView, ActivityIndicator, Keyboard,
 } from 'react-native';
-import { MapPin, Navigation, Search, Building2, Phone } from 'lucide-react-native';
-import MapAPI from '../services/mapApi';
+import {
+  Search, Maximize2, X, Navigation, MapPin, Phone, Crosshair, Building2, Clock, ChevronDown, ChevronUp, CornerDownRight, Compass,
+} from 'lucide-react-native';
+import MapAPI, { getDistanceKm, formatDistance } from '../services/mapApi';
+import ProfileAPI from '../services/profileApi';
+import { Popup } from './auth/auth-ui';
 
-export function MapViewSection({ facilities: propFacilities, onSelectFacility }) {
-  const [locations, setLocations] = useState(Array.isArray(propFacilities) ? propFacilities : []);
-  const [loading, setLoading] = useState(!Array.isArray(propFacilities) || propFacilities.length === 0);
-  const [query, setQuery] = useState('');
+const DEFAULT_REGION = {
+  latitude: 14.5995,
+  longitude: 120.9842,
+  latitudeDelta: 0.12,
+  longitudeDelta: 0.12,
+};
+
+// Global shared map state store so maps across all tabs stay 100% synchronized
+const sharedMapStore = {
+  region: { ...DEFAULT_REGION },
+  selectedPin: null,
+  activeRoute: null,
+  searchQuery: '',
+  locations: [],
+  userCoords: null,
+  locationGranted: null,
+  initialized: false,
+  listeners: new Set(),
+
+  getState() {
+    return {
+      region: this.region,
+      selectedPin: this.selectedPin,
+      activeRoute: this.activeRoute,
+      searchQuery: this.searchQuery,
+      locations: this.locations,
+      userCoords: this.userCoords,
+      locationGranted: this.locationGranted,
+      initialized: this.initialized,
+    };
+  },
+
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  },
+
+  notify() {
+    const s = this.getState();
+    this.listeners.forEach(fn => {
+      try { fn(s); } catch {}
+    });
+  },
+
+  setRegion(r) {
+    if (!r || !Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) return;
+    this.region = {
+      latitude: r.latitude,
+      longitude: r.longitude,
+      latitudeDelta: Math.min(0.20, Math.max(0.01, r.latitudeDelta || 0.12)),
+      longitudeDelta: Math.min(0.20, Math.max(0.01, r.longitudeDelta || 0.12)),
+    };
+  },
+
+  update(patch) {
+    let changed = false;
+    for (const [key, val] of Object.entries(patch)) {
+      if (key === 'region') {
+        this.setRegion(val);
+        changed = true;
+      } else if (this[key] !== val) {
+        this[key] = val;
+        changed = true;
+      }
+    }
+    if (changed) this.notify();
+  },
+};
+
+function computeBoundingRegion(points) {
+  if (!points || !Array.isArray(points) || points.length === 0) return { ...DEFAULT_REGION };
+
+  const validPoints = points
+    .filter(p => {
+      if (!p) return false;
+      const lat = Number(p.latitude ?? p.lat);
+      const lng = Number(p.longitude ?? p.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 4.5 && lat <= 21.5 && lng >= 116.0 && lng <= 127.0;
+    })
+    .map(p => ({
+      latitude: Number(p.latitude ?? p.lat),
+      longitude: Number(p.longitude ?? p.lng),
+    }));
+
+  if (validPoints.length === 0) return { ...DEFAULT_REGION };
+  if (validPoints.length === 1) {
+    return {
+      latitude: validPoints[0].latitude,
+      longitude: validPoints[0].longitude,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    };
+  }
+
+  const ncrPoints = validPoints.filter(
+    p => p.latitude >= 14.3 && p.latitude <= 14.9 && p.longitude >= 120.8 && p.longitude <= 121.2
+  );
+  const targetPoints = ncrPoints.length >= 2 ? ncrPoints : validPoints;
+
+  let minLat = targetPoints[0].latitude;
+  let maxLat = targetPoints[0].latitude;
+  let minLng = targetPoints[0].longitude;
+  let maxLng = targetPoints[0].longitude;
+
+  targetPoints.forEach(p => {
+    if (p.latitude < minLat) minLat = p.latitude;
+    if (p.latitude > maxLat) maxLat = p.latitude;
+    if (p.longitude < minLng) minLng = p.longitude;
+    if (p.longitude > maxLng) maxLng = p.longitude;
+  });
+
+  const latDelta = Math.min(0.18, Math.max(0.04, (maxLat - minLat) * 1.4));
+  const lngDelta = Math.min(0.18, Math.max(0.04, (maxLng - minLng) * 1.4));
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: latDelta,
+    longitudeDelta: lngDelta,
+  };
+}
+
+function buildInteractiveMapHtml({ locations, selectedId, userCoords, locationGranted, activeRoute, region, focusUser }) {
+  const payload = JSON.stringify({
+    locations: (locations || [])
+      .filter(loc => loc && Number.isFinite(Number(loc.latitude)) && Number.isFinite(Number(loc.longitude)) && Math.abs(Number(loc.latitude)) > 1)
+      .map(loc => ({
+        id: String(loc.id),
+        name: loc.name || loc.title || 'Medical Facility',
+        address: loc.address || loc.location || '',
+        lat: Number(loc.latitude),
+        lng: Number(loc.longitude),
+      })),
+    selectedId: selectedId != null ? String(selectedId) : null,
+    userCoords: locationGranted && userCoords ? { lat: Number(userCoords.latitude), lng: Number(userCoords.longitude) } : null,
+    routeCoords: Array.isArray(activeRoute?.coordinates)
+      ? activeRoute.coordinates.map(c => [Number(c.latitude), Number(c.longitude)])
+      : null,
+    region: region || DEFAULT_REGION,
+    focusUser: !!focusUser,
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .leaflet-control-zoom { display: none !important; }
+  .pin-svg { filter: drop-shadow(0 3px 5px rgba(0,0,0,0.28)); transition: transform 0.18s ease; }
+  .pin-svg.selected { transform: scale(1.22); }
+  .leaflet-popup-content-wrapper {
+    border-radius: 14px !important;
+    border: 1px solid #bae6fd !important;
+    box-shadow: 0 3px 10px rgba(2,132,199,0.18) !important;
+    padding: 0 !important;
+  }
+  .leaflet-popup-content { margin: 10px 12px !important; width: 195px !important; }
+  .callout-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .callout-badge {
+    width: 22px; height: 22px; border-radius: 7px; background: #e0f2fe;
+    display: flex; align-items: center; justify-content: center; color: #0ea5e9; font-weight: 800; font-size: 12px; flex-shrink: 0;
+  }
+  .callout-title { font-size: 13px; font-weight: 700; color: #1e293b; line-height: 1.25; }
+  .callout-sub { font-size: 11.5px; color: #64748b; line-height: 1.35; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const data = ${payload};
+  const map = L.map('map', { zoomControl: false }).setView([data.region.latitude || 14.5995, data.region.longitude || 120.9842], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  function pinIcon(color, isSelected) {
+    const svg = '<svg class="pin-svg' + (isSelected ? ' selected' : '') + '" width="30" height="40" viewBox="0 0 24 34" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 22 12 22s12-13 12-22c0-6.63-5.37-12-12-12z" fill="' + color + '" stroke="#ffffff" stroke-width="1.8"/>' +
+      '<circle cx="12" cy="12" r="4.5" fill="#ffffff"/>' +
+      '</svg>';
+    return L.divIcon({ className: '', html: svg, iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -36] });
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  const bounds = [];
+
+  if (data.userCoords && Number.isFinite(data.userCoords.lat)) {
+    const uMarker = L.marker([data.userCoords.lat, data.userCoords.lng], { icon: pinIcon('#ef4444', false) }).addTo(map);
+    uMarker.bindPopup(
+      '<div class="callout-row"><div class="callout-badge" style="background:#bae6fd;color:#0284c7">●</div>' +
+      '<div class="callout-title">You are here</div></div><div class="callout-sub">Your current location</div>'
+    );
+    if (data.focusUser) setTimeout(() => uMarker.openPopup(), 200);
+    bounds.push([data.userCoords.lat, data.userCoords.lng]);
+  }
+
+  data.locations.forEach(loc => {
+    const isSel = data.selectedId && String(loc.id) === String(data.selectedId);
+    const marker = L.marker([loc.lat, loc.lng], { icon: pinIcon(isSel ? '#1d4ed8' : '#0ea5e9', isSel) }).addTo(map);
+    marker.bindPopup(
+      '<div class="callout-row"><div class="callout-badge">🏥</div>' +
+      '<div class="callout-title">' + escapeHtml(loc.name) + '</div></div>' +
+      '<div class="callout-sub">' + escapeHtml(loc.address) + '</div>'
+    );
+    marker.on('click', () => {
+      window.parent.postMessage({ type: 'GABAY_SELECT_PIN', id: loc.id }, '*');
+    });
+    if (isSel) {
+      setTimeout(() => marker.openPopup(), 180);
+    }
+    bounds.push([loc.lat, loc.lng]);
+  });
+
+  map.on('click', () => {
+    window.parent.postMessage({ type: 'GABAY_MAP_BG_CLICK' }, '*');
+  });
+
+  if (data.routeCoords && data.routeCoords.length > 1) {
+    const poly = L.polyline(data.routeCoords, { color: '#0284c7', weight: 4.5, opacity: 0.9 }).addTo(map);
+    map.fitBounds(poly.getBounds(), { padding: [45, 45] });
+  } else if (data.focusUser && data.userCoords) {
+    map.setView([data.userCoords.lat, data.userCoords.lng], 15);
+  } else if (data.selectedId) {
+    const sel = data.locations.find(l => String(l.id) === String(data.selectedId));
+    if (sel) map.setView([sel.lat, sel.lng], 15);
+  } else if (bounds.length > 1) {
+    map.fitBounds(bounds, { padding: [38, 38], maxZoom: 14 });
+  } else if (bounds.length === 1) {
+    map.setView(bounds[0], 14);
+  }
+</script>
+</body>
+</html>`;
+}
+
+export function MapViewSection({ facilities: propFacilities, onSelectFacility, isActive = true }) {
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [focusUser, setFocusUser] = useState(false);
+  const [locations, setLocations] = useState(() => {
+    if (Array.isArray(propFacilities) && propFacilities.length > 0) return propFacilities;
+    return sharedMapStore.locations;
+  });
+  const [userCoords, setUserCoords] = useState(() => sharedMapStore.userCoords);
+  const [locationGranted, setLocationGranted] = useState(() => sharedMapStore.locationGranted);
+  const [region, setRegion] = useState(() => sharedMapStore.region);
+
+  const activeLocations = (Array.isArray(propFacilities) && propFacilities.length > 0)
+    ? propFacilities
+    : (locations && locations.length > 0)
+      ? locations
+      : (sharedMapStore.locations && sharedMapStore.locations.length > 0)
+        ? sharedMapStore.locations
+        : [];
+
+  const [selectedPin, setSelectedPin] = useState(() => sharedMapStore.selectedPin);
+  const [activeRoute, setActiveRoute] = useState(() => sharedMapStore.activeRoute);
+  const [loadingRoute, setLoadingRoute] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(() => sharedMapStore.searchQuery);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [locationPromptAction, setLocationPromptAction] = useState(null);
+  const [locatingBusy, setLocatingBusy] = useState(false);
 
   useEffect(() => {
     if (Array.isArray(propFacilities) && propFacilities.length > 0) {
       setLocations(propFacilities);
-      setLoading(false);
-      return;
-    }
-    let mounted = true;
-    (async () => {
-      try {
-        const res = await MapAPI.getMapFacilities();
-        if (mounted && Array.isArray(res?.facilities)) {
-          setLocations(res.facilities);
-        }
-      } catch {
-      } finally {
-        if (mounted) setLoading(false);
+      if (sharedMapStore.locations.length === 0) {
+        sharedMapStore.update({ locations: propFacilities });
       }
-    })();
-    return () => { mounted = false; };
+    }
   }, [propFacilities]);
 
-  const filtered = locations.filter(item => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    const text = `${item.name || ''} ${item.address || ''} ${item.location || ''}`.toLowerCase();
-    return text.includes(q);
+  useEffect(() => {
+    const unsub = sharedMapStore.subscribe(state => {
+      setRegion(state.region);
+      setSelectedPin(state.selectedPin);
+      setActiveRoute(state.activeRoute);
+      setSearchQuery(state.searchQuery);
+      if (Array.isArray(state.locations) && state.locations.length > 0) {
+        setLocations(state.locations);
+      }
+      setUserCoords(state.userCoords);
+      setLocationGranted(state.locationGranted);
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (isActive) {
+      const targetLocations = (Array.isArray(propFacilities) && propFacilities.length > 0)
+        ? propFacilities
+        : sharedMapStore.locations;
+
+      if (targetLocations && targetLocations.length > 0) {
+        setLocations(targetLocations);
+      } else {
+        initializeMap();
+      }
+      setRegion(sharedMapStore.region);
+      setSelectedPin(sharedMapStore.selectedPin);
+      setActiveRoute(sharedMapStore.activeRoute);
+      setSearchQuery(sharedMapStore.searchQuery);
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!sharedMapStore.initialized || sharedMapStore.locations.length === 0) {
+      initializeMap();
+    }
+    const unsub = ProfileAPI.subscribePermissions(perms => {
+      if (!perms.locationAllowed) {
+        setLocationGranted(false);
+        setUserCoords(null);
+        setActiveRoute(null);
+        setShowSteps(false);
+        sharedMapStore.update({
+          locationGranted: false,
+          userCoords: null,
+          activeRoute: null,
+        });
+      } else {
+        initializeMap();
+      }
+    });
+    return unsub;
+  }, []);
+
+  const initializeMap = async () => {
+    const locResult = await MapAPI.requestUserLocation();
+    const currentCoords = locResult.granted ? locResult.coords : null;
+    const facilities = await MapAPI.getFacilitiesLocations(currentCoords);
+
+    const isPhUser =
+      currentCoords &&
+      currentCoords.latitude >= 4.5 &&
+      currentCoords.latitude <= 21.5 &&
+      currentCoords.longitude >= 116.0 &&
+      currentCoords.longitude <= 127.0;
+
+    const points = isPhUser ? [currentCoords, ...facilities] : facilities;
+    const initialRegion = computeBoundingRegion(points);
+
+    sharedMapStore.update({
+      locationGranted: locResult.granted,
+      userCoords: currentCoords,
+      locations: facilities,
+      region: initialRegion,
+      initialized: true,
+    });
+    setRegion(initialRegion);
+    setLocations(facilities);
+    setUserCoords(currentCoords);
+    setLocationGranted(locResult.granted);
+  };
+
+  const activateAndFetchUserLocation = async () => {
+    const locResult = await MapAPI.requestUserLocation({ forceEnable: true });
+    if (!locResult.granted) {
+      Linking.openSettings?.();
+      return null;
+    }
+    setLocationGranted(true);
+    setUserCoords(locResult.coords);
+    if (locResult.coords) {
+      setLocations(prev =>
+        prev
+          .map(loc => {
+            const km = getDistanceKm(
+              locResult.coords.latitude,
+              locResult.coords.longitude,
+              loc.latitude,
+              loc.longitude
+            );
+            return { ...loc, distanceKm: km, distanceLabel: formatDistance(km) };
+          })
+          .sort((a, b) => (a.distanceKm ?? 99999) - (b.distanceKm ?? 99999))
+      );
+    }
+    return locResult.coords;
+  };
+
+  const panToUserCoords = coords => {
+    if (!coords) return;
+    const targetRegion = {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      latitudeDelta: 0.03,
+      longitudeDelta: 0.03,
+    };
+    setFocusUser(true);
+    setRegion(targetRegion);
+    sharedMapStore.update({ region: targetRegion });
+  };
+
+  const computeAndFrameRoute = async (origin, dest) => {
+    if (!origin || !dest) return;
+    setFocusUser(false);
+    setSelectedPin(dest);
+    setLoadingRoute(true);
+    try {
+      const routeData = await MapAPI.getInAppRoute(origin, dest);
+      setActiveRoute(routeData);
+      const framed = computeBoundingRegion([
+        origin,
+        { latitude: dest.latitude, longitude: dest.longitude },
+      ]);
+      setRegion(framed);
+      sharedMapStore.update({
+        selectedPin: dest,
+        activeRoute: routeData,
+        region: framed,
+      });
+    } finally {
+      setLoadingRoute(false);
+    }
+  };
+
+  const handleConfirmLocationPopup = async () => {
+    const pending = locationPromptAction;
+    setLocatingBusy(true);
+    try {
+      const coords = await activateAndFetchUserLocation();
+      setLocationPromptAction(null);
+      if (!coords) return;
+      if (pending?.type === 'directions' && pending.dest) {
+        await computeAndFrameRoute(coords, pending.dest);
+      } else {
+        panToUserCoords(coords);
+      }
+    } finally {
+      setLocatingBusy(false);
+    }
+  };
+
+  const selectFacilityPin = loc => {
+    Keyboard.dismiss?.();
+    setFocusUser(false);
+    setSelectedPin(loc);
+    setActiveRoute(null);
+    setShowSteps(false);
+    setShowSuggestions(false);
+    const targetRegion = {
+      latitude: Number(loc.latitude),
+      longitude: Number(loc.longitude),
+      latitudeDelta: 0.015,
+      longitudeDelta: 0.015,
+    };
+    setRegion(targetRegion);
+    sharedMapStore.update({
+      selectedPin: loc,
+      activeRoute: null,
+      region: targetRegion,
+    });
+    if (onSelectFacility) onSelectFacility(loc);
+  };
+
+  const clearSelection = () => {
+    setFocusUser(false);
+    setSelectedPin(null);
+    setActiveRoute(null);
+    setShowSteps(false);
+    sharedMapStore.update({
+      selectedPin: null,
+      activeRoute: null,
+    });
+  };
+
+  // Listen for pin clicks from the embedded Leaflet canvas
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onMessage = event => {
+      if (event?.data?.type === 'GABAY_SELECT_PIN') {
+        const found = activeLocations.find(loc => String(loc.id) === String(event.data.id));
+        if (found) selectFacilityPin(found);
+      } else if (event?.data?.type === 'GABAY_MAP_BG_CLICK') {
+        setShowSuggestions(false);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [activeLocations]);
+
+  const startInAppDirections = async targetFacility => {
+    const dest = targetFacility || selectedPin;
+    if (!dest) return;
+    const perms = await ProfileAPI.getPermissions();
+    if (!locationGranted || !perms.locationAllowed || !userCoords) {
+      setLocationPromptAction({ type: 'directions', dest });
+      return;
+    }
+    await computeAndFrameRoute(userCoords, dest);
+  };
+
+  const recenterOnUser = async () => {
+    const perms = await ProfileAPI.getPermissions();
+    if (!locationGranted || !perms.locationAllowed || !userCoords) {
+      setLocationPromptAction({ type: 'recenter' });
+      return;
+    }
+    panToUserCoords(userCoords);
+  };
+
+  const resetNorthOrientation = () => {
+    setFocusUser(false);
+    const initial = computeBoundingRegion(activeLocations);
+    setRegion(initial);
+  };
+
+  const suggestions = searchQuery.trim()
+    ? activeLocations.filter(loc => {
+        const q = searchQuery.trim().toLowerCase();
+        return (
+          (loc.name || loc.title || '').toLowerCase().includes(q) ||
+          (loc.address || loc.location || '').toLowerCase().includes(q) ||
+          (loc.services || []).some(s => (s || '').toLowerCase().includes(q))
+        );
+      })
+    : activeLocations.slice(0, 8);
+
+  const mapHtml = buildInteractiveMapHtml({
+    locations: activeLocations,
+    selectedId: selectedPin?.id,
+    userCoords,
+    locationGranted,
+    activeRoute,
+    region,
+    focusUser,
   });
 
-  const openDirections = item => {
-    const lat = item.latitude ?? item.lat;
-    const lng = item.longitude ?? item.long ?? item.lng;
-    const url = lat != null && lng != null
-      ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.name || item.address || 'Clinic')}`;
-    Linking.openURL(url).catch(() => {});
+  const renderSuggestionsDropdown = () => {
+    if (!showSuggestions) return null;
+    return (
+      <View style={styles.suggestionsDropdown}>
+        {suggestions.length === 0 ? (
+          <View style={styles.emptySuggestion}>
+            <Text style={styles.emptySuggestionText}>No matching hospitals or branches found.</Text>
+          </View>
+        ) : (
+          <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+            {suggestions.map(item => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.suggestionRow}
+                onPress={() => {
+                  setSearchQuery(item.name);
+                  selectFacilityPin(item);
+                }}
+              >
+                <View style={styles.suggestionIcon}>
+                  <MapPin size={15} color="#0ea5e9" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.suggestionTitle} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    {item.type === 'branch' && (
+                      <View style={styles.branchTag}>
+                        <Text style={styles.branchTagText}>Branch</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.suggestionSub} numberOfLines={1}>
+                    {item.distanceLabel ? `${item.distanceLabel} • ${item.address}` : item.address}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    );
+  };
+
+  const renderPopupCard = (isCompact = false) => {
+    if (!selectedPin) return null;
+    return (
+      <View style={[styles.selectedCard, isCompact && styles.selectedCardCompact]}>
+        <View style={styles.selectedHeader}>
+          <View style={styles.selectedIconWrap}>
+            <Building2 size={20} color="#0ea5e9" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.selectedTitle} numberOfLines={1}>
+              {selectedPin.name}
+            </Text>
+            <Text style={styles.selectedAddress} numberOfLines={isCompact ? 1 : 2}>
+              {selectedPin.address}
+            </Text>
+            <View style={styles.metaRow}>
+              {activeRoute ? (
+                <>
+                  <View style={styles.routeBadge}>
+                    <Clock size={12} color="#0284c7" />
+                    <Text style={styles.routeBadgeText}>{activeRoute.durationLabel}</Text>
+                  </View>
+                  <View style={styles.routeBadge}>
+                    <Navigation size={12} color="#0284c7" />
+                    <Text style={styles.routeBadgeText}>{activeRoute.distanceLabel}</Text>
+                  </View>
+                </>
+              ) : selectedPin.distanceLabel ? (
+                <View style={styles.distancePill}>
+                  <MapPin size={12} color="#0284c7" />
+                  <Text style={styles.distancePillText}>{selectedPin.distanceLabel}</Text>
+                </View>
+              ) : null}
+
+              {!isCompact && !!selectedPin.phone && (
+                <View style={styles.phoneRow}>
+                  <Phone size={11} color="#64748b" />
+                  <Text style={styles.phoneText}>{selectedPin.phone}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+          <TouchableOpacity onPress={clearSelection} hitSlop={8} style={styles.dismissCardBtn}>
+            <X size={16} color="#64748b" />
+          </TouchableOpacity>
+        </View>
+
+        {activeRoute && showSteps && !isCompact && (
+          <ScrollView style={styles.stepsList} nestedScrollEnabled>
+            {activeRoute.steps.map(step => (
+              <View key={step.id} style={styles.stepRow}>
+                <CornerDownRight size={14} color="#0ea5e9" />
+                <Text style={styles.stepInstruction}>{step.instruction}</Text>
+                <Text style={styles.stepDistance}>{step.distanceLabel}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        <View style={styles.cardActions}>
+          {!activeRoute ? (
+            <TouchableOpacity
+              style={styles.directionsBtn}
+              onPress={() => startInAppDirections(selectedPin)}
+              disabled={loadingRoute}
+              activeOpacity={0.85}
+            >
+              {loadingRoute ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Navigation size={15} color="#fff" />
+              )}
+              <Text style={styles.directionsBtnText}>
+                {loadingRoute ? 'Finding Route...' : 'Directions from My Location'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.activeRouteRow}>
+              {!isCompact ? (
+                <TouchableOpacity style={styles.stepsToggleBtn} onPress={() => setShowSteps(!showSteps)}>
+                  {showSteps ? <ChevronDown size={16} color="#0284c7" /> : <ChevronUp size={16} color="#0284c7" />}
+                  <Text style={styles.stepsToggleText}>
+                    {showSteps ? 'Hide Steps' : `View Steps (${activeRoute.steps.length})`}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.stepsToggleBtn}
+                  onPress={() => {
+                    setMapExpanded(true);
+                    setShowSteps(true);
+                  }}
+                >
+                  <ChevronUp size={16} color="#0284c7" />
+                  <Text style={styles.stepsToggleText}>View Full Route & Steps</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.clearRouteBtn}
+                onPress={() => {
+                  setActiveRoute(null);
+                  setShowSteps(false);
+                }}
+              >
+                <Text style={styles.clearRouteText}>End Route</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </View>
+    );
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <MapPin size={18} color="#0ea5e9" />
-          <Text style={styles.headerTitle}>Nearby Healthcare Facilities</Text>
-        </View>
-        <Text style={styles.countText}>{filtered.length} found</Text>
-      </View>
+    <>
+      <View style={styles.mapContainer}>
+        {!isActive ? (
+          <View style={[styles.map, styles.mapLoadingFallback]}>
+            <ActivityIndicator size="small" color="#0ea5e9" />
+          </View>
+        ) : (
+          React.createElement('iframe', {
+            title: 'GabayMed Clinic Map',
+            srcDoc: mapHtml,
+            style: { width: '100%', height: '100%', border: 'none' },
+          })
+        )}
 
-      <View style={styles.searchBar}>
-        <Search size={16} color="#94a3b8" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search clinic or address..."
-          placeholderTextColor="#94a3b8"
-          value={query}
-          onChangeText={setQuery}
-        />
-      </View>
-
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="small" color="#0ea5e9" />
-          <Text style={styles.muted}>Loading facilities...</Text>
-        </View>
-      ) : filtered.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.muted}>No facilities match your search.</Text>
-        </View>
-      ) : (
-        <ScrollView style={styles.list} nestedScrollEnabled>
-          {filtered.slice(0, 8).map((item, idx) => (
-            <TouchableOpacity
-              key={`${item.id || item.facilityId || idx}`}
-              style={styles.card}
-              activeOpacity={0.8}
-              onPress={() => onSelectFacility && onSelectFacility(item)}
-            >
-              <View style={{ flex: 1 }}>
-                <View style={styles.row}>
-                  <Building2 size={14} color="#0284c7" />
-                  <Text style={styles.name} numberOfLines={1}>{item.name || 'Healthcare Facility'}</Text>
-                </View>
-                {!!(item.address || item.location) && (
-                  <Text style={styles.address} numberOfLines={2}>{item.address || item.location}</Text>
-                )}
-                {!!item.phone && (
-                  <View style={styles.row}>
-                    <Phone size={12} color="#64748b" />
-                    <Text style={styles.phone}>{item.phone}</Text>
-                  </View>
-                )}
-              </View>
-              <TouchableOpacity style={styles.dirBtn} onPress={() => openDirections(item)}>
-                <Navigation size={14} color="#fff" />
-                <Text style={styles.dirText}>Map</Text>
+        {/* Top search bar with live suggestions + expand button */}
+        <View style={styles.inlineTopBar}>
+          <View style={styles.searchInputWrap}>
+            <Search size={16} color="#0ea5e9" />
+            <TextInput
+              value={searchQuery}
+              onChangeText={text => {
+                setSearchQuery(text);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onSubmitEditing={() => {
+                if (suggestions.length > 0) {
+                  setSearchQuery(suggestions[0].name);
+                  selectFacilityPin(suggestions[0]);
+                }
+              }}
+              returnKeyType="search"
+              placeholder="Search hospitals, clinics, or branches..."
+              placeholderTextColor="#94a3b8"
+              style={styles.searchInput}
+            />
+            {!!searchQuery && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery('');
+                  setShowSuggestions(false);
+                }}
+                hitSlop={8}
+              >
+                <X size={15} color="#94a3b8" />
               </TouchableOpacity>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={styles.expandButton}
+            onPress={() => {
+              setShowSuggestions(false);
+              setMapExpanded(true);
+            }}
+            accessibilityLabel="Expand map"
+          >
+            <Maximize2 size={18} color="#0ea5e9" />
+          </TouchableOpacity>
+        </View>
+
+        {renderSuggestionsDropdown()}
+
+        {locationGranted === false && !showSuggestions && (
+          <TouchableOpacity style={styles.enableLocationChip} onPress={recenterOnUser} activeOpacity={0.85}>
+            <Crosshair size={13} color="#0284c7" />
+            <Text style={styles.enableLocationText}>Enable my location</Text>
+          </TouchableOpacity>
+        )}
+
+        {!showSuggestions && (
+          <View style={styles.mapOverlay}>
+            <View style={styles.fabAboveCardRow}>
+              <TouchableOpacity
+                style={styles.locateButtonSmall}
+                onPress={resetNorthOrientation}
+                accessibilityLabel="Reset map compass to north"
+              >
+                <Compass size={17} color="#0ea5e9" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.locateButtonSmall}
+                onPress={recenterOnUser}
+                accessibilityLabel="My location"
+              >
+                <Crosshair size={17} color="#0ea5e9" />
+              </TouchableOpacity>
+            </View>
+            {selectedPin && renderPopupCard(true)}
+          </View>
+        )}
+      </View>
+
+      {/* Fullscreen Interactive Map Modal */}
+      <Modal visible={mapExpanded} animationType="slide" onRequestClose={() => setMapExpanded(false)}>
+        <View style={styles.fullscreenMapContainer}>
+          {React.createElement('iframe', {
+            title: 'GabayMed Fullscreen Clinic Map',
+            srcDoc: mapHtml,
+            style: { width: '100%', height: '100%', border: 'none', flex: 1 },
+          })}
+
+          <View style={styles.fullscreenTopBar}>
+            <View style={styles.fullscreenSearchBox}>
+              <Search size={18} color="#0ea5e9" />
+              <TextInput
+                value={searchQuery}
+                onChangeText={text => {
+                  setSearchQuery(text);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onSubmitEditing={() => {
+                  if (suggestions.length > 0) {
+                    setSearchQuery(suggestions[0].name);
+                    selectFacilityPin(suggestions[0]);
+                  }
+                }}
+                returnKeyType="search"
+                placeholder="Search hospital, clinic, branch, or service..."
+                placeholderTextColor="#94a3b8"
+                style={styles.fullscreenSearchInput}
+              />
+              {!!searchQuery && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchQuery('');
+                    setShowSuggestions(false);
+                  }}
+                >
+                  <X size={16} color="#94a3b8" />
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => {
+                setShowSuggestions(false);
+                setMapExpanded(false);
+              }}
+              accessibilityLabel="Close fullscreen map"
+            >
+              <X size={22} color="#fff" />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
-    </View>
+          </View>
+
+          {showSuggestions && (
+            <View style={styles.fullscreenSuggestionsWrap}>
+              {renderSuggestionsDropdown()}
+            </View>
+          )}
+
+          {!showSuggestions && (
+            <View style={styles.fullscreenMapOverlay}>
+              <View style={styles.fabAboveCardRow}>
+                <TouchableOpacity
+                  style={styles.myLocationFab}
+                  onPress={resetNorthOrientation}
+                  accessibilityLabel="Reset map compass to north"
+                >
+                  <Compass size={20} color="#0ea5e9" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.myLocationFab}
+                  onPress={recenterOnUser}
+                  accessibilityLabel="My location"
+                >
+                  <Crosshair size={20} color="#0ea5e9" />
+                </TouchableOpacity>
+              </View>
+              {selectedPin && renderPopupCard(false)}
+            </View>
+          )}
+        </View>
+      </Modal>
+
+      <Popup
+        visible={!!locationPromptAction}
+        icon={MapPin}
+        title="Allow Location Access?"
+        message="Location access is currently turned off. Would you like to enable location access so GabayMed can find your current location?"
+        actionLabel={locatingBusy ? 'Locating...' : 'Allow'}
+        actionLoading={locatingBusy}
+        onAction={handleConfirmLocationPopup}
+        secondaryLabel="Deny"
+        onSecondary={() => setLocationPromptAction(null)}
+        onRequestClose={() => setLocationPromptAction(null)}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: '#fff',
+  mapContainer: {
+    marginTop: 12,
     borderRadius: 16,
+    overflow: 'hidden',
+    height: 330,
+    position: 'relative',
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    padding: 14,
-    gap: 10,
   },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
-  countText: { fontSize: 12, color: '#64748b', fontWeight: '600' },
-  searchBar: {
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  mapLoadingFallback: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineTopBar: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#f8fafc',
-    borderRadius: 10,
+    zIndex: 10,
+  },
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    height: 38,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1e293b',
+    paddingVertical: 0,
+    outlineStyle: 'none',
+  },
+  expandButton: {
+    backgroundColor: '#fff',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  suggestionsDropdown: {
+    position: 'absolute',
+    top: 54,
+    left: 10,
+    right: 10,
+    backgroundColor: '#fff',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    zIndex: 20,
+    overflow: 'hidden',
   },
-  searchInput: { flex: 1, fontSize: 13, color: '#0f172a', outlineStyle: 'none' },
-  list: { maxHeight: 260 },
-  card: {
+  fullscreenSuggestionsWrap: {
+    position: 'absolute',
+    top: 48,
+    left: 6,
+    right: 6,
+    zIndex: 20,
+  },
+  suggestionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  name: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
-  address: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  phone: { fontSize: 11, color: '#64748b', marginTop: 2 },
-  dirBtn: {
+  suggestionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#f0f9ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionTitle: {
+    flexShrink: 1,
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#1e293b',
+  },
+  branchTag: {
+    backgroundColor: '#e0f2fe',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  branchTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#0284c7',
+  },
+  suggestionSub: {
+    fontSize: 11.5,
+    color: '#64748b',
+    marginTop: 1,
+  },
+  emptySuggestion: {
+    padding: 14,
+    alignItems: 'center',
+  },
+  emptySuggestionText: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  enableLocationChip: {
+    position: 'absolute',
+    top: 56,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    elevation: 2,
+  },
+  enableLocationText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#0284c7',
+  },
+  mapOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    right: 10,
+  },
+  fabAboveCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  locateButtonSmall: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  fullscreenMapContainer: {
+    flex: 1,
+  },
+  fullscreenTopBar: {
+    position: 'absolute',
+    top: 48,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    zIndex: 10,
+  },
+  fullscreenSearchBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    paddingHorizontal: 14,
+    height: 44,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  fullscreenSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1e293b',
+    paddingVertical: 0,
+    outlineStyle: 'none',
+  },
+  closeButton: {
+    backgroundColor: '#0ea5e9',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  myLocationFab: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  fullscreenMapOverlay: {
+    position: 'absolute',
+    bottom: 24,
+    left: 16,
+    right: 16,
+  },
+  selectedCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  selectedCardCompact: {
+    padding: 12,
+  },
+  selectedHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  selectedIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#f0f9ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectedTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  selectedAddress: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  distancePill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#0ea5e9',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
+    backgroundColor: '#e0f2fe',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
-  dirText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  centered: { alignItems: 'center', justifyContent: 'center', paddingVertical: 20, gap: 6 },
-  muted: { fontSize: 13, color: '#64748b' },
+  distancePillText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#0284c7',
+  },
+  routeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#e0f2fe',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  routeBadgeText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#0284c7',
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  phoneText: {
+    fontSize: 11.5,
+    color: '#64748b',
+  },
+  dismissCardBtn: {
+    padding: 4,
+  },
+  stepsList: {
+    maxHeight: 130,
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    paddingTop: 8,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 5,
+  },
+  stepInstruction: {
+    flex: 1,
+    fontSize: 12.5,
+    color: '#334155',
+  },
+  stepDistance: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  cardActions: {
+    marginTop: 10,
+  },
+  directionsBtn: {
+    backgroundColor: '#0ea5e9',
+    paddingVertical: 10,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  directionsBtnText: {
+    color: '#fff',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  activeRouteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stepsToggleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  stepsToggleText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#0284c7',
+  },
+  clearRouteBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  clearRouteText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#dc2626',
+  },
 });
-
