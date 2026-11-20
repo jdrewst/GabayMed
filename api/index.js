@@ -37,6 +37,30 @@ module.exports = async function handler(req, res) {
     return res.status(404).json({ error: 'Not found.' });
   }
 
+  // Allow requests from the mobile web deployment (Vercel or local Expo Web on 8081/19006)
+  const origin = req.headers?.origin;
+  if (origin) {
+    const mobileOrigins = [
+      process.env.MOBILE_WEB_ORIGIN,
+      'http://localhost:8081',
+      'http://localhost:19006',
+    ].filter(Boolean);
+    const isMobileWeb =
+      mobileOrigins.includes(origin) ||
+      /^https:\/\/[a-z0-9-]*gabay[a-z0-9-]*\.vercel\.app$/i.test(origin) ||
+      /^https:\/\/[^/]+\.expo\.app$/i.test(origin) ||
+      /^http:\/\/(localhost|127\.0\.0\.1):(8081|19006)$/i.test(origin);
+
+    if (isMobileWeb) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+      if (req.method === 'OPTIONS') return res.status(204).end();
+      delete req.headers.origin;
+    }
+  }
+
   // Vercel automatically parses req.body for JSON requests; fallback if unparsed
   if (req.body === undefined && req.method && !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase())) {
     try {

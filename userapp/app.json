@@ -30,7 +30,9 @@
       ]
     },
     "web": {
-      "favicon": "./assets/Logo.png"
+      "favicon": "./assets/Logo.png",
+      "bundler": "metro",
+      "output": "single"
     },
     "plugins": [
       "expo-status-bar",
@@ -56,7 +58,7 @@
     },
     "owner": "jdrews",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "sdkVersion"
     },
     "updates": {
       "url": "https://u.expo.dev/5604c40f-7a99-4eb8-987b-cedd27951253"

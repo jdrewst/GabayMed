@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../lib/secureStorage';
 import { supabase, setAccessTokenProvider } from '../lib/supabase';
 import AuthAPI from './authApi';
 

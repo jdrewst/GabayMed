@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../lib/secureStorage';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import Session from './session';

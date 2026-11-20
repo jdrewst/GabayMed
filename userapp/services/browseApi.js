@@ -29,6 +29,9 @@ function resolveApiBaseUrl() {
     const trimmedUrl = configuredUrl.replace(/\/+$/, '');
     return trimmedUrl.endsWith('/api') ? trimmedUrl : `${trimmedUrl}/api`;
   }
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(window.location.origin)) {
+    return `${window.location.origin}/api`;
+  }
 
   const hostUri =
     Constants.expoConfig?.hostUri ||

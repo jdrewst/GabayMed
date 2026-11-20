@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../lib/secureStorage';
 import { AuthScreen, ErrorBanner, OutlineButton, PrimaryButton, TextField, authText } from './auth/auth-ui';
 import Session from '../services/session';
 import AuthAPI from '../services/authApi';
