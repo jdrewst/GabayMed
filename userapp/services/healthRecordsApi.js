@@ -112,7 +112,8 @@ async function sendToStorage(uploadUrl, file, mimeType) {
   form.append('cacheControl', '3600');
   if (Platform.OS === 'web') {
     const blob = await (await fetch(file.uri)).blob();
-    form.append('file', blob, file.name);
+    const typed = blob.type && blob.type !== 'application/octet-stream' ? blob : new Blob([blob], { type: mimeType });
+    form.append('file', typed, file.name);
   } else {
     // React Native streams the file from its local URI.
     form.append('file', { uri: file.uri, name: file.name, type: mimeType });

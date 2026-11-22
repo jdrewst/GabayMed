@@ -235,7 +235,8 @@ async function confirmUpload(admin, userId, body = {}, { now = new Date() } = {}
   const extType = EXTENSION_TYPES[extensionOf(path)];
   const mimeType = resolveMimeType(info.contentType, '') || extType;
   const discard = async () => { try { await admin.storage.from(BUCKET).remove([path]); } catch {} };
-  if (!mimeType || mimeType !== extType && !(extType === 'image/heic' && mimeType === 'image/heif')) {
+  const heicMatch = (extType === 'image/heic' && mimeType === 'image/heif') || (extType === 'image/heif' && mimeType === 'image/heic');
+  if (!mimeType || (mimeType !== extType && !heicMatch)) {
     await discard();
     throw new RequestError(415, 'Only PDF, JPG, PNG, HEIC or WEBP files can be uploaded.');
   }

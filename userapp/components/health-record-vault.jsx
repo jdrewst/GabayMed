@@ -63,6 +63,16 @@ function sortKey(record) {
   return record.recordDate || record.createdAt || '';
 }
 
+function showNotice(title, message) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert(message ? `${title}\n\n${message}` : title);
+    }
+    return;
+  }
+  Alert.alert(title, message);
+}
+
 /**
  * Health Record Vault (US-3.7): upload, view/download, categorize, organize and delete
  * the patient's own health files in one place.
@@ -76,13 +86,14 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
 
-  // Sheets: 'source' (choose where the file comes from), 'form' (upload/edit details), 'detail'
+  // Sheets: 'source' (choose where the file comes from), 'form' (upload/edit details), 'detail', 'confirm-delete'
   const [sheet, setSheet] = useState(null);
   const [pickedFile, setPickedFile] = useState(null);
   const [editing, setEditing] = useState(null); // record being edited, or null for a new upload
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState({ title: '', category: '', recordDate: '', notes: '', shareWithProviders: false });
   const [formError, setFormError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState(''); // 'view' | 'download' | 'delete'
   const [previewUrl, setPreviewUrl] = useState('');
@@ -132,6 +143,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
     setEditing(null);
     setSelected(null);
     setFormError('');
+    setDeleteError('');
     setPreviewUrl('');
     setBusyAction('');
   }
@@ -141,7 +153,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   const startForm = file => {
     const problem = validateFile(file);
     if (problem) {
-      Alert.alert('File not supported', problem);
+      showNotice('File not supported', problem);
       return;
     }
     setPickedFile(file);
@@ -168,7 +180,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       const asset = result.assets[0];
       startForm({ uri: asset.uri, name: asset.name || 'health-record', mimeType: asset.mimeType, size: asset.size });
     } catch {
-      Alert.alert('Could not open files', 'Please try again.');
+      showNotice('Could not open files', 'Please try again.');
     }
   };
 
@@ -186,14 +198,14 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Permission needed', 'Allow photo access to upload images of your records.');
+        showNotice('Permission needed', 'Allow photo access to upload images of your records.');
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
       if (result.canceled || !result.assets?.length) return;
       startForm(fromImageAsset(result.assets[0], `record-${Date.now()}`));
     } catch {
-      Alert.alert('Could not open photos', 'Please try again.');
+      showNotice('Could not open photos', 'Please try again.');
     }
   };
 
@@ -201,14 +213,14 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Permission needed', 'Allow camera access to photograph a paper record.');
+        showNotice('Permission needed', 'Allow camera access to photograph a paper record.');
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 });
       if (result.canceled || !result.assets?.length) return;
       startForm(fromImageAsset(result.assets[0], `scan-${Date.now()}`));
     } catch {
-      Alert.alert('Could not open the camera', 'Please try again.');
+      showNotice('Could not open the camera', 'Please try again.');
     }
   };
 
@@ -257,7 +269,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
         const created = await HealthRecordsAPI.upload(pickedFile, details);
         setRecords(list => [created, ...list]);
         closeSheet();
-        Alert.alert('Uploaded', `"${created.title}" was saved to your vault.`);
+        showNotice('Uploaded', `"${created.title}" was saved to your vault.`);
       }
       onChanged?.();
     } catch (error) {
@@ -271,6 +283,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
 
   const openDetail = async record => {
     setSelected(record);
+    setDeleteError('');
     setPreviewUrl('');
     setSheet('detail');
     if (record.kind === 'image') {
@@ -287,7 +300,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       const url = await HealthRecordsAPI.getFileUrl(selected.id, mode);
       await Linking.openURL(url);
     } catch (error) {
-      Alert.alert('Could not open file', error.message || 'Please try again.');
+      showNotice('Could not open file', error.message || 'Please try again.');
     } finally {
       setBusyAction('');
     }
@@ -296,21 +309,17 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   const confirmDelete = () => {
     if (!selected) return;
     if (!selected.canDelete) {
-      Alert.alert('Protected record', 'This record was issued by your clinic and cannot be deleted from the app.');
+      showNotice('Protected record', 'This record was issued by your clinic and cannot be deleted from the app.');
       return;
     }
-    Alert.alert(
-      'Delete this record?',
-      `"${selected.title}" will be permanently removed from your vault. This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: doDelete },
-      ]
-    );
+    setDeleteError('');
+    setSheet('confirm-delete');
   };
 
   const doDelete = async () => {
     const target = selected;
+    if (!target) return;
+    setDeleteError('');
     setBusyAction('delete');
     try {
       await HealthRecordsAPI.remove(target.id);
@@ -319,7 +328,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       onChanged?.();
     } catch (error) {
       setBusyAction('');
-      Alert.alert('Could not delete', error.message || 'Please try again.');
+      setDeleteError(error.message || 'Could not delete this record. Please try again.');
     }
   };
 
@@ -477,6 +486,8 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
 
         <DatePickerField
           label="Date on the record (optional)"
+          placeholder="Select record date"
+          defaultToToday
           value={form.recordDate}
           onChange={recordDate => setForm(f => ({ ...f, recordDate }))}
           style={{ marginTop: 14 }}
@@ -599,6 +610,47 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
     );
   };
 
+  const renderConfirmDeleteSheet = () => {
+    if (!selected) return null;
+    const deleting = busyAction === 'delete';
+    return (
+      <View style={styles.sheet}>
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>Delete this record?</Text>
+          <TouchableOpacity onPress={() => { setDeleteError(''); setSheet('detail'); }} style={styles.closeBtn} disabled={deleting}>
+            <X size={18} color="#4b5563" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.confirmBody}>
+          "{selected.title}" will be permanently removed from your vault. This cannot be undone.
+        </Text>
+        {!!deleteError && (
+          <View style={styles.errorBox}>
+            <AlertCircle size={16} color="#dc2626" />
+            <Text style={styles.errorText}>{deleteError}</Text>
+          </View>
+        )}
+        <View style={styles.confirmActions}>
+          <TouchableOpacity
+            style={[styles.confirmBtn, styles.confirmCancelBtn]}
+            onPress={() => { setDeleteError(''); setSheet('detail'); }}
+            disabled={deleting}
+          >
+            <Text style={styles.confirmCancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.confirmBtn, styles.confirmDeleteBtn, deleting && { opacity: 0.7 }]}
+            onPress={doDelete}
+            disabled={deleting}
+          >
+            {deleting ? <ActivityIndicator size="small" color="#fff" /> : <Trash2 size={16} color="#fff" />}
+            <Text style={styles.confirmDeleteText}>{deleting ? 'Deleting...' : 'Delete'}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={sheet ? closeSheet : onClose}>
       <View style={styles.overlay}>
@@ -665,10 +717,11 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
             style={styles.sheetOverlay}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           >
-            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={saving ? undefined : closeSheet} />
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={saving || busyAction === 'delete' ? undefined : closeSheet} />
             {sheet === 'source' && renderSourceSheet()}
             {sheet === 'form' && renderFormSheet()}
             {sheet === 'detail' && renderDetailSheet()}
+            {sheet === 'confirm-delete' && renderConfirmDeleteSheet()}
           </KeyboardAvoidingView>
         )}
       </View>
@@ -782,4 +835,14 @@ const styles = StyleSheet.create({
   actionDanger: { backgroundColor: '#fef2f2' },
   actionDisabled: { backgroundColor: '#f1f5f9' },
   actionText: { fontSize: 12, fontWeight: '600', color: '#0284c7' },
+  confirmBody: { fontSize: 14, color: '#475569', lineHeight: 20, marginTop: 4, marginBottom: 16 },
+  confirmActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  confirmBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 12, borderRadius: 12,
+  },
+  confirmCancelBtn: { backgroundColor: '#f1f5f9' },
+  confirmCancelText: { fontSize: 14, fontWeight: '600', color: '#334155' },
+  confirmDeleteBtn: { backgroundColor: '#dc2626' },
+  confirmDeleteText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });
