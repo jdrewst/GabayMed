@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { format } from "date-fns"
 import { Header } from "@/components/header"
 import { DateDisplay } from "@/components/date-display"
 import { StatsCards } from "@/components/stats-cards"
@@ -26,7 +27,7 @@ export default function DashboardPage() {
     const loadDashboardData = async () => {
       try {
         setLoading(true);
-        const today = new Date().toISOString().split('T')[0];
+        const today = format(new Date(), 'yyyy-MM-dd');
 
         // 1. Fetch Stats, Schedule, and Upcoming in parallel
         const [statsData, scheduleData, upcomingData] = await Promise.all([ 
