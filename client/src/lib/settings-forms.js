@@ -74,12 +74,14 @@ export function validateSettingsForm(type, form = {}) {
   }
   if (type === 'fee') {
     required('scheduleName', 'Schedule name')
-    if (!validDate(form.effectiveFrom)) errors.effectiveFrom = 'Choose a valid start date.'
-    if (form.effectiveTo && (!validDate(form.effectiveTo) || form.effectiveTo <= form.effectiveFrom)) errors.effectiveTo = 'End date must be later than the start date.'
+    const fromDate = String(form.effectiveFrom || '').slice(0, 10)
+    const toDate = String(form.effectiveTo || '').slice(0, 10)
+    if (!validDate(fromDate)) errors.effectiveFrom = 'Choose a valid start date.'
+    if (toDate && (!validDate(toDate) || toDate <= fromDate)) errors.effectiveTo = 'End date must be later than the start date.'
     const included = (form.procedureFees || []).filter(p => p.included)
     if (!included.length) errors.procedureFees = 'Include at least one procedure.'
     for (const item of included) {
-      const value = number(item.scheduleFee)
+      const value = number(item.newFee ?? item.scheduleFee)
       if (value === '' || !Number.isFinite(value) || value < 0 || value > 9999999999.99 || Math.abs(value * 100 - Math.round(value * 100)) > 0.00001) {
         errors[`price:${item.code}`] = 'Enter a price of 0 or more, with at most two decimal places.'
       }
@@ -92,7 +94,7 @@ export function normalizeSettingsForm(type, form = {}) {
   if (type === 'branch') return { name: text(form.name), abbreviation: text(form.abbreviation).toUpperCase(), address: text(form.address), contact_num: text(form.contact_num).replace(/[\s().-]/g, ''), email: text(form.email).toLowerCase(), is_active: !!form.is_active }
   if (type === 'procedure') return { description: text(form.description), category: text(form.category), price: number(form.price), officeFee: number(form.officeFee), phCaseRate: number(form.phCaseRate), duration: number(form.duration) }
   if (type === 'room') return { branch_id: text(form.branch_id), code: text(form.code).toUpperCase(), name: text(form.name), floor_location: text(form.floor_location), patient_capacity: number(form.patient_capacity), turnaround_minutes: number(form.turnaround_minutes), status: form.status, equipment: list(form.equipment) }
-  return { scheduleName: text(form.scheduleName), insuranceId: text(form.insuranceId), effectiveFrom: form.effectiveFrom, effectiveTo: form.effectiveTo || '', procedureFees: (form.procedureFees || []).filter(p => p.included).map(p => ({ code: String(p.code), price: number(p.scheduleFee) })).sort((a, b) => a.code.localeCompare(b.code)) }
+  return { scheduleName: text(form.scheduleName), insuranceId: text(form.insuranceId), effectiveFrom: String(form.effectiveFrom || '').slice(0, 10), effectiveTo: String(form.effectiveTo || '').slice(0, 10), procedureFees: (form.procedureFees || []).filter(p => p.included).map(p => ({ code: String(p.code), price: number(p.newFee ?? p.scheduleFee) })).sort((a, b) => a.code.localeCompare(b.code)) }
 }
 const labels = { name: 'Name', email: 'Email', role: 'Provider Type', licenseNo: 'License Number', specialization: 'Specialization', schedule: 'Working Schedule', abbreviation: 'Branch Code', address: 'Address', contact_num: 'Phone', is_active: 'Active Branch', description: 'Description', category: 'Category', price: 'Base Price', officeFee: 'Office Fee', phCaseRate: 'PhilHealth Case Rate', duration: 'Duration', branch_id: 'Branch', code: 'Room Code', floor_location: 'Floor / Location', patient_capacity: 'Patient Capacity', turnaround_minutes: 'Turnaround Time', status: 'Status', equipment: 'Equipment', scheduleName: 'Schedule Name', insuranceId: 'Insurance Plan', effectiveFrom: 'Effective From', effectiveTo: 'Effective To' }
 function display(value) {

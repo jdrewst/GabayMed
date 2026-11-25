@@ -1,7 +1,8 @@
 import { Switch } from "@/components/ui/switch"
 import { useState, useEffect } from "react"
-import { Plus, CreditCard } from "lucide-react"
+import { Plus, CreditCard, AlertCircle, CheckCircle2, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -12,7 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ledgerAPI } from "../../services/ledger"
 import { appointmentAPI } from "../../services/appointment"
 
-export function PatientLedger({ patientId }) {
+const isInsurancePaymentMethod = (method) => method === 'ins_check' || method === 'ins_eft'
+
+export function PatientLedger({ patientId, refreshTrigger = 0, onPaymentChanged }) {
   const [transactions, setTransactions] = useState([])
   const [financialData, setFinancialData] = useState({
     aging: { '0-30': 0, '31-60': 0, '61-90': 0, '91+': 0 },
@@ -23,6 +26,7 @@ export function PatientLedger({ patientId }) {
   const [isProcedureDialogOpen, setIsProcedureDialogOpen] = useState(false)
   const [providers, setProviders] = useState([])
   const [procedureCodes, setProcedureCodes] = useState([])
+  const [paymentError, setPaymentError] = useState('')
 
   // Payment form state
   const [paymentForm, setPaymentForm] = useState({
@@ -95,17 +99,22 @@ export function PatientLedger({ patientId }) {
     .filter(t => t.remainingBalance > 0);
 
   // Auto-allocate payment across unpaid charges (oldest first)
-  const calculateAutoAllocations = (paymentAmt) => {
+  // For insurance payments (ins_check / ins_eft), only allocate to charges that have a submitted claim.
+  const calculateAutoAllocations = (paymentAmt, methodOverride = paymentForm.method) => {
     if (!paymentAmt || paymentAmt <= 0) {
       setAllocations({});
       return;
     }
 
+    const requireClaim = isInsurancePaymentMethod(methodOverride);
     let remainingPayment = paymentAmt;
     const newAllocations = {};
 
     // Sort charges oldest first
-    const sortedCharges = [...unpaidCharges].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const eligibleCharges = requireClaim
+      ? unpaidCharges.filter(c => c.hasSubmittedClaim)
+      : unpaidCharges;
+    const sortedCharges = [...eligibleCharges].sort((a, b) => new Date(a.date) - new Date(b.date));
 
     for (const charge of sortedCharges) {
       if (remainingPayment <= 0) break;
@@ -118,12 +127,52 @@ export function PatientLedger({ patientId }) {
     setAllocations(newAllocations);
   };
 
+  const isInsuranceMethod = isInsurancePaymentMethod(paymentForm.method);
+
+  // Determine if an insurance payment should be prevented because corresponding claims have not been submitted
+  const getInsurancePaymentBlockReason = () => {
+    if (!isInsuranceMethod) return '';
+
+    const allocatedIds = Object.keys(allocations).filter(k => parseFloat(allocations[k]) > 0);
+
+    if (selectedChargeId && selectedChargeId !== 'auto') {
+      const targetCharge = unpaidCharges.find(t => String(t.id) === String(selectedChargeId));
+      if (targetCharge && !targetCharge.hasSubmittedClaim) {
+        return `Insurance payment cannot proceed: The claim for "${targetCharge.description}" (${targetCharge.date}) has not been sent yet. Please submit the claim first.`;
+      }
+    }
+
+    for (const chargeId of allocatedIds) {
+      const charge = unpaidCharges.find(t => String(t.id) === String(chargeId));
+      if (charge && !charge.hasSubmittedClaim) {
+        return `Insurance payment cannot proceed: The claim for "${charge.description}" (${charge.date}) has not been sent yet. Please submit the claim first.`;
+      }
+    }
+
+    if (unpaidCharges.length === 0) {
+      return 'There are no outstanding charges available for an insurance payment.';
+    }
+
+    if (unpaidCharges.every(c => !c.hasSubmittedClaim)) {
+      return 'Insurance payment cannot proceed: None of the outstanding charges have a submitted claim yet. Please send the corresponding claim first.';
+    }
+
+    if (allocatedIds.length === 0) {
+      return 'Please allocate the insurance payment to a charge with a submitted claim.';
+    }
+
+    return '';
+  };
+
+  const insurancePaymentBlockReason = getInsurancePaymentBlockReason();
+
   // Validation functions
   const isPaymentFormValid = () => {
     return paymentForm.date && 
            paymentForm.amount && 
            parseFloat(paymentForm.amount) > 0 && 
-           paymentForm.method
+           paymentForm.method &&
+           !insurancePaymentBlockReason
   }
 
   const isProcedureFormValid = () => {
@@ -181,7 +230,7 @@ const fetchTransactions = async () => {
       }
     }
     loadProviders();
-  }, [patientId])
+  }, [patientId, refreshTrigger])
 
   // Auto-populate procedure amount based on provider's fee schedule (fee_schedule_items.current_fee)
   useEffect(() => {
@@ -216,12 +265,35 @@ const fetchTransactions = async () => {
 
   // Handle payment submission
   const handlePaymentSubmit = async () => {
+    setPaymentError('');
+    if (insurancePaymentBlockReason) {
+      setPaymentError(insurancePaymentBlockReason);
+      return;
+    }
     if (!isPaymentFormValid()) return
 
     const paymentAmount = parseFloat(paymentForm.amount);
     const allocKeys = Object.keys(allocations).filter(k => parseFloat(allocations[k]) > 0);
 
+    // Prevent insurance payments from proceeding if any targeted charge lacks a submitted claim
+    if (isInsuranceMethod) {
+      if (allocKeys.length === 0) {
+        setPaymentError('Insurance payment cannot proceed without an allocated charge that has a submitted claim.');
+        return;
+      }
+      for (const chargeId of allocKeys) {
+        const charge = unpaidCharges.find(t => String(t.id) === String(chargeId));
+        if (!charge || !charge.hasSubmittedClaim) {
+          setPaymentError(
+            `Insurance payment cannot proceed: The claim for "${charge?.description || `Charge #${chargeId}`}" has not been submitted yet.`
+          );
+          return;
+        }
+      }
+    }
+
     let allSuccessful = true;
+    let firstError = '';
 
     if (allocKeys.length > 0) {
       let totalAllocated = 0;
@@ -254,12 +326,13 @@ const fetchTransactions = async () => {
           }
         } else {
           allSuccessful = false;
+          if (!firstError && result.error) firstError = result.error;
         }
       }
       
-      // If the user overpaid (entered more than total unpaid), log the remainder as generic payment
+      // If the user overpaid (entered more than total unpaid) on a non-insurance payment, log remainder
       const leftover = paymentAmount - totalAllocated;
-      if (leftover > 0.01) {
+      if (leftover > 0.01 && !isInsuranceMethod) {
          const payload = {
            ...paymentForm,
            amount: leftover,
@@ -272,17 +345,21 @@ const fetchTransactions = async () => {
       }
       
     } else {
-      // Generic unallocated payment
+      // Generic unallocated payment (non-insurance only)
       const payload = {
         ...paymentForm,
         chargeId: null
       };
       const result = await ledgerAPI.addPayment(patientId, payload);
-      if (!result.success) allSuccessful = false;
+      if (!result.success) {
+        allSuccessful = false;
+        if (result.error) firstError = result.error;
+      }
     }
       
     if (allSuccessful) {
       setIsPaymentDialogOpen(false)
+      setPaymentError('')
       setPaymentForm({
         date: new Date().toISOString().split('T')[0],
         amount: '',
@@ -294,9 +371,10 @@ const fetchTransactions = async () => {
       })
       setAllocations({})
       setSelectedChargeId('auto')
-      fetchTransactions() 
+      await fetchTransactions()
+      onPaymentChanged?.()
     } else {
-      alert("Failed to process some or all payment allocations.");
+      setPaymentError(firstError || "Failed to process some or all payment allocations.");
     }
   }
 
@@ -392,6 +470,7 @@ const fetchTransactions = async () => {
         <div className="flex items-center gap-2">
           <Dialog open={isPaymentDialogOpen} onOpenChange={(open) => {
             setIsPaymentDialogOpen(open)
+            setPaymentError('')
             if (!open) {
               setAllocations({})
               setSelectedChargeId('auto')
@@ -456,7 +535,14 @@ const fetchTransactions = async () => {
                     <Label>Method <span className="text-red-500">*</span></Label>
                     <Select
                       value={paymentForm.method}
-                      onValueChange={(value) => setPaymentForm({ ...paymentForm, method: value })}
+                      onValueChange={(value) => {
+                        setPaymentError('');
+                        setPaymentForm(prev => ({ ...prev, method: value }));
+                        const numVal = parseFloat(paymentForm.amount) || 0;
+                        if (!selectedChargeId || selectedChargeId === 'auto') {
+                          calculateAutoAllocations(numVal, value);
+                        }
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select method" />
@@ -524,62 +610,87 @@ const fetchTransactions = async () => {
                       <SelectItem value="auto">Auto-allocate (Oldest First)</SelectItem>
                       {unpaidCharges.map((t) => (
                         <SelectItem key={t.id} value={String(t.id)}>
-                          {t.date} - {t.description} (₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })})
+                          {t.date} - {t.description} (₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}) — {t.hasSubmittedClaim ? `Claim: ${t.claimStatus}` : 'No Claim Sent'}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* Allocation Section presenting updated charge and auto-populated applied column */}
+                {/* Allocation Section presenting updated charge, claim status, and auto-populated applied column */}
                 <div className="border rounded-lg p-4 mt-2 bg-slate-50">
-                  <h4 className="font-medium mb-2 text-sm">Allocation</h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-sm">Allocation</h4>
+                    {isInsuranceMethod && (
+                      <span className="text-xs text-slate-600">
+                        Insurance payments can only be applied to charges with a submitted claim.
+                      </span>
+                    )}
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Code</TableHead>
+                        <TableHead>Claim Status</TableHead>
                         <TableHead>Updated Charge</TableHead>
                         <TableHead>Applied</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {unpaidCharges.map((t) => (
-                        <TableRow 
-                          key={t.id} 
-                          className={String(t.id) === selectedChargeId ? 'bg-blue-50/80 font-medium' : ''}
-                        >
-                          <TableCell>{t.date}</TableCell>
-                          <TableCell>{t.code}</TableCell>
-                          <TableCell className="text-slate-900 font-medium">
-                            ₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              className="h-8 w-28 bg-white"
-                              placeholder="0.00"
-                              type="number"
-                              step="0.01"
-                              value={allocations[t.id] || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setAllocations({ [t.id]: val });
-                                setSelectedChargeId(String(t.id));
-                                setPaymentForm(prev => ({
-                                  ...prev,
-                                  amount: val,
-                                  appointmentId: t.appointmentId || '',
-                                  procedureId: t.procedureId || '',
-                                  provider_id: t.providerId || ''
-                                }));
-                              }}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {unpaidCharges.map((t) => {
+                        const blockedByUnsentClaim = isInsuranceMethod && !t.hasSubmittedClaim;
+                        return (
+                          <TableRow 
+                            key={t.id} 
+                            className={String(t.id) === selectedChargeId ? 'bg-blue-50/80 font-medium' : blockedByUnsentClaim ? 'opacity-65' : ''}
+                          >
+                            <TableCell>{t.date}</TableCell>
+                            <TableCell>{t.code}</TableCell>
+                            <TableCell>
+                              {t.hasSubmittedClaim ? (
+                                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
+                                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                                  {t.claimStatus || 'Submitted'}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                                  <Clock className="w-3 h-3 mr-1" />
+                                  Not Sent
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-slate-900 font-medium">
+                              ₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                className="h-8 w-28 bg-white"
+                                placeholder="0.00"
+                                type="number"
+                                step="0.01"
+                                value={allocations[t.id] || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setPaymentError('');
+                                  setAllocations({ [t.id]: val });
+                                  setSelectedChargeId(String(t.id));
+                                  setPaymentForm(prev => ({
+                                    ...prev,
+                                    amount: val,
+                                    appointmentId: t.appointmentId || '',
+                                    procedureId: t.procedureId || '',
+                                    provider_id: t.providerId || ''
+                                  }));
+                                }}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                       {unpaidCharges.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={4} className="text-center text-muted-foreground text-sm">
+                          <TableCell colSpan={5} className="text-center text-muted-foreground text-sm">
                             No outstanding charges
                           </TableCell>
                         </TableRow>
@@ -587,6 +698,13 @@ const fetchTransactions = async () => {
                     </TableBody>
                   </Table>
                 </div>
+
+                {(insurancePaymentBlockReason || paymentError) && (
+                  <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                    <span>{paymentError || insurancePaymentBlockReason}</span>
+                  </div>
+                )}
 
                 <Button 
                   onClick={handlePaymentSubmit}
@@ -757,19 +875,20 @@ const fetchTransactions = async () => {
                 <TableHead>Code</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Provider</TableHead>
+                <TableHead>Claim Status</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     No transactions found
                   </TableCell>
                 </TableRow>
@@ -791,6 +910,28 @@ const fetchTransactions = async () => {
                       </TableCell>
                       
                       <TableCell>{t.provider}</TableCell>
+                      <TableCell>
+                        {t.amount < 0 ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : t.claimStatus ? (
+                          <Badge
+                            variant="outline"
+                            className={
+                              String(t.claimStatus).toUpperCase() === 'DENIED'
+                                ? 'bg-red-50 text-red-700 border-red-200 text-xs'
+                                : String(t.claimStatus).toUpperCase() === 'APPROVED' || String(t.claimStatus).toUpperCase() === 'PAID'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 text-xs'
+                                  : 'bg-blue-50 text-blue-700 border-blue-200 text-xs'
+                            }
+                          >
+                            {t.claimStatus}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                            Not Sent
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className={`text-right font-medium ${t.amount < 0 ? "text-green-600" : "text-slate-900"}`}>
                         {t.amount < 0 ? "(" : ""}₱{Math.abs(t.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                         {t.amount < 0 ? ")" : ""}

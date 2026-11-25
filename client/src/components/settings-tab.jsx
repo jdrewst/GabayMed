@@ -994,6 +994,8 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
   const draft = useSettingsDraft('fee', form)
   const [, setError] = useSettingsFeedback()
   const [busy, setBusy] = useState(false)
+  const [savingItemCode, setSavingItemCode] = useState(null)
+  const [procedureSearch, setProcedureSearch] = useState('')
   const [deleting, setDeleting] = useState(null)
 
   const load = async () => {
@@ -1013,6 +1015,7 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
 
   const openForm = schedule => {
     setError('')
+    setProcedureSearch('')
     const next = buildFeeForm(procedures, schedules, schedule)
     setForm(next)
     draft.start(schedule ? next : null)
@@ -1022,6 +1025,71 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
     procedureFees: previous.procedureFees.map(item => item.code === code ? { ...item, ...patch } : item)
   }))
 
+  const isItemModified = item => {
+    if (!draft.original) return false
+    const orig = draft.original.procedureFees?.find(p => String(p.code) === String(item.code))
+    if (!orig) return true
+    if (Boolean(orig.included) !== Boolean(item.included)) return true
+    if (!item.included) return false
+    const prevFee = Number(orig.newFee ?? orig.scheduleFee)
+    const nextFee = Number(item.newFee ?? item.scheduleFee)
+    return !Number.isFinite(nextFee) || Math.abs(prevFee - nextFee) > 0.0001
+  }
+
+  const saveIndividualFee = async item => {
+    if (!form?.id || busy || savingItemCode !== null) return
+    if (draft.errors[`price:${item.code}`]) {
+      draft.touch(`price:${item.code}`)
+      return
+    }
+    const nextIncludedCount = form.procedureFees.filter(p => p.included).length
+    if (nextIncludedCount === 0) {
+      setError('Include at least one procedure in the schedule.')
+      return
+    }
+
+    setError('')
+    setSavingItemCode(item.code)
+    try {
+      const feeVal = item.newFee ?? item.scheduleFee
+      const res = await settingsAPI.updateFeeScheduleItem(form.id, item.code, feeVal, item.included)
+      const origItem = draft.original?.procedureFees?.find(p => String(p.code) === String(item.code))
+      const beforeText = origItem?.included ? money(Number(origItem.newFee ?? origItem.scheduleFee)) : 'Not included'
+      const afterText = item.included ? money(res.currentFee) : 'Not included'
+
+      const nextForm = {
+        ...form,
+        procedureFees: form.procedureFees.map(p =>
+          p.code === item.code
+            ? {
+                ...p,
+                included: res.included,
+                currentFee: res.included ? res.currentFee : p.currentFee,
+                current_fee: res.included ? res.currentFee : p.current_fee,
+                scheduleFee: res.included ? String(res.currentFee) : p.scheduleFee,
+                newFee: res.included ? String(res.currentFee) : p.newFee
+              }
+            : p
+        )
+      }
+      setForm(nextForm)
+      if (draft.original) {
+        draft.start({
+          ...draft.original,
+          procedureFees: draft.original.procedureFees.map(p =>
+            p.code === item.code ? nextForm.procedureFees.find(n => n.code === item.code) : p
+          )
+        })
+      }
+      toast.edited('Procedure fee updated.', [{ field: item.name, before: beforeText, after: afterText }], form.scheduleName)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingItemCode(null)
+    }
+  }
+
   const planLabel = id => id === 'Not set' ? 'Standard Rates' : plans.find(plan => String(plan.insurance_id) === id)?.plan_name || id
   const save = async event => {
     event.preventDefault()
@@ -1030,7 +1098,7 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
     try {
       const payload = feeFormPayload(form)
       setBusy(true)
-      await settingsAPI.saveFeeSchedule(form.id, payload)
+      await settingsAPI.saveFeeSchedule(form.id, payload, draft.original)
       setForm(null)
       if (form.id != null) toast.edited('Fee schedule updated.', draft.changes.map(change => change.field === 'Insurance Plan' ? { ...change, before: planLabel(change.before), after: planLabel(change.after) } : change), form.scheduleName)
       else toast.success('Fee schedule saved.', form.scheduleName)
@@ -1085,40 +1153,142 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
             </TableRow>)}
         </TableBody></Table>
       </CardContent>
-      <Dialog open={form !== null} onOpenChange={value => { if (!value && !busy) setForm(null) }}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+      <Dialog open={form !== null} onOpenChange={value => { if (!value && !busy) { setForm(null); setProcedureSearch('') } }}>
+        <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form?.id != null ? 'Edit Fee Schedule' : 'Add Fee Schedule'}</DialogTitle>
-            <DialogDescription>Choose the plan, effective dates, and complete procedure prices. HMO procedures without a rate fall back to Standard Rates.</DialogDescription>
+            <DialogDescription>
+              {form?.id != null
+                ? 'Modify only the fields or individual procedure fees you want to change. Unchanged fields and fees are preserved.'
+                : 'Choose the plan, effective dates, and set procedure fees. Reference rates reflect PhilHealth case rates.'}
+            </DialogDescription>
           </DialogHeader>
-          {form && <form onSubmit={save} className="space-y-6" onBlurCapture={event => draft.touch(event.target.id?.replace(/^fee-/, ''))}>
-            <fieldset disabled={busy} className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2"><Label htmlFor="fee-name">Schedule Name *</Label><Input id="fee-name" onBlur={() => draft.touch('scheduleName')} required value={form.scheduleName} onChange={e => change('scheduleName', e.target.value)} /><SettingsFieldError draft={draft} field="scheduleName" /></div>
-                <div className="space-y-2"><Label htmlFor="fee-plan">Insurance Plan</Label>
-                  <Select disabled={busy} value={form.insuranceId || 'standard'} onValueChange={value => change('insuranceId', value === 'standard' ? '' : value)}>
-                    <SelectTrigger id="fee-plan"><SelectValue /></SelectTrigger><SelectContent>
-                      <SelectItem value="standard">Standard Rates (no insurance plan)</SelectItem>
-                      {form.insuranceId && !plans.some(p => String(p.insurance_id) === form.insuranceId) && <SelectItem value={form.insuranceId}>Plan {form.insuranceId}</SelectItem>}
-                      {plans.map(p => <SelectItem key={p.insurance_id} value={String(p.insurance_id)}>{p.plan_name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2"><Label htmlFor="fee-from">Effective From *</Label><Input id="fee-from" type="date" required value={form.effectiveFrom} onChange={e => change('effectiveFrom', e.target.value)} onBlur={() => draft.touch('effectiveFrom')} /><SettingsFieldError draft={draft} field="effectiveFrom" /></div>
-                <div className="space-y-2"><Label htmlFor="fee-to">Effective To (exclusive)</Label><Input id="fee-to" type="date" min={form.effectiveFrom} value={form.effectiveTo} onChange={e => change('effectiveTo', e.target.value)} onBlur={() => draft.touch('effectiveTo')} /><SettingsFieldError draft={draft} field="effectiveTo" /></div>
-              </div>
-              <p className="text-sm text-muted-foreground">New schedules start with the current Standard prices, or base price + office fee if no Standard price exists. Edit the complete amount below; office fees are already included. For future rate changes, add a new schedule version with a later start date.</p>
-              <Table><TableHeader><TableRow><TableHead>Include</TableHead><TableHead>Procedure Code</TableHead><TableHead>Description</TableHead><TableHead>Reference Rate</TableHead><TableHead>Schedule Price *</TableHead></TableRow></TableHeader>
-                <TableBody>{form.procedureFees.map(item => <TableRow key={item.code}>
-                  <TableCell><input type="checkbox" aria-label={`Include ${item.name}`} checked={item.included} onChange={e => { changeItem(item.code, { included: e.target.checked }); draft.touch('procedureFees') }} /></TableCell>
-                  <TableCell>{item.code}</TableCell><TableCell>{item.name}</TableCell><TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
-                  <TableCell><Input aria-label={`Price for ${item.name}`} type="number" min="0" max="9999999999.99" step="0.01" required={item.included} disabled={!item.included || busy} value={item.scheduleFee} onBlur={() => draft.touch(`price:${item.code}`)} onChange={e => changeItem(item.code, { scheduleFee: e.target.value })} /><SettingsFieldError draft={draft} field={`price:${item.code}`} /></TableCell>
-                </TableRow>)}</TableBody>
-              </Table>
-              <SettingsFieldError draft={draft} field="procedureFees" />
-              {form.procedureFees.length === 0 && <p>No procedures available. Add procedures first.</p>}
-            </fieldset>
-            <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => setForm(null)}>Cancel</Button><Button type="submit" className="bg-blue-500" disabled={busy || !draft.canSave}>{busy ? 'Saving...' : 'Save Fee Schedule'}</Button></div>
-          </form>}
+          {form && (() => {
+            const searchTerm = procedureSearch.trim().toLowerCase()
+            const filteredProcedureFees = searchTerm
+              ? form.procedureFees.filter(item =>
+                  String(item.code ?? '').toLowerCase().includes(searchTerm) ||
+                  String(item.name ?? '').toLowerCase().includes(searchTerm)
+                )
+              : form.procedureFees
+
+            return (
+              <form onSubmit={save} className="space-y-6" onBlurCapture={event => draft.touch(event.target.id?.replace(/^fee-/, ''))}>
+                <fieldset disabled={busy} className="space-y-6">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2"><Label htmlFor="fee-name">Schedule Name *</Label><Input id="fee-name" onBlur={() => draft.touch('scheduleName')} required value={form.scheduleName} onChange={e => change('scheduleName', e.target.value)} /><SettingsFieldError draft={draft} field="scheduleName" /></div>
+                    <div className="space-y-2"><Label htmlFor="fee-plan">Insurance Plan</Label>
+                      <Select disabled={busy} value={form.insuranceId || 'standard'} onValueChange={value => change('insuranceId', value === 'standard' ? '' : value)}>
+                        <SelectTrigger id="fee-plan"><SelectValue /></SelectTrigger><SelectContent>
+                          <SelectItem value="standard">Standard Rates (no insurance plan)</SelectItem>
+                          {form.insuranceId && !plans.some(p => String(p.insurance_id) === form.insuranceId) && <SelectItem value={form.insuranceId}>Plan {form.insuranceId}</SelectItem>}
+                          {plans.map(p => <SelectItem key={p.insurance_id} value={String(p.insurance_id)}>{p.plan_name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2"><Label htmlFor="fee-from">Effective From *</Label><Input id="fee-from" type="date" required value={form.effectiveFrom} onChange={e => change('effectiveFrom', e.target.value)} onBlur={() => draft.touch('effectiveFrom')} /><SettingsFieldError draft={draft} field="effectiveFrom" /></div>
+                    <div className="space-y-2"><Label htmlFor="fee-to">Effective To (exclusive)</Label><Input id="fee-to" type="date" min={form.effectiveFrom} value={form.effectiveTo} onChange={e => change('effectiveTo', e.target.value)} onBlur={() => draft.touch('effectiveTo')} /><SettingsFieldError draft={draft} field="effectiveTo" /></div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      {form.id != null
+                        ? 'You can update an individual procedure fee right on its row using "Update Fee", or modify multiple fields and click "Save Fee Schedule".'
+                        : 'Reference Rate reflects the PhilHealth Case Rate. Current Fee shows the existing fee from the fee schedule. Enter the New Fee for each included procedure.'}
+                    </p>
+                    <div className="relative w-full sm:w-80 shrink-0">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <Input
+                        type="text"
+                        aria-label="Search procedures by code or description"
+                        placeholder="Search procedure code or description..."
+                        className="pl-9 pr-8"
+                        value={procedureSearch}
+                        onChange={e => setProcedureSearch(e.target.value)}
+                      />
+                      {procedureSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setProcedureSearch('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          aria-label="Clear procedure search"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {searchTerm && (
+                    <p className="text-xs text-slate-500 -mt-3">
+                      Showing {filteredProcedureFees.length} of {form.procedureFees.length} procedures
+                    </p>
+                  )}
+                  <Table><TableHeader><TableRow>
+                    <TableHead className="w-16">Include</TableHead>
+                    <TableHead className="w-28 whitespace-nowrap">Procedure Code</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-32 whitespace-nowrap">Reference Rate</TableHead>
+                    <TableHead className="w-32 whitespace-nowrap">Current Fee</TableHead>
+                    <TableHead className="min-w-[150px] w-40 whitespace-nowrap">New Fee *</TableHead>
+                    {form.id != null && <TableHead className="w-32 text-right whitespace-nowrap">Individual Update</TableHead>}
+                  </TableRow></TableHeader>
+                    <TableBody>{filteredProcedureFees.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={form.id != null ? 7 : 6} className="text-center text-muted-foreground py-6">
+                          {form.procedureFees.length === 0
+                            ? 'No procedures available. Add procedures first.'
+                            : `No procedures match "${procedureSearch}".`}
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredProcedureFees.map(item => {
+                      const rowChanged = form.id != null && isItemModified(item)
+                      const rowInvalid = !!draft.errors[`price:${item.code}`]
+                      const isRowSaving = savingItemCode === item.code
+                      return (
+                        <TableRow key={item.code}>
+                          <TableCell><input type="checkbox" aria-label={`Include ${item.name}`} checked={item.included} onChange={e => { changeItem(item.code, { included: e.target.checked }); draft.touch('procedureFees') }} /></TableCell>
+                          <TableCell className="font-mono whitespace-nowrap">{item.code}</TableCell>
+                          <TableCell className="max-w-md leading-snug">{item.name}</TableCell>
+                          <TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
+                          <TableCell className="whitespace-nowrap font-medium text-slate-700">{money(item.currentFee ?? item.current_fee ?? 0)}</TableCell>
+                          <TableCell className="min-w-[150px] w-40">
+                            <Input
+                              aria-label={`New Fee for ${item.name}`}
+                              type="number"
+                              min="0"
+                              max="9999999999.99"
+                              step="0.01"
+                              required={item.included}
+                              disabled={!item.included || busy || isRowSaving}
+                              className="min-w-[135px] w-36 font-medium"
+                              value={item.scheduleFee}
+                              onBlur={() => draft.touch(`price:${item.code}`)}
+                              onChange={e => changeItem(item.code, { scheduleFee: e.target.value, newFee: e.target.value })}
+                            />
+                            <SettingsFieldError draft={draft} field={`price:${item.code}`} />
+                          </TableCell>
+                          {form.id != null && (
+                            <TableCell className="text-right whitespace-nowrap">
+                              <Button
+                                type="button"
+                                variant={rowChanged ? "default" : "outline"}
+                                size="sm"
+                                className={rowChanged ? "bg-blue-500 hover:bg-blue-600 text-white" : ""}
+                                disabled={!rowChanged || rowInvalid || busy || savingItemCode !== null}
+                                onClick={() => saveIndividualFee(item)}
+                              >
+                                {isRowSaving ? 'Updating...' : 'Update Fee'}
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      )
+                    })}</TableBody>
+                  </Table>
+                  <SettingsFieldError draft={draft} field="procedureFees" />
+                </fieldset>
+                <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy || savingItemCode !== null} onClick={() => { setForm(null); setProcedureSearch('') }}>Close</Button><Button type="submit" className="bg-blue-500" disabled={busy || savingItemCode !== null || !draft.canSave}>{busy ? 'Saving...' : 'Save Fee Schedule'}</Button></div>
+              </form>
+            )
+          })()}
         </DialogContent>
       </Dialog>
       <Dialog open={deleting !== null} onOpenChange={value => { if (!value && !busy) setDeleting(null) }}>
@@ -1557,7 +1727,7 @@ function useSettingsDraft(type, values) {
   const errors = validateSettingsForm(type, values || {})
   const changes = settingsChanges(type, original, values)
   return {
-    errors, changes, touched,
+    original, errors, changes, touched,
     canSave: Object.keys(errors).length === 0 && (!original || changes.length > 0),
     start: value => { setOriginal(value ? structuredClone(value) : null); setTouched({}) },
     touch: field => { if (field) setTouched(previous => previous[field] ? previous : { ...previous, [field]: true }) }
