@@ -100,12 +100,14 @@ export function Notifications() {
     : notifications
 
   return (
-    <>
-      <Header />
-      <div className="p-6 bg-slate-50 min-h-screen">
-        <div className="max-w-4xl mx-auto space-y-6">
+    <div className="flex h-[calc(100dvh+3rem)] min-h-[32rem] flex-col">
+      <div className="shrink-0">
+        <Header />
+      </div>
+      <main className="flex min-h-0 flex-1 flex-col bg-slate-50 p-6">
+        <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-6">
           {/* Header Section */}
-          <div className="flex items-center justify-between">
+          <div className="flex shrink-0 items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
               <p className="text-muted-foreground">Stay updated with your clinic activities</p>
@@ -123,7 +125,7 @@ export function Notifications() {
           </div>
 
           {/* Stats Card */}
-          <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-100">
+          <Card className="shrink-0 bg-gradient-to-br from-blue-50 to-white border-blue-100">
             <CardContent className="p-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-blue-100 rounded-full">
@@ -138,8 +140,8 @@ export function Notifications() {
           </Card>
 
           {/* Notifications List */}
-          <Card>
-            <CardHeader>
+          <Card className="flex min-h-0 flex-col">
+            <CardHeader className="shrink-0">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="all">
@@ -151,7 +153,7 @@ export function Notifications() {
                 </TabsList>
               </Tabs>
             </CardHeader>
-            <CardContent>
+            <CardContent className="min-h-0 overflow-y-auto" role="region" aria-label="Notifications list" tabIndex={0}>
               {filteredNotifications.length === 0 ? (
                 <div className="text-center py-12">
                   <Bell className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
@@ -221,7 +223,7 @@ export function Notifications() {
             </CardContent>
           </Card>
         </div>
-      </div>
-    </>
+      </main>
+    </div>
   )
 }
