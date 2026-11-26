@@ -6,9 +6,13 @@ import { Building2, Mail, Phone, MapPin, Globe, Clock } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { profileAPI } from "../../services/profile" // Import API
+import { profileAPI } from "../../services/profile"
+import { useBranch } from "@/lib/branch-context"
+import { BranchSelector } from "@/components/branch-selector"
+import { Badge } from "@/components/ui/badge"
 
 export default function ProfilePage() {
+  const { selectedBranch, isBranchPortal } = useBranch()
   const [locationInfo, setLocationInfo] = useState({
     clinicName: '',
     abbreviation: '',
@@ -53,30 +57,60 @@ export default function ProfilePage() {
     return () => window.removeEventListener('facilityUpdated', handleUpdate);
   }, [])
 
+  const displayedInfo = selectedBranch ? {
+    clinicName: selectedBranch.name,
+    abbreviation: selectedBranch.abbreviation,
+    address: selectedBranch.address || locationInfo.address,
+    phone: selectedBranch.contact_num || locationInfo.phone,
+    email: selectedBranch.email || locationInfo.email,
+    timezone: selectedBranch.timezone || 'Asia/Manila'
+  } : locationInfo;
+
   return (
     <div className="min-h-screen bg-[#f9f9f9]">
       <Header />
       <main className="container mx-auto px-6 py-8 -mt-8">
         <div className="max-w-4xl mx-auto space-y-6">
-          <div className="flex items-center gap-4 mb-6">
-            <Avatar className="w-20 h-20">
-              <AvatarImage src="/caring-doctor.png" alt="User" />
-              <AvatarFallback>{locationInfo.abbreviation || 'DR'}</AvatarFallback>
-            </Avatar>
-            <div>
-              <h1 className="text-2xl font-bold">
-                {loading ? "Loading..." : locationInfo.clinicName}
-              </h1>
-              <p className="text-muted-foreground">View your profile and location information</p>
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+            <div className="flex items-center gap-4">
+              <Avatar className="w-20 h-20">
+                <AvatarImage src="/caring-doctor.png" alt="User" />
+                <AvatarFallback>{displayedInfo.abbreviation || 'DR'}</AvatarFallback>
+              </Avatar>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold">
+                    {loading ? "Loading..." : displayedInfo.clinicName}
+                  </h1>
+                  {isBranchPortal && (
+                    <Badge className="bg-blue-600 text-white text-xs">
+                      Branch Portal
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-muted-foreground">
+                  {isBranchPortal
+                    ? `Viewing details for ${selectedBranch.name} location`
+                    : "View your profile and location information"}
+                </p>
+              </div>
             </div>
+            <BranchSelector />
           </div>
 
           {/* Location Information Card */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Location Information</CardTitle>
+              <div>
+                <CardTitle>Location Information</CardTitle>
+                {isBranchPortal && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Reflecting selected branch portal: {selectedBranch.name}
+                  </p>
+                )}
+              </div>
               <Button onClick={() => window.location.href = '/settings?tab=location'}>
-                Edit Profile
+                Edit Locations
               </Button>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -88,28 +122,28 @@ export default function ProfilePage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Clinic Name</Label>
-                  <Input value={locationInfo.clinicName || ''} readOnly className="bg-muted cursor-not-allowed" />
+                  <Label>Clinic / Branch Name</Label>
+                  <Input value={displayedInfo.clinicName || ''} readOnly className="bg-muted cursor-not-allowed" />
                 </div>
                 <div className="space-y-2">
                   <Label>Abbreviation</Label>
-                  <Input value={locationInfo.abbreviation || ''} readOnly className="bg-muted cursor-not-allowed" />
+                  <Input value={displayedInfo.abbreviation || ''} readOnly className="bg-muted cursor-not-allowed" />
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label>Address</Label>
-                  <Input value={locationInfo.address || ''} readOnly className="bg-muted cursor-not-allowed" />
+                  <Input value={displayedInfo.address || ''} readOnly className="bg-muted cursor-not-allowed" />
                 </div>
                 <div className="space-y-2">
                   <Label>Phone</Label>
-                  <Input value={locationInfo.phone || ''} readOnly className="bg-muted cursor-not-allowed" />
+                  <Input value={displayedInfo.phone || ''} readOnly className="bg-muted cursor-not-allowed" />
                 </div>
                 <div className="space-y-2">
                   <Label>Email</Label>
-                  <Input type="email" value={locationInfo.email || ''} readOnly className="bg-muted cursor-not-allowed" />
+                  <Input type="email" value={displayedInfo.email || ''} readOnly className="bg-muted cursor-not-allowed" />
                 </div>
                 <div className="space-y-2">
                   <Label>Timezone</Label>
-                  <Input value={locationInfo.timezone || ''} readOnly className="bg-muted cursor-not-allowed" />
+                  <Input value={displayedInfo.timezone || ''} readOnly className="bg-muted cursor-not-allowed" />
                 </div>
               </div>
             </CardContent>

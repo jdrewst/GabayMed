@@ -12,6 +12,7 @@ import ProfilePage from './pages/profile'
 import { Messages } from './pages/messages'
 import { Notifications } from './pages/notifications'
 import { Session } from '../services/session'
+import { BranchProvider } from './lib/branch-context'
 
 function App() {
   const [currentPage, setCurrentPage] = useState(() => {
@@ -200,17 +201,19 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {currentPage === 'login' && <LoginPage onLoginSuccess={handleLoginSuccess} />}
-      {currentPage === 'dashboard' && <DashboardPage />}
-      {currentPage === 'patients' && <PatientsPage />}
-      {currentPage === 'appointments' && <AppointmentsPage />}
-      {currentPage === 'carriers' && <CarriersPage />}
-      {currentPage === 'settings' && <SettingsPage />}
-      {currentPage === 'profile' && <ProfilePage />}
-      {currentPage === 'messages' && <Messages />}
-      {currentPage === 'notifications' && <Notifications />}
-    </div>
+    <BranchProvider>
+      <div className="min-h-screen bg-background">
+        {currentPage === 'login' && <LoginPage onLoginSuccess={handleLoginSuccess} />}
+        {currentPage === 'dashboard' && <DashboardPage />}
+        {currentPage === 'patients' && <PatientsPage />}
+        {currentPage === 'appointments' && <AppointmentsPage />}
+        {currentPage === 'carriers' && <CarriersPage />}
+        {currentPage === 'settings' && <SettingsPage />}
+        {currentPage === 'profile' && <ProfilePage />}
+        {currentPage === 'messages' && <Messages />}
+        {currentPage === 'notifications' && <Notifications />}
+      </div>
+    </BranchProvider>
   )
 }
 

@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react"
-import { Cloud, CloudRain, Sun, CloudDrizzle } from "lucide-react"
+import { Cloud, CloudRain, Sun, CloudDrizzle, MapPin } from "lucide-react"
+import { useBranch } from "@/lib/branch-context"
 
 export function DateDisplay() {
+  const { selectedBranch } = useBranch()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [weather, setWeather] = useState({ temp: 29, condition: 'cloudy' })
   const [loading, setLoading] = useState(true)
@@ -131,8 +133,8 @@ export function DateDisplay() {
             backgroundClip: 'text'
           }}
         >
-          <div className="text-lg font-bold -mb-2">Metropolitan</div>
-          <div className="text-lg font-bold">Medical Center</div>
+          <div className="text-lg font-bold -mb-1">{selectedBranch ? selectedBranch.name : 'Metropolitan'}</div>
+          <div className="text-sm font-semibold opacity-90">{selectedBranch ? 'Branch Portal' : 'Medical Center'}</div>
         </div>
       </div>
     </div>

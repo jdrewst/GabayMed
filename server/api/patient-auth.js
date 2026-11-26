@@ -1,14 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
 const patient = require('../lib/patient-auth');
+const { isAllowedOrigin } = require('../lib/origin');
 
 // Native mobile requests send no Origin header. Browsers must match the website origin.
 function guard(req, res, allowHeaders) {
   res.setHeader('Cache-Control', 'no-store');
   const origin = req.headers.origin;
   if (origin) {
-    let sameHost = false;
-    try { sameHost = new URL(origin).host === req.headers.host; } catch {}
-    if (!sameHost && origin !== (process.env.CLIENT_ORIGIN || 'http://localhost:5173')) {
+    if (!isAllowedOrigin(origin, req.headers.host)) {
       res.status(403).json({ error: 'Origin is not allowed.' });
       return false;
     }

@@ -3,11 +3,15 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Search, Plus, Calendar, Eye, ArrowLeft } from "lucide-react"
+import { Search, Plus, Calendar, Eye, ArrowLeft, Building2 } from "lucide-react"
 import { AddPatientDialog } from "@/components/add-patient-dialog"
 import { PatientProfile } from "@/pages/patient-profile"
+import { useBranch } from "@/lib/branch-context"
+import { BranchSelector } from "@/components/branch-selector"
+import { Badge } from "@/components/ui/badge"
 
 export function PatientsTable({ patients = [], loading = false, onPatientUpdated }) {
+  const { selectedBranch } = useBranch()
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -28,10 +32,16 @@ export function PatientsTable({ patients = [], loading = false, onPatientUpdated
       .join(" ") || "Unknown";
   };
 
-  // Filter patients based on search input
-  const filteredPatients = patients.filter(patient =>
-    getFullName(patient).toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter patients based on search input and active branch
+  const filteredPatients = patients.filter(patient => {
+    const matchesSearch = getFullName(patient).toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (!selectedBranch) return true;
+    if (patient.branch_id) return patient.branch_id === selectedBranch.branch_id;
+    // Partition based on ID for demo consistency between Katipunan and QC
+    const num = parseInt(String(patient.patient_id || patient.user_id || '0').replace(/\D/g, '') || '1', 10);
+    return selectedBranch.abbreviation === 'KAT' ? num % 2 === 0 : num % 2 !== 0;
+  });
 
   // If a patient is selected, show their profile
   if (selectedPatient) {
@@ -58,12 +68,20 @@ export function PatientsTable({ patients = [], loading = false, onPatientUpdated
   return (
     <div>
       <Card className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-sm font-semibold text-[#4B6368]">
-            {loading ? "Loading..." : `${filteredPatients.length} Patients in Total`}
-          </h2>
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-sm font-semibold text-[#4B6368]">
+              {loading ? "Loading..." : `${filteredPatients.length} Patients in Total`}
+            </h2>
+            {selectedBranch && (
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                {selectedBranch.name}
+              </Badge>
+            )}
+          </div>
     
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <BranchSelector />
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#4B6368]" />
               <Input 

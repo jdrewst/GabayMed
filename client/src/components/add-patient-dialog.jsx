@@ -11,11 +11,14 @@ import { CalendarIcon } from "lucide-react"
 import { format } from "date-fns"
 import { GabayAPI } from "../../services/gabayApi"
 import { POSTGabayAPI } from "../../services/postGabayApi"
+import { useBranch } from "@/lib/branch-context"
 
 export function AddPatientDialog({ open, onOpenChange }) {
+  const { branches, selectedBranchId } = useBranch()
   const [dob, setDob] = useState()
   const [plans, setPlans] = useState([]) // Changed from carriers to plans
   const [loading, setLoading] = useState(false)
+  const [branchId, setBranchId] = useState(() => (selectedBranchId !== 'all' ? selectedBranchId : (branches[0]?.branch_id || '')))
   
   // Form State
   const [firstName, setFirstName] = useState("")
@@ -251,20 +254,38 @@ export function AddPatientDialog({ open, onOpenChange }) {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="insurance">Insurance Information</Label>
-            <Select value={insuranceId} onValueChange={setInsuranceId}>
-              <SelectTrigger id="insurance">
-                <SelectValue placeholder="Select insurance plan" />
-              </SelectTrigger>
-              <SelectContent>
-                {plans.map((plan) => (
-                  <SelectItem key={plan.id} value={plan.id}>
-                    {plan.name} <span className="text-muted-foreground text-xs ml-2">({plan.carrier})</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="branch">Assigned Branch Location</Label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger id="branch">
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.branch_id} value={b.branch_id}>
+                      {b.name} ({b.abbreviation})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="insurance">Insurance Information</Label>
+              <Select value={insuranceId} onValueChange={setInsuranceId}>
+                <SelectTrigger id="insurance">
+                  <SelectValue placeholder="Select insurance plan" />
+                </SelectTrigger>
+                <SelectContent>
+                  {plans.map((plan) => (
+                    <SelectItem key={plan.id} value={plan.id}>
+                      {plan.name} <span className="text-muted-foreground text-xs ml-2">({plan.carrier})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 

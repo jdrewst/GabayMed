@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const vault = require('../lib/health-records');
+const { isAllowedOrigin } = require('../lib/origin');
 
 // Health Record Vault endpoint (US-3.7). Every request is POST { action, ... } with the patient's bearer token.
 // Files themselves never pass through this function: uploads go straight to Storage via a signed upload URL,
@@ -24,9 +25,7 @@ module.exports = async function handler(req, res) {
   // Native mobile requests send no Origin header. Browsers must match the website origin.
   const origin = req.headers.origin;
   if (origin) {
-    let sameHost = false;
-    try { sameHost = new URL(origin).host === req.headers.host; } catch {}
-    if (!sameHost && origin !== (process.env.CLIENT_ORIGIN || 'http://localhost:5173')) {
+    if (!isAllowedOrigin(origin, req.headers.host)) {
       return res.status(403).json({ error: 'Origin is not allowed.' });
     }
     res.setHeader('Access-Control-Allow-Origin', origin);

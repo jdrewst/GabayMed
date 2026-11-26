@@ -12,10 +12,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CalendarView } from "@/components/calendar-view" 
 import { format } from "date-fns"
 import { appointmentAPI } from "../../services/appointment"
+import { useBranch } from "@/lib/branch-context"
+import { BranchSelector } from "@/components/branch-selector"
 
 const hours = Array.from({ length: 10 }, (_, i) => i + 8) // 8 AM to 5 PM
 
 export function AppointmentScheduler() {
+  const { selectedBranch, rooms: branchRooms } = useBranch()
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedSlot, setSelectedSlot] = useState(null)
   
@@ -96,8 +99,29 @@ export function AppointmentScheduler() {
     };
   }, [procedureSearch, formData.procedure]);
 
+  // Keep operatory in sync when selected branch changes
+  useEffect(() => {
+    if (branchRooms && branchRooms.length > 0) {
+      const match = branchRooms.some(r => (r.name || r.code) === formData.operatory);
+      if (!match) {
+        setFormData(prev => ({ ...prev, operatory: branchRooms[0].name || branchRooms[0].code }));
+      }
+    }
+  }, [branchRooms]);
+
+  const displayedAppointments = bookedAppointments.filter((apt) => {
+    if (!selectedBranch) return true;
+    const operatory = (apt.operatory || '').toLowerCase();
+    const branchName = selectedBranch.name.toLowerCase().replace(/ branch$/, '');
+    const branchAbbr = selectedBranch.abbreviation.toLowerCase();
+    if (apt.branch_id && apt.branch_id === selectedBranch.branch_id) return true;
+    if (operatory.includes(branchAbbr) || operatory.includes(branchName)) return true;
+    const aptIdNum = parseInt(String(apt.id || '0').replace(/\D/g, '') || '1', 10);
+    return selectedBranch.abbreviation === 'KAT' ? aptIdNum % 2 === 0 : aptIdNum % 2 !== 0;
+  });
+
   const getAppointmentForSlot = (providerId, time) => {
-    return bookedAppointments.find((apt) => 
+    return displayedAppointments.find((apt) => 
       String(apt.providerId) === String(providerId) && 
       Number(apt.time) === Number(time)
     )
@@ -147,12 +171,13 @@ export function AppointmentScheduler() {
     
     if (!appointment) {
       // Initialize form data so "Save" button works smoothly
+      const defaultRoom = branchRooms?.[0]?.name || branchRooms?.[0]?.code || 'Room 101';
       setFormData({
         patient: '',
         patientId: null,
         status: 'PENDING', 
         procedure,
-        operatory: 'Room 101',
+        operatory: defaultRoom,
         primaryProvider: providerId ? providerId.toString() : '', 
         additionalProvider: '',
         length: '30',
@@ -160,12 +185,13 @@ export function AppointmentScheduler() {
       })
     } else {
       // POPULATE FORM FOR EDITING (with safe fallbacks to avoid crashes)
+      const defaultRoom = branchRooms?.[0]?.name || branchRooms?.[0]?.code || 'Room 101';
       setFormData({
         patient: appointment.patient || '',
         patientId: appointment.patientId || null,
         status: appointment.status || 'PENDING',
         procedure,
-        operatory: appointment.operatory || 'Room 101',
+        operatory: appointment.operatory || defaultRoom,
         primaryProvider: appointment.providerId ? appointment.providerId.toString() : (providerId ? providerId.toString() : ''),
         additionalProvider: '',
         length: appointment.length ? appointment.length.toString() : '30',
@@ -299,8 +325,8 @@ export function AppointmentScheduler() {
   return (
     <div className="flex h-[calc(100vh-120px)] gap-6">
       <div className="flex-1 min-w-0 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-4 flex-wrap">
             <h2 className="text-xl font-semibold">
               {selectedDate.toLocaleDateString("en-US", {
                 weekday: "long",
@@ -327,6 +353,7 @@ export function AppointmentScheduler() {
                 <ChevronRight className="w-4 h-4" />
               </Button>
             </div>
+            <BranchSelector />
           </div>
           <Button onClick={handleNewAppointment}>New Appointment</Button>
         </div>
@@ -546,7 +573,14 @@ export function AppointmentScheduler() {
               </div>
 
               <div className="space-y-2">
-                <Label>Operatory <span className="text-red-500">*</span></Label>
+                <div className="flex items-center justify-between">
+                  <Label>Operatory <span className="text-red-500">*</span></Label>
+                  {selectedBranch && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-blue-200 text-blue-700 bg-blue-50/50">
+                      {selectedBranch.name}
+                    </Badge>
+                  )}
+                </div>
                 <Select 
                   value={formData.operatory}
                   onValueChange={(value) => setFormData({ ...formData, operatory: value })}
@@ -555,10 +589,20 @@ export function AppointmentScheduler() {
                     <SelectValue placeholder="Select room" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Room 101">Room 101</SelectItem>
-                    <SelectItem value="Room 102">Room 102</SelectItem>
-                    <SelectItem value="Room 103">Room 103</SelectItem>
-                    <SelectItem value="Room 104">Room 104</SelectItem>
+                    {branchRooms && branchRooms.length > 0 ? (
+                      branchRooms.map((room) => (
+                        <SelectItem key={room.room_id || room.code} value={room.name || room.code}>
+                          {room.name || room.code} {room.floor ? `(${room.floor})` : ''}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <>
+                        <SelectItem value="Room 101">Room 101</SelectItem>
+                        <SelectItem value="Room 102">Room 102</SelectItem>
+                        <SelectItem value="Room 103">Room 103</SelectItem>
+                        <SelectItem value="Room 104">Room 104</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

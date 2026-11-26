@@ -1,13 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
 const { createProviderAccount, resetProviderPassword, syncProviderEmail, changeOwnPassword } = require('../lib/provider-accounts');
+const { isAllowedOrigin } = require('../lib/origin');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const origin = req.headers.origin;
   if (origin) {
-    let sameHost = false;
-    try { sameHost = new URL(origin).host === req.headers.host; } catch { /* Invalid origin is rejected. */ }
-    if (!sameHost && origin !== (process.env.CLIENT_ORIGIN || 'http://localhost:5173')) {
+    if (!isAllowedOrigin(origin, req.headers.host)) {
       return res.status(403).json({ error: 'Origin is not allowed.' });
     }
     res.setHeader('Access-Control-Allow-Origin', origin);
