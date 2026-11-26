@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { ChevronLeft, ChevronRight, CalendarIcon, Clock, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CalendarView } from "@/components/calendar-view" 
 import { format } from "date-fns"
 import { appointmentAPI } from "../../services/appointment"
+import { profileAPI } from "../../services/profile"
 import { useBranch } from "@/lib/branch-context"
 import { BranchSelector } from "@/components/branch-selector"
 
@@ -29,6 +30,8 @@ export function AppointmentScheduler() {
 
   // Search State
   const [patientSearchResults, setPatientSearchResults] = useState([])
+  const [prefilledPatient, setPrefilledPatient] = useState(null)
+  const autoOpenedFromUrlRef = useRef(false)
 
   const [formData, setFormData] = useState({
     patient: '',
@@ -41,6 +44,50 @@ export function AppointmentScheduler() {
     length: '30',
     notes: ''
   })
+
+  // Resolve pre-selected patient from ?patientId=... (when coming from Patients Table "Schedule" or Profile "+")
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paramPatientId = params.get('patientId');
+    const paramPatientName = params.get('patientName');
+    if (!paramPatientId) return;
+
+    if (paramPatientName) {
+      setPrefilledPatient({ id: paramPatientId, name: paramPatientName });
+      return;
+    }
+
+    let cancelled = false;
+    profileAPI.getPatientDetails(paramPatientId).then((details) => {
+      if (!cancelled && details) {
+        setPrefilledPatient({
+          id: paramPatientId,
+          name: details.name || 'Patient',
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Auto-open the booking form with the prefilled patient as soon as providers finish loading
+  useEffect(() => {
+    if (!prefilledPatient || autoOpenedFromUrlRef.current || providers.length === 0) return;
+    autoOpenedFromUrlRef.current = true;
+    const defaultRoom = branchRooms?.[0]?.name || branchRooms?.[0]?.code || 'Room 101';
+    const firstProviderId = providers[0]?.id;
+    setSelectedSlot({ providerId: firstProviderId, time: 8, date: selectedDate, appointment: null });
+    setFormData({
+      patient: prefilledPatient.name,
+      patientId: prefilledPatient.id,
+      status: 'PENDING',
+      procedure: '',
+      operatory: defaultRoom,
+      primaryProvider: firstProviderId ? firstProviderId.toString() : '',
+      additionalProvider: '',
+      length: '30',
+      notes: '',
+    });
+  }, [prefilledPatient, providers]);
 
   //Procedure-search state
   const [procedureSearch, setProcedureSearch] = useState("");
@@ -170,11 +217,11 @@ export function AppointmentScheduler() {
     setIsSearchingProcedures(false)
     
     if (!appointment) {
-      // Initialize form data so "Save" button works smoothly
+      // Initialize form data (preserving prefilledPatient if navigated from Patients -> Schedule)
       const defaultRoom = branchRooms?.[0]?.name || branchRooms?.[0]?.code || 'Room 101';
       setFormData({
-        patient: '',
-        patientId: null,
+        patient: prefilledPatient?.name || '',
+        patientId: prefilledPatient?.id || null,
         status: 'PENDING', 
         procedure,
         operatory: defaultRoom,
@@ -249,6 +296,12 @@ export function AppointmentScheduler() {
         const appointmentsData = await appointmentAPI.getAppointmentsByDate(selectedDate);
         setBookedAppointments(appointmentsData);
         setSelectedSlot(null); // Close panel
+        if (prefilledPatient) {
+          setPrefilledPatient(null);
+          if (window.location.search.includes('patientId=')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
     } else {
         alert("Failed to create appointment: " + result.error);
     }
@@ -275,6 +328,12 @@ export function AppointmentScheduler() {
         const appointmentsData = await appointmentAPI.getAppointmentsByDate(selectedDate);
         setBookedAppointments(appointmentsData);
         setSelectedSlot(null); // Close panel
+        if (prefilledPatient) {
+          setPrefilledPatient(null);
+          if (window.location.search.includes('patientId=')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
     } else {
         alert("Failed to update appointment: " + result.error);
     }

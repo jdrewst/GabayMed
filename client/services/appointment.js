@@ -342,8 +342,13 @@ export const appointmentAPI = {
 
   // 7. Get Upcoming Appointments for a Patient
   async getUpcomingAppointmentsByPatient(patientId) {
+    const { upcoming } = await this.getPatientAppointments(patientId);
+    return upcoming;
+  },
+
+  // 7b. Get Upcoming & Past Appointments for a Patient (for Profile Sidebar)
+  async getPatientAppointments(patientId) {
     const facilityId = Session.getFacilityId();
-    // FIX: Use local date string
     const today = getLocalDateStr(new Date());
     const startOfToday = `${today}T00:00:00`;
 
@@ -353,30 +358,49 @@ export const appointmentAPI = {
         .select(`
           appointment_id,
           appointment_date,
+          appointment_time,
           status,
+          notes,
           procedure_id,
-          procedures ( procedure_id ),
+          procedures ( procedure_id, description ),
           providers ( name )
         `)
         .eq('facility_id', facilityId)
         .eq('patient_id', patientId)
-        .gte('appointment_date', startOfToday)
-        .neq('status', 'CANCELLED')
-        .order('appointment_date', { ascending: true })
-        .limit(5);
+        .order('appointment_date', { ascending: true });
 
       if (error) throw error;
 
-      return (data || []).map(apt => ({
-        id: apt.appointment_id,
-        date: apt.appointment_date,
-        procedure: apt.procedure_id || apt.procedures?.procedure_id || 'General Checkup',
-        provider: apt.providers?.name || 'Unknown Provider',
-        status: apt.status
-      }));
+      const upcoming = [];
+      const past = [];
+
+      for (const apt of (data || [])) {
+        const statusUpper = String(apt.status || '').toUpperCase();
+        const item = {
+          id: apt.appointment_id,
+          date: apt.appointment_date,
+          time: apt.appointment_time || '',
+          procedure:
+            apt.procedures?.description ||
+            (apt.procedure_id ? `Procedure #${apt.procedure_id}` : 'General Consultation'),
+          provider: apt.providers?.name || 'Unknown Provider',
+          status: apt.status || 'SCHEDULED',
+        };
+
+        if (statusUpper === 'COMPLETED' || statusUpper === 'CANCELLED' || apt.appointment_date < startOfToday) {
+          past.push(item);
+        } else {
+          upcoming.push(item);
+        }
+      }
+
+      // Past appointments sorted newest first
+      past.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      return { upcoming, past };
     } catch (error) {
-      console.error("Get Patient Upcoming Appointments Error:", error.message);
-      return [];
+      console.error("Get Patient Appointments Error:", error.message);
+      return { upcoming: [], past: [] };
     }
   },
 

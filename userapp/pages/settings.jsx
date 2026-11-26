@@ -65,7 +65,7 @@ export function ProfilePage({ onBack }) {
 
   useEffect(() => {
     let mounted = true;
-    ProfileAPI.getProfile()
+    ProfileAPI.getProfile({ forceRefresh: true })
       .then(data => {
         if (mounted && data) setProfileData(data);
       })
@@ -86,6 +86,23 @@ export function ProfilePage({ onBack }) {
       unsub();
     };
   }, []);
+
+  // Live background sync fallback so edits saved by clinic staff in Gabay 1.0 appear immediately
+  useEffect(() => {
+    if (editingPersonal || editingMedical) return undefined;
+    let active = true;
+    const poll = setInterval(() => {
+      ProfileAPI.getProfile({ forceRefresh: true })
+        .then(data => {
+          if (active && data) setProfileData(data);
+        })
+        .catch(() => {});
+    }, 6000);
+    return () => {
+      active = false;
+      clearInterval(poll);
+    };
+  }, [editingPersonal, editingMedical]);
 
   // Countdown timer for Email OTP popup
   useEffect(() => {
@@ -221,14 +238,22 @@ export function ProfilePage({ onBack }) {
       return;
     }
 
-    // Otherwise save Personal & Demographics directly
+    // Otherwise save Personal & Demographics directly (independently of medical records)
     setSaving(true);
     try {
       const updated = await ProfileAPI.updateProfile({
-        ...draft,
-        allergiesList: profileData?.allergiesList || [],
-        medicalHistory: profileData?.medicalHistory || [],
-        bloodType: profileData?.bloodType !== 'Not set' ? profileData?.bloodType : '',
+        firstName: draft.firstName,
+        middleName: draft.middleName,
+        lastName: draft.lastName,
+        nameSuffix: draft.nameSuffix,
+        rawBirthdate: draft.rawBirthdate,
+        gender: draft.gender,
+        mobileLocal: draft.mobileLocal,
+        streetAddress: draft.streetAddress,
+        barangay: draft.barangay,
+        cityMunicipality: draft.cityMunicipality,
+        province: draft.province,
+        zipCode: draft.zipCode,
       });
       setProfileData(updated);
       setEditingPersonal(false);
@@ -276,12 +301,20 @@ export function ProfilePage({ onBack }) {
         code: cleanCode,
       });
       const updated = await ProfileAPI.updateProfile({
-        ...draft,
+        firstName: draft.firstName,
+        middleName: draft.middleName,
+        lastName: draft.lastName,
+        nameSuffix: draft.nameSuffix,
+        rawBirthdate: draft.rawBirthdate,
+        gender: draft.gender,
+        mobileLocal: draft.mobileLocal,
+        streetAddress: draft.streetAddress,
+        barangay: draft.barangay,
+        cityMunicipality: draft.cityMunicipality,
+        province: draft.province,
+        zipCode: draft.zipCode,
         newEmail: pendingNewEmail,
         otpToken: verified.otp_token,
-        allergiesList: profileData?.allergiesList || [],
-        medicalHistory: profileData?.medicalHistory || [],
-        bloodType: profileData?.bloodType !== 'Not set' ? profileData?.bloodType : '',
       });
       setEmailOtpModal(false);
       setProfileData(updated);

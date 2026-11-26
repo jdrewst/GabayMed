@@ -30,82 +30,126 @@ const API_BASE_URL = 'http://localhost:3000/api';
 export const profileAPI = {
 
   async getPatientDetails(patientId) {
-  try {
-    // 1. Retrieve the patient record
-    const { data: patient, error: patientError } = await supabase
-      .from("patients")
-      .select("patient_id, profile_id, date_of_birth, gender")
-      .eq("patient_id", patientId)
-      .single();
+    try {
+      // 1. Retrieve the facility patient record
+      const { data: patient, error: patientError } = await supabase
+        .from("patients")
+        .select("*")
+        .eq("patient_id", patientId)
+        .single();
 
-    if (patientError) throw patientError;
+      if (patientError) throw patientError;
 
-    if (!patient?.profile_id) {
-      throw new Error("Patient profile ID was not found.");
-    }
+      // 2. Retrieve the linked Gabay 2.0 profile (when linked via profile_id)
+      let profile = null;
+      if (patient?.profile_id) {
+        const { data: profileRow, error: profileError } = await supabase
+          .from("profiles")
+          .select(`
+            id,
+            first_name,
+            middle_name,
+            last_name,
+            name_suffix,
+            full_name,
+            email,
+            phone_number,
+            date_of_birth,
+            gender,
+            address,
+            street_address,
+            barangay,
+            city_municipality,
+            province,
+            zip_code,
+            blood_type,
+            allergies,
+            medical_history,
+            avatar_url
+          `)
+          .eq("id", patient.profile_id)
+          .maybeSingle();
 
-    // 2. Retrieve the associated profile
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select(`
-        id,
-        first_name,
-        middle_name,
-        last_name,
-        full_name,
-        email,
-        phone_number,
-        address,
-        street_address,
+        if (!profileError && profileRow) {
+          profile = profileRow;
+        }
+      }
+
+      const firstName = profile?.first_name ?? patient.first_name ?? "";
+      const middleName = profile?.middle_name ?? patient.middle_name ?? "";
+      const lastName = profile?.last_name ?? patient.last_name ?? "";
+      const nameSuffix = profile?.name_suffix ?? "";
+      const fullName =
+        [firstName, middleName, lastName, nameSuffix].filter(Boolean).join(" ") ||
+        profile?.full_name ||
+        patient.full_name ||
+        "Unknown";
+
+      const streetAddress = profile?.street_address || "";
+      const barangay = profile?.barangay || "";
+      const cityMunicipality = profile?.city_municipality || "";
+      const province = profile?.province || "";
+      const zipCode = profile?.zip_code || "";
+      const fullAddress =
+        [streetAddress, barangay, cityMunicipality, province, zipCode].filter(Boolean).join(", ") ||
+        profile?.address ||
+        patient.address ||
+        "";
+
+      const birthDate = (profile?.date_of_birth || patient.date_of_birth || "").slice(0, 10);
+      const gender = profile?.gender || patient.gender || "";
+      const bloodType = profile?.blood_type || "";
+      const allergiesRaw = profile?.allergies || "";
+      const medicalHistoryRaw = profile?.medical_history ?? patient.medical_history ?? "";
+
+      const splitList = (val) =>
+        typeof val === "string"
+          ? val
+              .split(/[\n,;]+/)
+              .map((s) => s.trim())
+              .filter((s) => s && s.toLowerCase() !== "none")
+          : [];
+
+      return {
+        id: patient.patient_id,
+        patientId: patient.patient_id,
+        profileId: profile?.id || patient.profile_id || null,
+        isLinkedAccount: Boolean(patient.profile_id),
+
+        name: fullName,
+        first_name: firstName,
+        middle_name: middleName,
+        last_name: lastName,
+        name_suffix: nameSuffix,
+        email: profile?.email || "",
+        phone: profile?.phone_number || patient.phone_number || "",
+        avatar_url: profile?.avatar_url || "",
+
+        // Structured address
+        street_address: streetAddress,
         barangay,
-        city_municipality,
+        city_municipality: cityMunicipality,
         province,
-        zip_code
-      `)
-      .eq("id", patient.profile_id)
-      .single();
+        zip_code: zipCode,
+        address: fullAddress,
 
-    if (profileError) throw profileError;
+        birthDate,
+        gender,
+        sex: gender,
+        age: birthDate ? calculateAge(birthDate) : (patient.age ?? "N/A"),
 
-    const fullName = [
-      profile.first_name,
-      profile.middle_name,
-      profile.last_name
-    ].filter(Boolean).join(" ") || profile.full_name || "Unknown";
-
-    return {
-      // Keep the two IDs separate
-      id: patient.patient_id,
-      patientId: patient.patient_id,
-      profileId: profile.id,
-
-      name: fullName,
-      first_name: profile.first_name,
-      middle_name: profile.middle_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone_number,
-
-      // Structured address
-      street_address: profile.street_address || "",
-      barangay: profile.barangay || "",
-      city_municipality: profile.city_municipality || "",
-      province: profile.province || "",
-      zip_code: profile.zip_code || "",
-
-      address: profile.address || "",
-
-      birthDate: patient.date_of_birth,
-      gender: patient.gender,
-      sex: patient.gender,
-      age: calculateAge(patient.date_of_birth)
-    };
-
-  } catch (error) {
-    console.error("Get Patient Details Error:", error);
-    return null;
-  }
-},
+        // Synchronized Medical Chart Summary
+        blood_type: bloodType,
+        allergies: allergiesRaw,
+        allergiesList: splitList(allergiesRaw),
+        medical_history: medicalHistoryRaw,
+        medicalHistoryList: splitList(medicalHistoryRaw),
+      };
+    } catch (error) {
+      console.error("Get Patient Details Error:", error);
+      return null;
+    }
+  },
 
   // 2. Get Insurance Plans
   async getInsurancePlans(patientId) {
@@ -149,23 +193,178 @@ export const profileAPI = {
     }
   },
 
-  // 3. Update Patient Profile
+  // 3. Update Patient Personal & Demographic Profile (independent of medical fields)
   async updatePatient(patientId, updates) {
     try {
+      const { data: patient, error: fetchError } = await supabase
+        .from("patients")
+        .select("patient_id, profile_id")
+        .eq("patient_id", patientId)
+        .single();
+      if (fetchError) throw fetchError;
 
-      //Calculate Age
-      const calculateAge = (dateOfBirth) => {
-        if (!dateOfBirth) return null;
-        const today = new Date();
-        const birthDate = new Date(`${dateOfBirth}T00:00:00`);
-        let age = today.getFullYear() - birthDate.getFullYear();
-        const monthDifference = today.getMonth() - birthDate.getMonth();
-        if (monthDifference < 0 ||(monthDifference === 0 && today.getDate() < birthDate.getDate())) {
-          age--;
-        }
-        return age;
+      const firstName = (updates.first_name || "").trim();
+      const middleName = (updates.middle_name || "").trim() || null;
+      const lastName = (updates.last_name || "").trim();
+      const nameSuffix = (updates.name_suffix || "").trim() || null;
+      const fullName = [firstName, middleName, lastName, nameSuffix].filter(Boolean).join(" ");
+
+      const streetAddress = (updates.street_address || "").trim() || null;
+      const barangay = (updates.barangay || "").trim() || null;
+      const cityMunicipality = (updates.city_municipality || "").trim() || null;
+      const province = (updates.province || "").trim() || null;
+      const zipCode = (updates.zip_code || "").trim() || null;
+      const address =
+        [streetAddress, barangay, cityMunicipality, province, zipCode].filter(Boolean).join(", ") ||
+        null;
+
+      const normalizedGender =
+        updates.sex === "M" ? "Male" : updates.sex === "F" ? "Female" : (updates.sex || updates.gender || null);
+      const age = updates.birthDate ? calculateAge(updates.birthDate) : null;
+      const ageNum = typeof age === "number" && !Number.isNaN(age) ? age : null;
+
+      let updatedProfile = null;
+      let prevProfile = null;
+
+      if (patient?.profile_id) {
+        const { data: existingProfile } = await supabase
+          .from("profiles")
+          .select(
+            "first_name, middle_name, last_name, name_suffix, full_name, email, phone_number, date_of_birth, gender, street_address, barangay, city_municipality, province, zip_code, address"
+          )
+          .eq("id", patient.profile_id)
+          .maybeSingle();
+        prevProfile = existingProfile || null;
+
+        const { data: savedProfile, error: profileError } = await supabase
+          .from("profiles")
+          .update({
+            first_name: firstName,
+            middle_name: middleName,
+            last_name: lastName,
+            name_suffix: nameSuffix,
+            full_name: fullName,
+            email: (updates.email || "").trim() || prevProfile?.email || null,
+            phone_number: (updates.phone || "").trim() || null,
+            date_of_birth: updates.birthDate || null,
+            gender: normalizedGender,
+            street_address: streetAddress,
+            barangay,
+            city_municipality: cityMunicipality,
+            province,
+            zip_code: zipCode,
+            address,
+          })
+          .eq("id", patient.profile_id)
+          .select()
+          .single();
+
+        if (profileError) throw profileError;
+        updatedProfile = savedProfile;
+      }
+
+      const patientPatch = {
+        full_name: fullName,
+        first_name: firstName,
+        middle_name: middleName,
+        last_name: lastName,
+        phone_number: (updates.phone || "").trim() || null,
+        address,
+        date_of_birth: updates.birthDate || null,
+        gender: normalizedGender,
+        age: ageNum,
       };
 
+      // Sync across all linked facility patient rows when linked, or just this patient row for walk-ins
+      const patientQuery = patient?.profile_id
+        ? supabase.from("patients").update(patientPatch).eq("profile_id", patient.profile_id)
+        : supabase.from("patients").update(patientPatch).eq("patient_id", patientId);
+
+      const { error: patientError } = await patientQuery;
+      if (patientError) {
+        if (patient?.profile_id && prevProfile) {
+          try {
+            await supabase.from("profiles").update(prevProfile).eq("id", patient.profile_id);
+          } catch {}
+        }
+        throw patientError;
+      }
+
+      return {
+        success: true,
+        age: ageNum ?? "N/A",
+        data: updatedProfile,
+      };
+    } catch (error) {
+      console.error("Update Patient Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // 3b. Update Patient Medical Chart (blood type, allergies, medical conditions — independent of personal details)
+  async updatePatientMedical(patientId, { blood_type, allergies, medical_history }) {
+    try {
+      const { data: patient, error: fetchError } = await supabase
+        .from("patients")
+        .select("patient_id, profile_id")
+        .eq("patient_id", patientId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      const cleanBloodType = (blood_type || "").trim() || null;
+      const cleanAllergies = (allergies || "").trim().slice(0, 500) || null;
+      const cleanHistory = (medical_history || "").trim().slice(0, 1000) || null;
+
+      let prevProfile = null;
+      if (patient?.profile_id) {
+        const { data: existingProfile } = await supabase
+          .from("profiles")
+          .select("blood_type, allergies, medical_history")
+          .eq("id", patient.profile_id)
+          .maybeSingle();
+        prevProfile = existingProfile || null;
+
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .update({
+            blood_type: cleanBloodType,
+            allergies: cleanAllergies,
+            medical_history: cleanHistory,
+          })
+          .eq("id", patient.profile_id);
+
+        if (profileError) throw profileError;
+      }
+
+      const patientQuery = patient?.profile_id
+        ? supabase.from("patients").update({ medical_history: cleanHistory }).eq("profile_id", patient.profile_id)
+        : supabase.from("patients").update({ medical_history: cleanHistory }).eq("patient_id", patientId);
+
+      const { error: patientError } = await patientQuery;
+      if (patientError) {
+        if (patient?.profile_id && prevProfile) {
+          try {
+            await supabase.from("profiles").update(prevProfile).eq("id", patient.profile_id);
+          } catch {}
+        }
+        throw patientError;
+      }
+
+      return {
+        success: true,
+        blood_type: cleanBloodType || "",
+        allergies: cleanAllergies || "",
+        medical_history: cleanHistory || "",
+      };
+    } catch (error) {
+      console.error("Update Patient Medical Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // 3c. Update Patient Avatar (preset ID or custom image data URI / URL)
+  async updatePatientAvatar(patientId, avatarUrl) {
+    try {
       const { data: patient, error: fetchError } = await supabase
         .from("patients")
         .select("patient_id, profile_id")
@@ -173,62 +372,23 @@ export const profileAPI = {
         .single();
       if (fetchError) throw fetchError;
       if (!patient?.profile_id) {
-        throw new Error("Associated profile was not found.");
+        return { success: false, error: "This patient does not have a linked profile account yet." };
       }
-        
-      const address = [ updates.street_address, updates.barangay, updates.city_municipality, updates.province,updates.zip_code]
-        .filter(value => value && value.trim())
-        .join(", ");
 
-      const { data: updatedProfile, error: profileError } = await supabase
-      .from("profiles")
-      .update({
-        first_name: updates.first_name,
-        middle_name: updates.middle_name || null,
-        last_name: updates.last_name,
-        email: updates.email,
-        phone_number: updates.phone,
-        street_address: updates.street_address || null,
-        barangay: updates.barangay || null,
-        city_municipality: updates.city_municipality || null,
-        province: updates.province || null,
-        zip_code: updates.zip_code || null,
-        address: address
-      })
-      .eq("id", patient.profile_id)
-      .select()
-      .single();
+      const cleanAvatar =
+        typeof avatarUrl === "string" && avatarUrl.trim()
+          ? avatarUrl.trim().slice(0, 1500000)
+          : null;
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: cleanAvatar })
+        .eq("id", patient.profile_id);
 
       if (profileError) throw profileError;
-
-    const age = calculateAge(updates.birthDate);
-
-    const { error: patientError } = await supabase
-      .from("patients")
-      .update({
-      full_name: [
-        updates.first_name,
-        updates.middle_name,
-        updates.last_name
-      ].filter(Boolean).join(" "),
-      first_name: updates.first_name,
-      middle_name: updates.middle_name || null,
-      last_name: updates.last_name,
-      date_of_birth: updates.birthDate,
-      gender: updates.sex,
-      age: age
-      })
-      .eq("patient_id", patientId);
-
-    if (patientError) throw patientError;
-
-    return {
-      success: true,
-      age: age,
-      data: updatedProfile
-    };
+      return { success: true, avatar_url: cleanAvatar || "" };
     } catch (error) {
-      console.error("Update Patient Error:", error.message);
+      console.error("Update Patient Avatar Error:", error.message);
       return { success: false, error: error.message };
     }
   },

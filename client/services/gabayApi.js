@@ -395,6 +395,7 @@ export const GabayAPI = {
         .from('patients')
         .select(`
           patient_id,
+          profile_id,
           full_name,
           first_name,
           middle_name,
@@ -411,17 +412,52 @@ export const GabayAPI = {
 
       if (error) throw error;
 
-      // 2. Process data
-      const patientsList = data.map(patient => {
+      // Batch-fetch linked Gabay 2.0 profiles for synchronized avatar & gender
+      const profileIds = [...new Set((data || []).map(p => p.profile_id).filter(Boolean))];
+      const profileMap = new Map();
+      if (profileIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, avatar_url, gender, full_name, first_name, middle_name, last_name, name_suffix')
+          .in('id', profileIds);
+        (profilesData || []).forEach(prof => profileMap.set(prof.id, prof));
+      }
+
+      // 2. Process data & deduplicate by profile_id (keep the record with the most recent visit / most appointments)
+      const dedupedRows = [];
+      const seenByProfile = new Map();
+
+      for (const patient of (data || [])) {
+        if (!patient.profile_id) {
+          dedupedRows.push(patient);
+          continue;
+        }
+        const existingIdx = seenByProfile.get(patient.profile_id);
+        if (existingIdx === undefined) {
+          seenByProfile.set(patient.profile_id, dedupedRows.length);
+          dedupedRows.push(patient);
+        } else {
+          const prev = dedupedRows[existingIdx];
+          const prevCount = prev.appointments?.length || 0;
+          const currCount = patient.appointments?.length || 0;
+          if (currCount > prevCount) {
+            dedupedRows[existingIdx] = patient;
+          }
+        }
+      }
+
+      const patientsList = dedupedRows.map(patient => {
+        const linkedProfile = patient.profile_id ? profileMap.get(patient.profile_id) : null;
         
         // A. Construct Full Name
         const fullName = [
-          patient.first_name,
-          patient.middle_name,
-          patient.last_name
+          linkedProfile?.first_name ?? patient.first_name,
+          linkedProfile?.middle_name ?? patient.middle_name,
+          linkedProfile?.last_name ?? patient.last_name,
+          linkedProfile?.name_suffix
         ]
           .filter(Boolean)
-          .join(" ") || patient.full_name || "Unknown";
+          .join(" ") || linkedProfile?.full_name || patient.full_name || "Unknown";
 
         // B. Calculate Age
         let age = patient.age || 'N/A';
@@ -448,13 +484,15 @@ export const GabayAPI = {
 
         return {
           user_id: patient.patient_id,
+          profile_id: patient.profile_id || null,
           full_name: fullName,
-          first_name: patient.first_name,
-          middle_name: patient.middle_name,
-          last_name: patient.last_name,
+          first_name: linkedProfile?.first_name ?? patient.first_name,
+          middle_name: linkedProfile?.middle_name ?? patient.middle_name,
+          last_name: linkedProfile?.last_name ?? patient.last_name,
           age: age,
-          gender: patient.gender || 'N/A',
+          gender: linkedProfile?.gender || patient.gender || 'N/A',
           date_of_birth: patient.date_of_birth,
+          avatar_url: linkedProfile?.avatar_url || '',
           visit_date: lastVisit 
         };
       });

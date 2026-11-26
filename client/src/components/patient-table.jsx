@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { PatientAvatar } from "@/components/patient-avatar"
 import { Search, Plus, Calendar, Eye, ArrowLeft, Building2 } from "lucide-react"
 import { AddPatientDialog } from "@/components/add-patient-dialog"
 import { PatientProfile } from "@/pages/patient-profile"
@@ -129,15 +129,11 @@ export function PatientsTable({ patients = [], loading = false, onPatientUpdated
                   <tr key={patient.user_id || index} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
                     <td className="py-4">
                       <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8 flex-shrink-0">
-                          <AvatarImage 
-                            src={`https://api.dicebear.com/7.x/initials/svg?seed=${getFullName(patient)}`} 
-                            alt={getFullName(patient)} 
-                          />
-                          <AvatarFallback>
-                            {patient.first_name?.[0] || "p"}
-                          </AvatarFallback>
-                        </Avatar>
+                        <PatientAvatar
+                          avatar={patient.avatar_url}
+                          gender={patient.gender}
+                          size={36}
+                        />
                         <span className="font-medium truncate">{getFullName(patient)}</span>
                       </div>
                     </td>
@@ -158,7 +154,7 @@ export function PatientsTable({ patients = [], loading = false, onPatientUpdated
                     <td className="py-4">
                       <div className="flex items-center gap-2">
                         <Button variant="outline" size="sm" className="flex-1" asChild>
-                          <a href={`/appointments?patientId=${patient.user_id}`}>
+                          <a href={`/appointments?patientId=${encodeURIComponent(patient.user_id)}&patientName=${encodeURIComponent(getFullName(patient))}`}>
                             <Calendar className="w-3 h-3 mr-1" />
                             Schedule
                           </a>

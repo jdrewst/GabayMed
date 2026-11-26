@@ -243,6 +243,53 @@ function getPermissionsKey() {
   return `gabay_permissions_v1_${uid}`;
 }
 
+let realtimeChannel = null;
+let realtimeUserId = null;
+
+function stopRealtimeProfileSync() {
+  if (realtimeChannel) {
+    try { supabase.removeChannel(realtimeChannel); } catch {}
+    realtimeChannel = null;
+    realtimeUserId = null;
+  }
+}
+
+function ensureRealtimeProfileSync() {
+  const userId = Session.getUserId();
+  if (!userId) {
+    stopRealtimeProfileSync();
+    return;
+  }
+  if (realtimeChannel && realtimeUserId === userId) return;
+  stopRealtimeProfileSync();
+  realtimeUserId = userId;
+  try {
+    realtimeChannel = supabase
+      .channel(`profile-sync-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+        payload => {
+          if (payload?.new) {
+            const formatted = normalizeRowToUi(payload.new);
+            Session.setProfile({
+              id: formatted.id,
+              firstName: formatted.firstName,
+              lastName: formatted.lastName,
+              fullName: formatted.name,
+              email: formatted.email,
+              avatar: formatted.avatar,
+              gender: formatted.gender,
+              onboardingCompleted: true,
+            });
+            notifyProfileChanged(formatted);
+          }
+        }
+      )
+      .subscribe();
+  } catch {}
+}
+
 function notifyProfileChanged(profile) {
   cachedProfile = profile;
   profileListeners.forEach(fn => {
@@ -260,7 +307,11 @@ function notifyPermissionsChanged(perms) {
 const ProfileAPI = {
   subscribe(listener) {
     profileListeners.add(listener);
-    return () => profileListeners.delete(listener);
+    ensureRealtimeProfileSync();
+    return () => {
+      profileListeners.delete(listener);
+      if (profileListeners.size === 0) stopRealtimeProfileSync();
+    };
   },
 
   subscribePermissions(listener) {
@@ -545,10 +596,11 @@ const ProfileAPI = {
   },
 
   /**
-   * Updates ONLY the patient's medical records (blood type, allergies list, medical history list).
+   * Updates ONLY the patient's medical records (blood type, allergies list, medical history list)
+   * and synchronizes them to all linked facility patient records without overwriting personal details.
    */
   async updateMedicalRecords({ bloodType, allergiesList, medicalHistory }) {
-    const bt = bloodType && bloodType !== 'Not set' ? bloodType : '';
+    const bt = bloodType && bloodType !== 'Not set' ? String(bloodType).trim() : '';
     const allergiesStr = (allergiesList || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
     const historyStr = (medicalHistory || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
 
@@ -565,11 +617,19 @@ const ProfileAPI = {
           notifyProfileChanged(formatted);
           return formatted;
         }
-      } catch {}
+      } catch (err) {
+        if (err?.status && err.status !== 404) throw err;
+      }
     }
 
     const userId = Session.getUserId();
     if (!userId) throw new Error('User not logged in');
+
+    const { data: prevProfile } = await supabase
+      .from('profiles')
+      .select('blood_type, allergies, medical_history')
+      .eq('id', userId)
+      .maybeSingle();
 
     const { data, error } = await supabase
       .from('profiles')
@@ -583,6 +643,30 @@ const ProfileAPI = {
       .single();
 
     if (error) throw error;
+
+    const { error: syncError } = await supabase
+      .from('patients')
+      .update({ medical_history: historyStr || null })
+      .eq('profile_id', userId);
+
+    if (syncError) {
+      if (prevProfile) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              blood_type: prevProfile.blood_type ?? null,
+              allergies: prevProfile.allergies ?? null,
+              medical_history: prevProfile.medical_history ?? null,
+            })
+            .eq('id', userId);
+        } catch {}
+      }
+      throw new Error(
+        'Could not synchronize your medical records with linked clinics. No changes were saved. Please try again.'
+      );
+    }
+
     const formatted = normalizeRowToUi(data);
     notifyProfileChanged(formatted);
     return formatted;
@@ -626,7 +710,8 @@ const ProfileAPI = {
 
   /**
    * UPDATE:
-   * Validates and updates personal, contact, demographic, and medical details via the backend.
+   * Validates and updates ONLY personal, contact, and demographic details via the backend,
+   * synchronizing them across linked facility records without overwriting medical records.
    * Supports OTP-verified email update via `newEmail` + `otpToken`.
    */
   async updateProfile(updates) {
@@ -643,16 +728,6 @@ const ProfileAPI = {
       city_municipality: (updates.cityMunicipality || '').trim(),
       province: (updates.province || '').trim(),
       zip_code: (updates.zipCode || '').trim(),
-      blood_type: updates.bloodType && updates.bloodType !== 'Not set' ? updates.bloodType : '',
-      allergies: Array.isArray(updates.allergiesList)
-        ? updates.allergiesList.join(', ')
-        : updates.allergies && updates.allergies !== 'None'
-          ? String(updates.allergies).trim()
-          : '',
-      medical_history: Array.isArray(updates.medicalHistory)
-        ? updates.medicalHistory.join(', ')
-        : String(updates.medicalHistory || '').trim(),
-      avatar_url: updates.avatar || '',
     };
 
     if (updates.newEmail) {
@@ -678,11 +753,11 @@ const ProfileAPI = {
           return formatted;
         }
       } catch (err) {
-        if (err.status === 400 || err.status === 401 || err.status === 409) throw err;
+        if (err?.status && err.status !== 404) throw err;
       }
     }
 
-    // Fallback direct update if local backend server was not restarted
+    // Fallback direct update only if local backend server is unreachable
     const userId = Session.getUserId();
     if (!userId) throw new Error('User not logged in');
 
@@ -721,15 +796,19 @@ const ProfileAPI = {
       province: payload.province || null,
       zip_code: payload.zip_code || null,
       address: address || null,
-      blood_type: payload.blood_type || null,
-      allergies: payload.allergies || null,
-      medical_history: payload.medical_history || null,
-      avatar_url: payload.avatar_url || null,
     };
 
     if (payload.new_email) {
       dbUpdates.email = payload.new_email;
     }
+
+    const { data: prevProfile } = await supabase
+      .from('profiles')
+      .select(
+        'first_name, middle_name, last_name, name_suffix, full_name, email, date_of_birth, gender, phone_number, street_address, barangay, city_municipality, province, zip_code, address'
+      )
+      .eq('id', userId)
+      .maybeSingle();
 
     const { data, error } = await supabase
       .from('profiles')
@@ -739,6 +818,35 @@ const ProfileAPI = {
       .single();
 
     if (error) throw error;
+
+    const ageStr = calculateAge(payload.date_of_birth);
+    const ageNum = ageStr !== 'N/A' && !Number.isNaN(Number(ageStr)) ? Number(ageStr) : null;
+    const { error: syncError } = await supabase
+      .from('patients')
+      .update({
+        full_name,
+        first_name: payload.first_name,
+        middle_name: payload.middle_name || null,
+        last_name: payload.last_name,
+        phone_number: normalizedPhone,
+        address: address || null,
+        date_of_birth: payload.date_of_birth || null,
+        gender: payload.gender || null,
+        age: ageNum,
+      })
+      .eq('profile_id', userId);
+
+    if (syncError) {
+      if (prevProfile) {
+        try {
+          await supabase.from('profiles').update(prevProfile).eq('id', userId);
+        } catch {}
+      }
+      throw new Error(
+        'Could not synchronize your profile with linked clinics. No changes were saved. Please try again.'
+      );
+    }
+
     const formatted = normalizeRowToUi(data);
     Session.setProfile({
       id: formatted.id,
@@ -758,11 +866,15 @@ const ProfileAPI = {
   async clearMedicalRecord(field = 'all') {
     const token = await Session.getAccessToken();
     if (token) {
-      const res = await AuthAPI.clearMedicalField(token, field);
-      if (res?.profile) {
-        const formatted = normalizeRowToUi(res.profile);
-        notifyProfileChanged(formatted);
-        return formatted;
+      try {
+        const res = await AuthAPI.clearMedicalField(token, field);
+        if (res?.profile) {
+          const formatted = normalizeRowToUi(res.profile);
+          notifyProfileChanged(formatted);
+          return formatted;
+        }
+      } catch (err) {
+        if (err?.status && err.status !== 404) throw err;
       }
     }
     const userId = Session.getUserId();
@@ -773,6 +885,13 @@ const ProfileAPI = {
         : field === 'medical_history'
           ? { medical_history: null }
           : { blood_type: null, allergies: null, medical_history: null };
+
+    const { data: prevProfile } = await supabase
+      .from('profiles')
+      .select('blood_type, allergies, medical_history')
+      .eq('id', userId)
+      .maybeSingle();
+
     const { data, error } = await supabase
       .from('profiles')
       .update(patch)
@@ -780,6 +899,24 @@ const ProfileAPI = {
       .select('*')
       .single();
     if (error) throw error;
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'medical_history')) {
+      const { error: syncError } = await supabase
+        .from('patients')
+        .update({ medical_history: null })
+        .eq('profile_id', userId);
+      if (syncError) {
+        if (prevProfile) {
+          try {
+            await supabase.from('profiles').update(prevProfile).eq('id', userId);
+          } catch {}
+        }
+        throw new Error(
+          'Could not synchronize your medical record with linked clinics. No changes were saved. Please try again.'
+        );
+      }
+    }
+
     const formatted = normalizeRowToUi(data);
     notifyProfileChanged(formatted);
     return formatted;
@@ -820,6 +957,7 @@ const ProfileAPI = {
   },
 
   async signOut() {
+    stopRealtimeProfileSync();
     notifyProfileChanged(null);
     return Session.signOut();
   },

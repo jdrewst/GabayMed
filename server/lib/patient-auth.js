@@ -530,17 +530,6 @@ function validateProfileUpdateInput(body) {
     text('address') ||
     null;
 
-  const blood_type = text('blood_type') || null;
-  if (blood_type && !BLOOD_TYPES.includes(blood_type)) {
-    errors.blood_type = 'Choose a valid blood type.';
-  }
-
-  const allergies = text('allergies') ? text('allergies').slice(0, 500) : null;
-  const medical_history = text('medical_history') ? text('medical_history').slice(0, 1000) : null;
-  const avatar_url = typeof body.avatar_url === 'string' && body.avatar_url.trim()
-    ? body.avatar_url.trim().slice(0, 1500000)
-    : null;
-
   if (Object.keys(errors).length) {
     throw Object.assign(new RequestError(400, Object.values(errors)[0]), { fields: errors });
   }
@@ -561,17 +550,73 @@ function validateProfileUpdateInput(body) {
     province,
     zip_code,
     address,
-    blood_type,
-    allergies,
-    medical_history,
-    avatar_url,
   };
+}
+
+function validateMedicalUpdateInput(body) {
+  if (!body || typeof body !== 'object') {
+    throw new RequestError(400, 'Medical record details are required.');
+  }
+  const text = key => (typeof body[key] === 'string' ? body[key].trim().replace(/\s+/g, ' ') : '');
+  const errors = {};
+
+  const rawBloodType = text('blood_type');
+  if (rawBloodType && !BLOOD_TYPES.includes(rawBloodType)) {
+    errors.blood_type = 'Choose a valid blood type.';
+  }
+
+  if (Object.keys(errors).length) {
+    throw Object.assign(new RequestError(400, Object.values(errors)[0]), { fields: errors });
+  }
+
+  const blood_type = rawBloodType || null;
+  const allergies = text('allergies') ? text('allergies').slice(0, 500) : null;
+  const medical_history = text('medical_history') ? text('medical_history').slice(0, 1000) : null;
+
+  return { blood_type, allergies, medical_history };
+}
+
+/**
+ * Propagates saved profile/medical changes to ALL existing linked facility `patients` rows
+ * (`profile_id = userId`) without ever creating duplicate patient records.
+ */
+async function syncLinkedPatients(admin, userId, patientPatch) {
+  if (!patientPatch || Object.keys(patientPatch).length === 0) return;
+  const res = await admin
+    .from('patients')
+    .update(patientPatch)
+    .eq('profile_id', userId);
+  if (res?.error) {
+    throw new Error(res.error.message || 'Facility patient sync failed.');
+  }
+}
+
+async function rollbackProfile(admin, userId, previousRow, keys, previousEmail = '') {
+  if (previousRow && keys.length > 0) {
+    const revertPatch = {};
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(previousRow, key)) {
+        revertPatch[key] = previousRow[key];
+      }
+    }
+    try {
+      await admin.from('profiles').update(revertPatch).eq('id', userId);
+    } catch {}
+  }
+  if (previousEmail && admin.auth?.admin?.updateUserById) {
+    try {
+      await admin.auth.admin.updateUserById(userId, {
+        email: previousEmail,
+        email_confirm: true,
+      });
+    } catch {}
+  }
 }
 
 /**
  * Handles full CRUD on the signed-in patient's profile
  * (`action: 'get' | 'update' | 'update_avatar' | 'update_medical' | 'update_consents' | 'clear_medical'`).
- * Also syncs updated demographic & medical details to any linked `patients` rows across facilities.
+ * Atomically syncs updated demographic or medical details independently to linked `patients` rows across facilities.
  */
 async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
   const user = await verifiedUser(admin, token);
@@ -592,6 +637,8 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
         : field === 'medical_history'
           ? { medical_history: null }
           : { blood_type: null, allergies: null, medical_history: null };
+
+    const prevRes = await admin.from('profiles').select('blood_type, allergies, medical_history').eq('id', user.id).maybeSingle();
     const updated = await admin
       .from('profiles')
       .update(patch)
@@ -600,6 +647,18 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
       .maybeSingle();
     if (updated.error || !updated.data) {
       throw new RequestError(503, 'Could not update your medical record.');
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'medical_history')) {
+      try {
+        await syncLinkedPatients(admin, user.id, { medical_history: null });
+      } catch {
+        await rollbackProfile(admin, user.id, prevRes?.data, Object.keys(patch));
+        throw new RequestError(
+          503,
+          'Could not synchronize your medical record with linked clinics. No changes were saved. Please try again.'
+        );
+      }
     }
     return { profile: mapFullProfile(updated.data) };
   }
@@ -674,42 +733,53 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
   }
 
   if (action === 'update_medical') {
-    const blood_type =
-      typeof body.blood_type === 'string' && BLOOD_TYPES.includes(body.blood_type.trim())
-        ? body.blood_type.trim()
-        : null;
-    const allergies =
-      typeof body.allergies === 'string' && body.allergies.trim()
-        ? body.allergies.trim().slice(0, 500)
-        : null;
-    const medical_history =
-      typeof body.medical_history === 'string' && body.medical_history.trim()
-        ? body.medical_history.trim().slice(0, 1000)
-        : null;
+    const medicalUpdates = validateMedicalUpdateInput(body);
+    const prevRes = await admin
+      .from('profiles')
+      .select('blood_type, allergies, medical_history')
+      .eq('id', user.id)
+      .maybeSingle();
 
     const updated = await admin
       .from('profiles')
-      .update({ blood_type, allergies, medical_history })
+      .update(medicalUpdates)
       .eq('id', user.id)
       .select(FULL_PROFILE_COLUMNS)
       .maybeSingle();
     if (updated.error || !updated.data) {
       throw new RequestError(503, 'Could not save your medical records.');
     }
+
+    // Sync medical summary to linked facility `patients` rows without touching personal/demographic fields
     try {
-      await admin
-        .from('patients')
-        .update({ medical_history })
-        .eq('profile_id', user.id);
-    } catch {}
+      await syncLinkedPatients(admin, user.id, {
+        medical_history: medicalUpdates.medical_history,
+      });
+    } catch {
+      await rollbackProfile(admin, user.id, prevRes?.data, ['blood_type', 'allergies', 'medical_history']);
+      throw new RequestError(
+        503,
+        'Could not synchronize your medical records with linked clinics. No changes were saved. Please try again.'
+      );
+    }
+
     return { profile: mapFullProfile(updated.data) };
   }
 
-  // action === 'update' (Personal & Demographics, with optional OTP-verified email change)
+  // action === 'update' (Personal & Demographics ONLY, with optional OTP-verified email change)
   const updates = validateProfileUpdateInput(body);
   const requestedEmail =
     typeof body.new_email === 'string' ? body.new_email.trim().toLowerCase() : '';
   const currentEmail = (user.email || '').trim().toLowerCase();
+  let emailChanged = false;
+
+  const prevRes = await admin
+    .from('profiles')
+    .select(
+      'first_name, middle_name, last_name, name_suffix, full_name, email, date_of_birth, gender, phone_number, street_address, barangay, city_municipality, province, zip_code, address'
+    )
+    .eq('id', user.id)
+    .maybeSingle();
 
   if (requestedEmail && requestedEmail !== currentEmail) {
     if (!EMAIL.test(requestedEmail) || requestedEmail.length > 254) {
@@ -746,6 +816,7 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
         }
         throw new RequestError(503, 'Could not update your login email right now. Please try again.');
       }
+      emailChanged = true;
     }
     updates.email = requestedEmail;
   }
@@ -757,30 +828,41 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
     .select(FULL_PROFILE_COLUMNS)
     .maybeSingle();
   if (saved.error || !saved.data) {
+    if (emailChanged) {
+      await rollbackProfile(admin, user.id, null, [], currentEmail);
+    }
     throw new RequestError(503, 'Could not save your profile changes. Please try again.');
   }
 
-  // Keep linked hospital `patients` rows in sync so healthcare providers always see the latest record
+  // Sync ONLY personal & demographic fields to linked facility `patients` rows (never overwrites medical_history)
   const ageYears = calculateAgeYears(updates.date_of_birth);
+  const patientSync = {
+    full_name: updates.full_name,
+    first_name: updates.first_name,
+    middle_name: updates.middle_name,
+    last_name: updates.last_name,
+    phone_number: updates.phone_number,
+    address: updates.address,
+    date_of_birth: updates.date_of_birth,
+    gender: updates.gender,
+    age: ageYears,
+  };
+
   try {
-    const patientSync = {
-      full_name: updates.full_name,
-      first_name: updates.first_name,
-      middle_name: updates.middle_name,
-      last_name: updates.last_name,
-      phone_number: updates.phone_number,
-      address: updates.address,
-      date_of_birth: updates.date_of_birth,
-      gender: updates.gender,
-      age: ageYears,
-      medical_history: updates.medical_history,
-    };
-    if (updates.email) patientSync.email = updates.email;
-    await admin
-      .from('patients')
-      .update(patientSync)
-      .eq('profile_id', user.id);
-  } catch {}
+    await syncLinkedPatients(admin, user.id, patientSync);
+  } catch {
+    await rollbackProfile(
+      admin,
+      user.id,
+      prevRes?.data,
+      Object.keys(updates),
+      emailChanged ? currentEmail : ''
+    );
+    throw new RequestError(
+      503,
+      'Could not synchronize your profile with linked clinics. No changes were saved. Please try again.'
+    );
+  }
 
   return { profile: mapFullProfile(saved.data) };
 }
@@ -788,5 +870,6 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
 module.exports = {
   registrationInput, normalizeMobile, passwordProblem, handlePatientOtp, registerPatient,
   resetPatientPassword, loginPatient, refreshPatientSession, completeOnboarding,
-  validateProfileUpdateInput, managePatientProfile, logoutPatient, patientAccount, verifiedUser, changePatientPassword, rejected
+  validateProfileUpdateInput, validateMedicalUpdateInput, syncLinkedPatients,
+  managePatientProfile, logoutPatient, patientAccount, verifiedUser, changePatientPassword, rejected
 };
