@@ -1152,7 +1152,7 @@ function ProceduresTab({ procedures, setProcedures, loading, loadError }) {
   const [, setError] = useSettingsFeedback()
   const [busy, setBusy] = useState(false)
   const [deleting, setDeleting] = useState(null)
-  const [, setDeleteError] = useSettingsFeedback()
+  const [deleteError, setDeleteError] = useState('')
 
   const openForm = procedure => {
     setEditingId(procedure?.id ?? null)
@@ -1275,6 +1275,7 @@ function ProceduresTab({ procedures, setProcedures, loading, loadError }) {
             <DialogTitle>Delete Procedure</DialogTitle>
             <DialogDescription>Delete {deleting?.description}? This cannot be undone.</DialogDescription>
           </DialogHeader>
+          {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="outline" disabled={busy} onClick={() => setDeleting(null)}>Cancel</Button>
             <Button className="bg-red-600 hover:bg-red-700" disabled={busy} onClick={remove}>{busy ? 'Deleting...' : 'Delete Procedure'}</Button>

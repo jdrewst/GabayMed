@@ -448,12 +448,19 @@ export const settingsAPI = {
     try {
       const { data, error } = await supabase.from('procedures')
         .delete().eq('procedure_id', id).select('procedure_id').single();
-      if (error) throw settingsRequestError(error);
+      if (error) throw error;
       return { success: true, id: data.procedure_id };
     } catch (error) {
-      return { success: false, error: error.code === '23503'
-        ? 'This procedure is used by other records and cannot be deleted.'
-        : settingsRequestError(error).message };
+      if (error?.code === '23503') {
+        const linkedTable = error.message?.match(/\bon table "([^"]+)"\.?$/)?.[1];
+        return {
+          success: false,
+          error: linkedTable
+            ? `Procedure ${id} is referenced by records in ${linkedTable} and cannot be deleted.`
+            : 'This procedure is used by other records and cannot be deleted.'
+        };
+      }
+      return { success: false, error: settingsRequestError(error, 'Unable to delete the procedure. Please try again.').message };
     }
   },
 
