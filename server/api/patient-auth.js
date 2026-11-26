@@ -48,7 +48,10 @@ function endpoint(run, { headers = 'Content-Type', unavailable = 'GabayMed is te
       if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
       return res.status(error.status || 503).json({
         error: error.status ? error.message : unavailable,
-        code: error.code || undefined, fields: error.fields || undefined, retry_after: error.retryAfter || 0
+        code: error.code || undefined,
+        fields: error.fields || undefined,
+        retry_after: error.retryAfter || 0,
+        attempts_remaining: typeof error.attemptsRemaining === 'number' ? error.attemptsRemaining : undefined
       });
     }
   };

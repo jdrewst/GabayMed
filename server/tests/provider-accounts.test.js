@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createProviderAccount, providerInput } = require('../lib/provider-accounts');
+const { createProviderAccount, resetProviderPassword, changeOwnPassword, providerInput } = require('../lib/provider-accounts');
 
 const input = { name: ' Test Doctor ', email: ' Doctor@Example.com ', role: 'DOCTOR',
   licenseNo: '123', schedule: { mon: '09:00-17:00' } };
@@ -116,4 +116,96 @@ test('unverifiable result and cleanup failure produce recovery errors', async ()
   await assert.rejects(createProviderAccount(check.admin, 'token', input), /could not be verified/);
   assert.equal(check.calls.deleted.length, 0);
   await assert.rejects(createProviderAccount(mock({ rpcError: true, cleanupError: true }).admin, 'token', input), /administrator cleanup/);
+});
+
+test('IT Admin can manually reset a provider password permanently', async () => {
+  const updates = [];
+  const admin = {
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'admin-id', app_metadata: {} } } }),
+      admin: {
+        updateUserById: async (id, patch) => { updates.push({ id, patch }); return {}; }
+      }
+    },
+    from(table) {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        ilike() { return this; },
+        single: async () => ({ data: { id: 'admin-id', role: 'IT Admin', facility_id: 'real-clinic' } }),
+        maybeSingle: async () => ({
+          data: table === 'providers'
+            ? { provider_id: 123, name: 'Test Doctor', email: 'doctor@example.com', user_id: 'prov-user-id', facility_id: 'real-clinic' }
+            : null
+        })
+      };
+    }
+  };
+
+  const sentEmails = [];
+  const res = await resetProviderPassword(admin, 'token', { providerId: 123 }, {
+    sendMail: async m => sentEmails.push(m)
+  });
+  assert.equal(res.success, true);
+  assert.equal(res.emailSent, true);
+  assert.equal(res.credentials.email, 'doctor@example.com');
+  assert.ok(res.credentials.password.length >= 32);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].id, 'prov-user-id');
+  assert.equal(updates[0].patch.app_metadata.must_change_password, false);
+  assert.equal(sentEmails.length, 1);
+  assert.equal(sentEmails[0].to, 'doctor@example.com');
+  assert.equal(sentEmails[0].password, res.credentials.password);
+
+  await assert.rejects(
+    resetProviderPassword(admin, 'token', { providerId: 123, password: 'short' }),
+    e => e.status === 400
+  );
+
+  const auth = {
+    auth: {
+      signInWithPassword: async ({ password }) =>
+        password === 'OldStr0ng!Pass' ? { data: { user: { id: 'prov-user-id' } } } : { error: { code: 'invalid_credentials' } }
+    }
+  };
+  await assert.rejects(
+    resetProviderPassword(admin, 'token', { providerId: 123, password: 'OldStr0ng!Pass' }, { auth }),
+    e => e.status === 400 && /different from the current password/i.test(e.message)
+  );
+});
+
+test('logged-in clinic user can change only their own password after verifying current password', async () => {
+  const updates = [];
+  const admin = {
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'staff-id', email: 'staff@clinic.ph', app_metadata: {} } } }),
+      admin: {
+        updateUserById: async (id, patch) => { updates.push({ id, patch }); return {}; }
+      }
+    },
+    from: () => ({
+      select() { return this; },
+      eq() { return this; },
+      single: async () => ({ data: { id: 'staff-id', role: 'Hospital Staff', facility_id: 'real-clinic' } })
+    })
+  };
+  const auth = {
+    auth: {
+      signInWithPassword: async ({ password }) =>
+        password === 'Curr3nt!Pass99' ? { data: { user: { id: 'staff-id' } } } : { error: { code: 'invalid_credentials' } }
+    }
+  };
+
+  await assert.rejects(
+    changeOwnPassword(admin, auth, 'token', { currentPassword: 'wrong', newPassword: 'NewStr0ng!Pass1' }),
+    e => e.status === 401
+  );
+  await assert.rejects(
+    changeOwnPassword(admin, auth, 'token', { currentPassword: 'Curr3nt!Pass99', newPassword: 'Curr3nt!Pass99' }),
+    e => e.status === 400
+  );
+  const ok = await changeOwnPassword(admin, auth, 'token', { currentPassword: 'Curr3nt!Pass99', newPassword: 'NewStr0ng!Pass1' });
+  assert.deepEqual(ok, { success: true });
+  assert.equal(updates[0].id, 'staff-id');
+  assert.equal(updates[0].patch.password, 'NewStr0ng!Pass1');
 });

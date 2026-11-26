@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, useMemo, createContext } from "react"
-import { Building2, Plus, X, Pencil, Trash2, Eye, Check, Copy, TriangleAlert, Info, MapPin, Search } from "lucide-react"
+import { Building2, Plus, X, Pencil, Trash2, Eye, EyeOff, Check, Copy, TriangleAlert, Info, MapPin, Search, KeyRound } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -50,6 +50,18 @@ function SettingsContent() {
   const [creatingProvider, setCreatingProvider] = useState(false)
   const [, setProviderError] = useSettingsFeedback()
   const [createdCredentials, setCreatedCredentials] = useState(null)
+  const [resetTargetUser, setResetTargetUser] = useState(null)
+  const [resetCustomPassword, setResetCustomPassword] = useState('')
+  const [resettingPassword, setResettingPassword] = useState(false)
+  const [resetCredentials, setResetCredentials] = useState(null)
+  const [ownPasswordDialogOpen, setOwnPasswordDialogOpen] = useState(false)
+  const [ownCurrentPassword, setOwnCurrentPassword] = useState('')
+  const [ownNewPassword, setOwnNewPassword] = useState('')
+  const [ownConfirmPassword, setOwnConfirmPassword] = useState('')
+  const [showOwnCurrentPassword, setShowOwnCurrentPassword] = useState(false)
+  const [showOwnNewPassword, setShowOwnNewPassword] = useState(false)
+  const [showOwnConfirmPassword, setShowOwnConfirmPassword] = useState(false)
+  const [changingOwnPassword, setChangingOwnPassword] = useState(false)
   const canAddProvider = account?.role === 'IT Admin'
 
   useEffect(() => {
@@ -363,6 +375,79 @@ function SettingsContent() {
     }
   }
 
+  const handleOpenResetPassword = (user) => {
+    setResetTargetUser(user)
+    setResetCustomPassword('')
+  }
+
+  const resetPasswordRules = [
+    { label: '12 to 128 characters', met: resetCustomPassword.length >= 12 && resetCustomPassword.length <= 128 },
+    { label: 'Uppercase and lowercase letters', met: /[a-z]/.test(resetCustomPassword) && /[A-Z]/.test(resetCustomPassword) },
+    { label: 'At least one number', met: /\d/.test(resetCustomPassword) },
+    { label: 'At least one symbol', met: /[^A-Za-z0-9]/.test(resetCustomPassword) }
+  ]
+  const isCustomResetPasswordValid = resetCustomPassword.length === 0 || resetPasswordRules.every(r => r.met)
+
+  const handleConfirmResetPassword = async () => {
+    if (!resetTargetUser || resettingPassword || !isCustomResetPasswordValid) return
+    setResettingPassword(true)
+    const result = await settingsAPI.resetProviderPassword(resetTargetUser.id, resetCustomPassword)
+    setResettingPassword(false)
+    if (result.success) {
+      setResetTargetUser(null)
+      setResetCustomPassword('')
+      setResetCredentials(result.credentials)
+    } else {
+      toast.error(result.error || 'Could not reset provider password.')
+    }
+  }
+
+  const isOwnProviderRow = (user) => {
+    if (!account || !user) return false
+    if (user.userId && account.id && user.userId === account.id) return true
+    if (user.email && account.email && user.email.trim().toLowerCase() === account.email.trim().toLowerCase()) return true
+    return false
+  }
+
+  const ownPasswordRules = [
+    { label: '12 to 128 characters', met: ownNewPassword.length >= 12 && ownNewPassword.length <= 128 },
+    { label: 'Uppercase and lowercase letters', met: /[a-z]/.test(ownNewPassword) && /[A-Z]/.test(ownNewPassword) },
+    { label: 'At least one number', met: /\d/.test(ownNewPassword) },
+    { label: 'At least one symbol', met: /[^A-Za-z0-9]/.test(ownNewPassword) }
+  ]
+  const ownPasswordsMatch = ownConfirmPassword.length > 0 && ownNewPassword === ownConfirmPassword
+  const canSubmitOwnPassword =
+    ownCurrentPassword.length > 0 &&
+    ownPasswordRules.every(r => r.met) &&
+    ownPasswordsMatch &&
+    !changingOwnPassword
+
+  const handleOpenOwnPasswordDialog = () => {
+    setOwnCurrentPassword('')
+    setOwnNewPassword('')
+    setOwnConfirmPassword('')
+    setShowOwnCurrentPassword(false)
+    setShowOwnNewPassword(false)
+    setShowOwnConfirmPassword(false)
+    setOwnPasswordDialogOpen(true)
+  }
+
+  const handleConfirmOwnPassword = async () => {
+    if (!canSubmitOwnPassword) return
+    setChangingOwnPassword(true)
+    const result = await settingsAPI.changeOwnPassword(ownCurrentPassword, ownNewPassword)
+    setChangingOwnPassword(false)
+    if (result.success) {
+      setOwnPasswordDialogOpen(false)
+      setOwnCurrentPassword('')
+      setOwnNewPassword('')
+      setOwnConfirmPassword('')
+      toast.success('Your password has been updated.')
+    } else {
+      toast.error(result.error || 'Could not change your password.')
+    }
+  }
+
   return (
     <div ref={settingsRoot} className="space-y-6 -mt-8">
       <div>
@@ -387,6 +472,198 @@ function SettingsContent() {
               } catch { toast.error('Copy was unavailable. Select and copy the login details manually.') }
             }}>Copy Login Details</Button>
             <div className="flex justify-end"><Button onClick={() => setCreatedCredentials(null)}>Done</Button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Manual Reset Password Dialog */}
+      <Dialog open={resetTargetUser !== null} onOpenChange={value => { if (!value && !resettingPassword) { setResetTargetUser(null); setResetCustomPassword('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Provider Password</DialogTitle>
+            <DialogDescription>
+              Set a new password for <span className="font-semibold text-gray-800">{resetTargetUser?.name}</span> ({resetTargetUser?.email || 'No email'}). The new password will take effect immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="admin-reset-password">New Password</Label>
+              <Input
+                id="admin-reset-password"
+                type="text"
+                autoComplete="off"
+                placeholder="Leave blank to auto-generate a secure password"
+                value={resetCustomPassword}
+                onChange={(e) => setResetCustomPassword(e.target.value)}
+              />
+              <ul className="mt-2.5 space-y-1.5 text-xs">
+                {resetPasswordRules.map((rule) => (
+                  <li key={rule.label} className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                        rule.met
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : 'border-slate-300 bg-white text-transparent'
+                      }`}
+                    >
+                      <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                    </span>
+                    <span className={rule.met ? 'text-slate-700 font-medium' : 'text-slate-400'}>
+                      {rule.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={resettingPassword} onClick={() => { setResetTargetUser(null); setResetCustomPassword('') }}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-blue-500 hover:bg-blue-600"
+                disabled={resettingPassword || !isCustomResetPasswordValid}
+                onClick={handleConfirmResetPassword}
+              >
+                {resettingPassword ? 'Resetting...' : resetCustomPassword.length > 0 ? 'Save New Password' : 'Generate New Password'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Password Result Dialog */}
+      <Dialog open={resetCredentials !== null} onOpenChange={value => { if (!value) setResetCredentials(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Provider Password Updated</DialogTitle>
+            <DialogDescription>Share these login details with {resetCredentials?.name || 'the provider'}. This password is active immediately and shown only once.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label htmlFor="reset-email">Email</Label><Input id="reset-email" readOnly value={resetCredentials?.email || ''} /></div>
+            <div className="space-y-2"><Label htmlFor="reset-generated-password">New Password</Label><Input id="reset-generated-password" autoComplete="off" readOnly value={resetCredentials?.password || ''} /></div>
+            <Button variant="outline" onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(`Email: ${resetCredentials.email}\nPassword: ${resetCredentials.password}`)
+                toast.success('Login details copied.')
+              } catch { toast.error('Copy was unavailable. Select and copy the details manually.') }
+            }}>Copy Login Details</Button>
+            <div className="flex justify-end"><Button onClick={() => setResetCredentials(null)}>Done</Button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Self-Service Change Own Password Dialog */}
+      <Dialog open={ownPasswordDialogOpen} onOpenChange={value => { if (!value && !changingOwnPassword) setOwnPasswordDialogOpen(false) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Your Password</DialogTitle>
+            <DialogDescription>
+              Enter your current password and choose a new strong password for your account ({account?.email}).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="own-current-password">Current Password</Label>
+              <div className="relative">
+                <Input
+                  id="own-current-password"
+                  type={showOwnCurrentPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={ownCurrentPassword}
+                  onChange={(e) => setOwnCurrentPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOwnCurrentPassword(v => !v)}
+                  aria-label={showOwnCurrentPassword ? "Hide current password" : "Show current password"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  {showOwnCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="own-new-password">New Password</Label>
+              <div className="relative">
+                <Input
+                  id="own-new-password"
+                  type={showOwnNewPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={ownNewPassword}
+                  onChange={(e) => setOwnNewPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOwnNewPassword(v => !v)}
+                  aria-label={showOwnNewPassword ? "Hide new password" : "Show new password"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  {showOwnNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <ul className="mt-2 space-y-1.5 text-xs">
+                {ownPasswordRules.map((rule) => (
+                  <li key={rule.label} className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                        rule.met
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : 'border-slate-300 bg-white text-transparent'
+                      }`}
+                    >
+                      <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                    </span>
+                    <span className={rule.met ? 'text-slate-700 font-medium' : 'text-slate-400'}>
+                      {rule.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="own-confirm-password">Confirm New Password</Label>
+              <div className="relative">
+                <Input
+                  id="own-confirm-password"
+                  type={showOwnConfirmPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={ownConfirmPassword}
+                  onChange={(e) => setOwnConfirmPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOwnConfirmPassword(v => !v)}
+                  aria-label={showOwnConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  {showOwnConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {ownConfirmPassword.length > 0 && (
+                <p className={`flex items-center gap-1.5 text-xs mt-1 ${ownPasswordsMatch ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {ownPasswordsMatch ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                  {ownPasswordsMatch ? 'Passwords match' : 'Passwords do not match'}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" disabled={changingOwnPassword} onClick={() => setOwnPasswordDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-blue-500 hover:bg-blue-600"
+                disabled={!canSubmitOwnPassword}
+                onClick={handleConfirmOwnPassword}
+              >
+                {changingOwnPassword ? 'Saving...' : 'Change Password'}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -796,7 +1073,34 @@ function SettingsContent() {
                         </TableCell>
 
                         <TableCell className="text-right">
-                          <SettingsActionButton action="edit" label={`Edit ${user.name}`} onClick={() => handleEditUser(user)} />
+                          <div className="inline-flex items-center justify-end gap-1">
+                            {isOwnProviderRow(user) ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                title="Change your password"
+                                aria-label="Change your password"
+                                onClick={handleOpenOwnPasswordDialog}
+                                className="h-8 w-8 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+                              >
+                                <KeyRound className="h-4 w-4" />
+                              </Button>
+                            ) : canAddProvider ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                title={`Reset password for ${user.name}`}
+                                aria-label={`Reset password for ${user.name}`}
+                                onClick={() => handleOpenResetPassword(user)}
+                                className="h-8 w-8 text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                              >
+                                <KeyRound className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            <SettingsActionButton action="edit" label={`Edit ${user.name}`} onClick={() => handleEditUser(user)} />
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

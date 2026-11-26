@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MessageCircle, Bell } from 'lucide-react-native';
 import ProfileAPI from '../services/profileApi';
+import Session from '../services/session';
+import { supabase } from '../lib/supabase';
 import { PatientAvatar } from './patient-avatar';
 
 function buildHeaderUserData(profile) {
@@ -45,10 +47,36 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
     fetchUserData();
     fetchUnreadCounts();
     setGreeting(computeGreeting());
-    const unsub = ProfileAPI.subscribe(profile => {
+    const unsubProfile = ProfileAPI.subscribe(profile => {
       if (profile) setUserData(buildHeaderUserData(profile));
     });
-    return unsub;
+    const unsubPerms = ProfileAPI.subscribePermissions(() => {
+      fetchUnreadCounts();
+    });
+
+    const userId = Session.getUserId();
+    let channel = null;
+    if (userId) {
+      channel = supabase
+        .channel(`header-notifs-${userId}-${Math.random().toString(36).slice(2, 7)}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `profile_id=eq.${userId}`,
+        }, () => {
+          fetchUnreadCounts();
+        })
+        .subscribe();
+    }
+
+    return () => {
+      unsubProfile();
+      unsubPerms();
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch {}
+      }
+    };
   }, []);
 
   const fetchUserData = async () => {
@@ -64,15 +92,33 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
 
   const fetchUnreadCounts = async () => {
     try {
-      // TODO: Replace with actual API call
-      // const response = await fetch('YOUR_API_ENDPOINT/unread-counts');
-      // const data = await response.json();
-      
-      // Simulated data for now
-      setTimeout(() => {
-        setUnreadMessages(0);
+      const perms = await ProfileAPI.getPermissions().catch(() => null);
+      if (perms && perms.notificationsAllowed === false) {
         setUnreadNotifications(0);
-      }, 100);
+        return;
+      }
+      const userId = Session.getUserId();
+      if (!userId) {
+        setUnreadNotifications(0);
+        return;
+      }
+
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('profile_id', userId)
+        .eq('recipient_type', 'patient')
+        .eq('is_read', false);
+
+      if (!error && typeof count === 'number') {
+        setUnreadNotifications(count);
+        return;
+      }
+
+      // Fallback if `notifications` table hasn't been created yet
+      const fallback = await Session.getUnreadCounts();
+      setUnreadMessages(fallback?.messages || 0);
+      setUnreadNotifications(fallback?.notifications || 0);
     } catch (error) {
       console.error('Error fetching unread counts:', error);
     }

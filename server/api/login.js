@@ -34,7 +34,9 @@ module.exports = async function handler(req, res) {
     if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
     return res.status(error.status || 503).json({
       error: error.status ? error.message : 'Login is temporarily unavailable. Please try again later.',
-      code: error.code || 'login_unavailable', retry_after: error.retryAfter || 0
+      code: error.code || 'login_unavailable',
+      retry_after: error.retryAfter || 0,
+      attempts_remaining: typeof error.attemptsRemaining === 'number' ? error.attemptsRemaining : undefined
     });
   }
 };

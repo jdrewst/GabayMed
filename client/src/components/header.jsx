@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react"
-import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check, LogOut, Building2, MapPin, Mail } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check, LogOut, Building2, MapPin, Mail, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
@@ -7,50 +7,23 @@ import { GlobalSearch } from "@/components/global-search"
 import { Badge } from "@/components/ui/badge"
 import { GabayAPI } from "../../services/gabayApi"
 import { profileAPI } from "../../services/profile"
+import { notificationsAPI, navigateToNotification } from "../../services/notifications"
 import LogoSvg from "@/assets/Logo.svg"
 
-const notificationsData = [
-  {
-    id: 1,
-    type: "appointment",
-    title: "New Appointment Request",
-    message: "Red Gabriel Tagura requested appointment",
-    time: "5 min ago",
-    read: false,
-    icon: Calendar,
-  },
-  {
-    id: 2,
-    type: "payment",
-    title: "Payment Received",
-    message: "₱2,500 from Francis Ronan Alfaro",
-    time: "15 min ago",
-    read: false,
-    icon: CreditCard,
-  },
-  {
-    id: 3,
-    type: "patient",
-    title: "New Patient Registration",
-    message: "Tyrone Winter Tolentino registered",
-    time: "1 hour ago",
-    read: false,
-    icon: UserPlus,
-  },
-  {
-    id: 4,
-    type: "reminder",
-    title: "Appointment Reminder",
-    message: "Maria Santos in 30 minutes",
-    time: "2 hours ago",
-    read: true,
-    icon: Clock,
-  },
-]
+const HEADER_NOTIF_ICONS = {
+  appointment: Calendar,
+  payment: CreditCard,
+  patient: UserPlus,
+  reminder: Clock,
+  admin: ShieldCheck,
+  alert: AlertCircle,
+}
 
 export function Header() {
   const [currentPage, setCurrentPage] = useState('dashboard')
-  const [notifications, setNotifications] = useState(notificationsData)
+  const [notifications, setNotifications] = useState([])
+  const [highlightedIds, setHighlightedIds] = useState(() => new Set())
+  const highlightTimerRef = useRef(null)
   const [facility, setFacility] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -89,16 +62,46 @@ export function Header() {
     }
   }, [])
 
+  const loadNotifications = useCallback(async () => {
+    try {
+      const items = await notificationsAPI.getClinicNotifications()
+      setNotifications(items)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    loadNotifications()
+    const unsubscribe = notificationsAPI.subscribeClinicNotifications(() => {
+      loadNotifications()
+    })
+    return () => {
+      unsubscribe()
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+    }
+  }, [loadNotifications])
+
   const unreadCount = notifications.filter(n => !n.read).length
 
-  const markAsRead = (id) => {
-    setNotifications(notifications.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    ))
+  const triggerHighlightFade = (ids) => {
+    if (!ids || ids.length === 0) return
+    setHighlightedIds(new Set(ids))
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedIds(new Set())
+    }, 10000)
   }
 
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })))
+  const markAsRead = async (notification) => {
+    setNotifications(prev => prev.map(n =>
+      n.id === notification.id ? { ...n, read: true } : n
+    ))
+    await notificationsAPI.markAsRead(notification)
+  }
+
+  const markAllAsRead = async () => {
+    const snapshot = notifications
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    await notificationsAPI.markAllAsRead(snapshot)
   }
 
   useEffect(() => {
@@ -197,26 +200,47 @@ export function Header() {
                 </Button>
               </a>
 
-              <DropdownMenu>
+              <DropdownMenu
+                onOpenChange={(open) => {
+                  if (open && unreadCount > 0) {
+                    const unseenIds = notifications.filter(n => !n.read).map(n => n.id)
+                    triggerHighlightFade(unseenIds)
+                    markAllAsRead()
+                  }
+                }}
+              >
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full relative">
-                    <Bell className="w-5 h-5" />
+                  <Button variant="ghost" size="icon" className="rounded-full relative hover:bg-sky-50">
+                    <Bell className="w-5 h-5 text-slate-700" />
                     {unreadCount > 0 && (
-                      <div className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                      <span className="absolute top-1 right-1 flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 ring-2 ring-white" />
+                      </span>
                     )}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80">
-                  <div className="flex items-center justify-between px-4 py-3 border-b">
-                    <div>
-                      <h3 className="font-semibold text-sm">Notifications</h3>
-                      <p className="text-xs text-muted-foreground">{unreadCount} unread</p>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-80 sm:w-96 p-0 overflow-hidden rounded-2xl border border-[#BAE6FD]/80 bg-white shadow-[0_18px_45px_-10px_rgba(59,165,236,0.22)]"
+                >
+                  <div className="flex items-center justify-between px-4 py-3.5 bg-gradient-to-r from-[#F0F9FF] to-[#E0F2FE]/60 border-b border-[#E0F2FE]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-b from-[#55C5F8] to-[#3BA5EC] flex items-center justify-center shadow-sm">
+                        <Bell className="w-4 h-4 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-sm text-slate-800">Notifications</h3>
+                        <p className="text-[11px] text-slate-500">
+                          {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+                        </p>
+                      </div>
                     </div>
                     {unreadCount > 0 && (
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-7 text-xs"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-[#0284C7] hover:text-[#0369A1] hover:bg-sky-100/70 rounded-full px-2.5"
                         onClick={(e) => {
                           e.stopPropagation()
                           markAllAsRead()
@@ -227,32 +251,40 @@ export function Header() {
                       </Button>
                     )}
                   </div>
-                  <div className="max-h-96 overflow-y-auto">
-                    {notifications.map((notification) => {
-                      const Icon = notification.icon
+                  <div className="max-h-96 overflow-y-auto divide-y divide-slate-100">
+                    {notifications.length === 0 ? (
+                      <div className="py-10 text-center text-xs text-slate-400">
+                        No notifications yet
+                      </div>
+                    ) : notifications.map((notification) => {
+                      const Icon = HEADER_NOTIF_ICONS[notification.type] || Calendar
+                      const isHighlighted = !notification.read || highlightedIds.has(notification.id)
                       return (
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           key={notification.id}
-                          className={`p-3 cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
-                          onClick={() => markAsRead(notification.id)}
+                          className={`p-3.5 cursor-pointer rounded-none focus:bg-[#E0F2FE]/60 transition-colors duration-1000 ${isHighlighted ? 'bg-[#E0F2FE]/75' : 'bg-white'}`}
+                          onClick={() => {
+                            markAsRead(notification)
+                            navigateToNotification(notification)
+                          }}
                         >
                           <div className="flex items-start gap-3 w-full">
-                            <div className="p-1.5 bg-slate-100 rounded-full flex-shrink-0">
-                              <Icon className="w-4 h-4 text-slate-600" />
+                            <div className="p-2 bg-[#E0F2FE] rounded-full flex-shrink-0">
+                              <Icon className="w-4 h-4 text-[#0284C7]" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
-                                <p className="font-medium text-xs text-gray-900">
+                                <p className="font-semibold text-xs text-slate-800 leading-snug">
                                   {notification.title}
                                 </p>
-                                {!notification.read && (
-                                  <Badge className="bg-blue-500 hover:bg-blue-600 text-xs h-4 px-1">New</Badge>
+                                {isHighlighted && (
+                                  <Badge className="bg-gradient-to-b from-[#55C5F8] to-[#3BA5EC] text-white border-0 text-[10px] h-4 px-1.5 rounded-full">New</Badge>
                                 )}
                               </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">
+                              <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
                                 {notification.message}
                               </p>
-                              <p className="text-xs text-muted-foreground mt-1">
+                              <p className="text-[11px] text-slate-400 mt-1">
                                 {notification.time}
                               </p>
                             </div>
@@ -261,12 +293,13 @@ export function Header() {
                       )
                     })}
                   </div>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild className="justify-center text-center">
-                    <a href="/notifications" className="text-blue-600 text-sm font-medium w-full">
-                      View all notifications
-                    </a>
-                  </DropdownMenuItem>
+                  <div className="border-t border-[#E0F2FE] bg-[#FAFEFF] p-2">
+                    <DropdownMenuItem asChild className="justify-center text-center rounded-full focus:bg-sky-50">
+                      <a href="/notifications" className="text-[#3BA5EC] hover:text-[#0284C7] text-xs font-semibold w-full py-1">
+                        View all notifications
+                      </a>
+                    </DropdownMenuItem>
+                  </div>
                 </DropdownMenuContent>
               </DropdownMenu>
 

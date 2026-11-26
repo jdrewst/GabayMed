@@ -12,6 +12,8 @@ import { ArrowLeft, Calendar, CreditCard, Gift, Bell, MessageCircle, ShieldCheck
 import { LinearGradient } from 'expo-linear-gradient';
 import ProfileAPI, { getDisplayConfig } from '../services/profileApi';
 import AppointmentAPI from '../services/appointmentApi';
+import Session from '../services/session';
+import { supabase } from '../lib/supabase';
 
 const CATEGORY_MAP = [
   { key: 'notifyAppointments', type: 'reminder', label: 'Appointments', icon: Calendar },
@@ -45,82 +47,102 @@ export function NotificationsPage({ onBack }) {
       })
       .catch(() => {});
     fetchNotifications();
-    const unsub = ProfileAPI.subscribePermissions(next => {
+    const unsubPerms = ProfileAPI.subscribePermissions(next => {
       if (next) setPerms(next);
     });
-    return unsub;
+
+    // Subscribe to live Supabase Realtime updates for this patient's notifications
+    const userId = Session.getUserId();
+    let channel = null;
+    if (userId) {
+      channel = supabase
+        .channel(`patient-notifs-${userId}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `profile_id=eq.${userId}`,
+        }, () => {
+          fetchNotifications();
+        })
+        .subscribe();
+    }
+
+    return () => {
+      unsubPerms();
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch {}
+      }
+    };
   }, []);
+
+  const iconForType = type => {
+    if (type === 'payment') return CreditCard;
+    if (type === 'news' || type === 'claim') return ShieldCheck;
+    if (type === 'message') return MessageCircle;
+    if (type === 'promo') return Gift;
+    return Calendar;
+  };
 
   const fetchNotifications = async () => {
     try {
       setLoading(true);
+      const userId = Session.getUserId();
+
+      // 1. Live persisted notifications from `public.notifications`
+      let dbNotifs = [];
+      if (userId) {
+        try {
+          const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('profile_id', userId)
+            .eq('recipient_type', 'patient')
+            .order('created_at', { ascending: false })
+            .limit(30);
+          if (!error && Array.isArray(data)) {
+            dbNotifs = data.map(row => ({
+              id: row.notification_id,
+              source: 'db',
+              type: row.type || 'reminder',
+              icon: iconForType(row.type),
+              title: row.title,
+              message: row.message,
+              timestamp: new Date(row.created_at).getTime(),
+              unread: !row.is_read,
+            }));
+            // Mark unseen notifications as read once opened/seen by the patient
+            const unseenIds = data.filter(r => !r.is_read).map(r => r.notification_id);
+            if (unseenIds.length > 0) {
+              supabase.from('notifications').update({ is_read: true }).in('notification_id', unseenIds).then(() => {}).catch(() => {});
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Live upcoming appointment reminders from patient's schedule
       let realAppointmentNotifs = [];
       try {
         const schedule = await AppointmentAPI.getPatientSchedule();
-        realAppointmentNotifs = (schedule || []).slice(0, 3).map((apt, idx) => ({
+        realAppointmentNotifs = (schedule || []).slice(0, 5).map((apt, idx) => ({
           id: `apt-notif-${apt.id || idx}`,
+          source: 'computed',
           type: 'reminder',
           icon: Calendar,
           title:
             (apt.status || '').toUpperCase() === 'CANCELLED'
               ? 'Appointment Cancelled'
-              : 'Appointment Scheduled',
+              : 'Appointment Reminder',
           message: `${apt.procedureName || 'Consultation'} with ${apt.providerName} at ${apt.facilityName} on ${apt.formattedDate} at ${apt.formattedTime}.`,
           timestamp: apt.createdAt ? new Date(apt.createdAt).getTime() : Date.now() - (idx + 1) * 1800000,
           unread: idx === 0,
         }));
       } catch {}
 
-      const baseNotifications = [
-        ...realAppointmentNotifs,
-        {
-          id: '1',
-          type: 'reminder',
-          icon: Calendar,
-          title: 'Appointment Reminder',
-          message: 'Your appointment at Philippine General Hospital is tomorrow at 10:30 AM.',
-          timestamp: Date.now() - 2 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '2',
-          type: 'payment',
-          icon: CreditCard,
-          title: 'Payment Due',
-          message: 'You have an outstanding balance of ₱2,500 for Laboratory Tests.',
-          timestamp: Date.now() - 18 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '5',
-          type: 'message',
-          icon: MessageCircle,
-          title: 'Message from Clinic Staff',
-          message: 'Please bring a valid ID and your latest lab results 15 minutes before your consultation.',
-          timestamp: Date.now() - 26 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '3',
-          type: 'promo',
-          icon: Gift,
-          title: 'Special Offer',
-          message: 'Get 20% off on your next general check-up at UERM Medical Center!',
-          timestamp: Date.now() - 48 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '4',
-          type: 'news',
-          icon: ShieldCheck,
-          title: 'Insurance Update',
-          message: 'Your PhilHealth & HMO insurance coverage has been verified and renewed.',
-          timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000,
-          unread: false,
-        },
-      ];
-
-      setNotifications(baseNotifications);
+      const merged = [...dbNotifs, ...realAppointmentNotifs].sort(
+        (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
+      );
+      setNotifications(merged);
     } catch (error) {
       console.error('Error fetching notifications:', error);
     } finally {
@@ -159,13 +181,25 @@ export function NotificationsPage({ onBack }) {
   };
 
   const markAsRead = async notificationId => {
+    const target = notifications.find(n => n.id === notificationId);
     setNotifications(prev =>
       prev.map(notif => (notif.id === notificationId ? { ...notif, unread: false } : notif))
     );
+    if (target?.source === 'db') {
+      try {
+        await supabase.from('notifications').update({ is_read: true }).eq('notification_id', notificationId);
+      } catch {}
+    }
   };
 
   const markAllAsRead = async () => {
+    const dbIds = notifications.filter(n => n.source === 'db' && n.unread).map(n => n.id);
     setNotifications(prev => prev.map(notif => ({ ...notif, unread: false })));
+    if (dbIds.length > 0) {
+      try {
+        await supabase.from('notifications').update({ is_read: true }).in('notification_id', dbIds);
+      } catch {}
+    }
   };
 
   const getRelativeTime = timestamp => {

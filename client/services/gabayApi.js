@@ -90,7 +90,10 @@ export const GabayAPI = {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw Object.assign(new Error(result.error || 'Login is temporarily unavailable.'), {
-      status: response.status, code: result.code, retryAfter: result.retry_after || 0
+      status: response.status,
+      code: result.code,
+      retryAfter: result.retry_after || 0,
+      attemptsRemaining: typeof result.attempts_remaining === 'number' ? result.attempts_remaining : undefined
     });
     const { data, error } = await supabase.auth.setSession(result);
     if (error) throw error;
@@ -128,6 +131,28 @@ export const GabayAPI = {
     if (!response.ok) throw new Error(result.error || 'Password change failed.');
     // A fresh sign-in obtains tokens with the updated server-controlled metadata.
     await this.logout();
+  },
+
+  async requestPasswordReset(email) {
+    const response = await fetch('/api/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'request', email })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not send reset link. Please try again later.');
+    return result;
+  },
+
+  async confirmPasswordReset(tokenHash, password, email = '') {
+    const response = await fetch('/api/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'confirm', token_hash: tokenHash, password, ...(email ? { email } : {}) })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Could not reset password. Please try again.');
+    return result;
   },
 
   /**

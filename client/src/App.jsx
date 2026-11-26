@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { GabayAPI } from '../services/gabayApi'
 import LoginPage from './pages/login'
 import FirstPasswordPage from './pages/first-password'
+import ResetPasswordPage from './pages/reset-password'
 import DashboardPage from './pages/dashboard'
 import PatientsPage from './pages/patients'
 import AppointmentsPage from './pages/appointments'
@@ -18,6 +19,7 @@ function App() {
     const hasAuth = typeof window !== 'undefined' ? !!localStorage.getItem('gabay_auth') : false
     
     if (path === '/login') return 'login'
+    if (path === '/reset-password') return 'reset-password'
     if (path === '/patients') return 'patients'
     if (path === '/appointments') return 'appointments'
     if (path === '/carriers') return 'carriers'
@@ -45,7 +47,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!access.account || currentPage === 'login') return
+    if (!access.account || currentPage === 'login' || currentPage === 'reset-password') return
     const idleLimit = 60 * 60 * 1000
     const key = 'gabay_last_activity'
     let ending = false
@@ -84,7 +86,7 @@ function App() {
     }
   }, [access.account?.id, currentPage])
   useEffect(() => {
-    if (currentPage === 'login') return
+    if (currentPage === 'login' || currentPage === 'reset-password') return
     let active = true
     const generation = authGeneration.current
     setAccess({ loading: true, account: null, error: '' })
@@ -103,6 +105,7 @@ function App() {
       const hasAuth = !!localStorage.getItem('gabay_auth')
 
       if (path === '/login') setCurrentPage('login')
+      else if (path === '/reset-password') setCurrentPage('reset-password')
       else if (path === '/patients') setCurrentPage('patients')
       else if (path === '/appointments') setCurrentPage('appointments')
       else if (path === '/carriers') setCurrentPage('carriers')
@@ -129,6 +132,7 @@ function App() {
       const hasAuth = !!localStorage.getItem('gabay_auth')
 
       if (path === '/login') setCurrentPage('login')
+      else if (path === '/reset-password') setCurrentPage('reset-password')
       else if (path === '/patients') setCurrentPage('patients')
       else if (path === '/appointments') setCurrentPage('appointments')
       else if (path === '/carriers') setCurrentPage('carriers')
@@ -161,6 +165,8 @@ function App() {
         window.history.pushState({}, '', url.pathname + url.search + url.hash)
         
         if (path === '/login') setCurrentPage('login')
+        else if (path === '/reset-password') setCurrentPage('reset-password')
+      else if (path === '/reset-password') setCurrentPage('reset-password')
         else if (path === '/patients') setCurrentPage('patients')
         else if (path === '/appointments') setCurrentPage('appointments')
         else if (path === '/carriers') setCurrentPage('carriers')
@@ -181,6 +187,10 @@ function App() {
   const handleLoginSuccess = () => {
     window.history.pushState({}, '', '/')
     window.location.assign('/')
+  }
+
+  if (currentPage === 'reset-password') {
+    return <ResetPasswordPage />
   }
 
   if (currentPage !== 'login') {

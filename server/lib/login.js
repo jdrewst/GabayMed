@@ -1,8 +1,33 @@
 const { createHmac, randomUUID } = require('node:crypto');
 const { RequestError } = require('./provider-accounts');
 
-function rejected(status, message, retryAfter = 0, code = 'login_failed') {
-  return Object.assign(new RequestError(status, message), { retryAfter, code });
+const MAX_ATTEMPTS = 3;
+const WINDOW_MS = 30 * 60 * 1000;
+const recentFailures = new Map();
+
+function recordLocalFailure(key) {
+  const now = Date.now();
+  const prev = recentFailures.get(key);
+  const count = prev && now - prev.startedAt < WINDOW_MS ? prev.count + 1 : 1;
+  recentFailures.set(key, { count, startedAt: prev && now - prev.startedAt < WINDOW_MS ? prev.startedAt : now });
+  return Math.max(0, MAX_ATTEMPTS - count);
+}
+
+function clearLocalFailures(key) {
+  recentFailures.delete(key);
+}
+
+function rejected(status, message, retryAfter = 0, code = 'login_failed', attemptsRemaining = null) {
+  const extra = { retryAfter, code };
+  if (typeof attemptsRemaining === 'number') extra.attemptsRemaining = attemptsRemaining;
+  return Object.assign(new RequestError(status, message), extra);
+}
+
+function invalidCredentialsMessage(attemptsRemaining) {
+  if (typeof attemptsRemaining === 'number' && attemptsRemaining > 0) {
+    return `Email or password is incorrect. ${attemptsRemaining} ${attemptsRemaining === 1 ? 'attempt' : 'attempts'} remaining before your account is locked.`;
+  }
+  return 'Email or password is incorrect.';
 }
 
 // Website default: only clinic staff assigned to a facility may sign in.
@@ -54,18 +79,31 @@ async function login({ admin, auth, secret, authorize }, body) {
             : 'Login is temporarily unavailable. Please try again later.', error.status === 429 ? 60 : 0);
       }
       const state = await finish('failure');
-      if (state.locked) throw rejected(429, 'Too many failed login attempts. Please try again for this account in 30 minutes.', 1800, 'login_locked');
-      throw rejected(401, 'Email or password is incorrect.', 0, 'invalid_credentials');
+      if (state.locked) {
+        clearLocalFailures(key);
+        throw rejected(429, 'Too many failed login attempts. Please try again for this account in 30 minutes.', 1800, 'login_locked', 0);
+      }
+      const attemptsRemaining = typeof state.attempts_remaining === 'number'
+        ? state.attempts_remaining
+        : Math.max(1, recordLocalFailure(key));
+      throw rejected(401, invalidCredentialsMessage(attemptsRemaining), 0, 'invalid_credentials', attemptsRemaining);
     }
     if (!data?.user || !data.session) throw rejected(503, 'Login could not be completed.');
     // authorize returns extra response fields for an allowed account, or null.
     const extra = await (authorize || clinicAccount)(admin, data.user, data.session);
     if (!extra) {
       const state = await finish('failure');
-      if (state.locked) throw rejected(429, 'Too many failed login attempts for this account. Try again in 30 minutes.', 1800, 'login_locked');
-      throw rejected(401, 'Email or password is incorrect.', 0, 'invalid_credentials');
+      if (state.locked) {
+        clearLocalFailures(key);
+        throw rejected(429, 'Too many failed login attempts for this account. Try again in 30 minutes.', 1800, 'login_locked', 0);
+      }
+      const attemptsRemaining = typeof state.attempts_remaining === 'number'
+        ? state.attempts_remaining
+        : Math.max(1, recordLocalFailure(key));
+      throw rejected(401, invalidCredentialsMessage(attemptsRemaining), 0, 'invalid_credentials', attemptsRemaining);
     }
     await finish('success');
+    clearLocalFailures(key);
     return { access_token: data.session.access_token, refresh_token: data.session.refresh_token, ...extra };
   } finally {
     // An interrupted request holds the lease for at most 45 seconds.

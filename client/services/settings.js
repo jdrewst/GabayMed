@@ -3,6 +3,7 @@ import { branchRecord, roomRecord, roomStatusRequest, validateLogo } from '../sr
 import { createClient } from '@supabase/supabase-js';
 import { GabayAPI } from './gabayApi';
 import { Session } from './session'; // Import the session helper
+import { notificationsAPI } from './notifications';
 
 // Helper to get env vars in both Vite (Frontend) and Node (Test Script)
 const getEnv = (key) => {
@@ -52,6 +53,12 @@ export const settingsAPI = {
       error = retry.error;
     }
     if (error) throw settingsLocationError(error, 'This branch code already exists in your clinic.');
+    notificationsAPI.emit({
+      facilityId,
+      type: 'admin',
+      title: id ? 'Clinic Branch Updated' : 'New Clinic Branch Added',
+      message: `${data.name || 'A clinic branch'} was ${id ? 'updated' : 'added'} by an administrator.`
+    });
     return data;
   },
 
@@ -114,6 +121,12 @@ export const settingsAPI = {
       : supabase.from('operatory_rooms').insert({ ...values, facility_id: facilityId });
     const { data, error } = await query.select().single();
     if (error) throw settingsLocationError(error, 'This room code already exists in the selected branch.');
+    notificationsAPI.emit({
+      facilityId,
+      type: 'admin',
+      title: id ? 'Operating Room Updated' : 'New Operating Room Added',
+      message: `Room ${data.code || data.name || ''} was ${id ? 'updated' : 'added'} in Settings.`
+    });
     return data;
   },
 
@@ -148,6 +161,7 @@ export const settingsAPI = {
         .select(`
           provider_id,
           facility_id,
+          user_id,
           name,
           email,
           type,
@@ -163,6 +177,7 @@ export const settingsAPI = {
       
       return (data ?? []).map(p => ({
         id: p.provider_id,
+        userId: p.user_id || null,
         name: p.name,
         email: p.email || '',
         type: p.type,
@@ -211,6 +226,71 @@ export const settingsAPI = {
     }
   },
 
+  async resetProviderPassword(providerId, customPassword = '') {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) throw settingsRequestError(error);
+      if (!session?.access_token) throw userSettingsError('Please sign in before resetting a provider password.');
+      const response = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          action: 'reset_password',
+          providerId,
+          ...(customPassword ? { password: customPassword } : {})
+        })
+      });
+      let result;
+      try { result = await response.json(); }
+      catch { throw userSettingsError('Password reset is temporarily unavailable. Please try again later.'); }
+      if (!response.ok) {
+        if (response.status === 400 && result.error) {
+          throw userSettingsError(result.error);
+        }
+        const messages = {
+          401: 'Your session has expired. Please sign in again.',
+          403: 'Only IT Admin accounts can reset provider passwords.',
+          404: result.error || 'Provider login account not found.'
+        };
+        throw settingsRequestError({ status: response.status, message: result.error },
+          messages[response.status] || 'Unable to reset the provider password. Please try again later.');
+      }
+      return result;
+    } catch (error) {
+      return { success: false, error: settingsRequestError(error).message };
+    }
+  },
+
+  async changeOwnPassword(currentPassword, newPassword) {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) throw settingsRequestError(error);
+      if (!session?.access_token) throw userSettingsError('Please sign in before changing your password.');
+      const response = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          action: 'change_own_password',
+          currentPassword,
+          newPassword
+        })
+      });
+      let result;
+      try { result = await response.json(); }
+      catch { throw userSettingsError('Password change is temporarily unavailable. Please try again later.'); }
+      if (!response.ok) {
+        if ((response.status === 400 || response.status === 401) && result.error) {
+          throw userSettingsError(result.error);
+        }
+        throw settingsRequestError({ status: response.status, message: result.error },
+          'Unable to change your password. Please try again later.');
+      }
+      return result;
+    } catch (error) {
+      return { success: false, error: settingsRequestError(error).message };
+    }
+  },
+
   async updateProvider(id, providerData) {
     try {
       const errors = validateSettingsForm('provider', providerData);
@@ -235,7 +315,31 @@ export const settingsAPI = {
         .eq('provider_id', id).select().single();
 
       if (error) throw settingsRequestError(error);
-      return { success: true, provider: { id: data.provider_id, name: data.name, email: data.email || '',
+
+      // Keep Supabase Auth and public.users email in sync if the provider's email was updated
+      if (updates.email) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.access_token) {
+            await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+              body: JSON.stringify({ action: 'sync_email', providerId: id, email: updates.email })
+            });
+          }
+        } catch {}
+      }
+
+      // Notify the provider about details/schedule changes
+      notificationsAPI.emit({
+        facilityId: data.facility_id || Session.getFacilityId(),
+        userId: data.user_id || null,
+        type: 'admin',
+        title: 'Provider Profile / Schedule Updated',
+        message: `${data.name}'s profile details or working schedule was updated in Settings.`
+      });
+
+      return { success: true, provider: { id: data.provider_id, userId: data.user_id || null, name: data.name, email: data.email || '',
         type: data.type, role: data.type, licenseNo: data.NPI, specialization: data.specialization,
         workingHours: data.working_hrs, schedule: data.schedule_details || {} } };
     } catch (error) {
@@ -345,6 +449,11 @@ export const settingsAPI = {
       const { data, error } = await supabase.from('procedures')
         .insert(procedureRecord(values)).select().single();
       if (error) throw settingsRequestError(error);
+      notificationsAPI.emit({
+        type: 'admin',
+        title: 'New Procedure Added',
+        message: `${data.description || data.procedure_id || 'A new procedure'} was added in Settings.`
+      });
       return { success: true, procedure: mapProcedure(data) };
     } catch (error) {
       return { success: false, error: settingsRequestError(error).message };
@@ -356,6 +465,11 @@ export const settingsAPI = {
       const { data, error } = await supabase.from('procedures')
         .update(procedureRecord(values)).eq('procedure_id', id).select().single();
       if (error) throw settingsRequestError(error);
+      notificationsAPI.emit({
+        type: 'admin',
+        title: 'Procedure Updated',
+        message: `${data.description || data.procedure_id || 'A procedure'} was updated in Settings.`
+      });
       return { success: true, procedure: mapProcedure(data) };
     } catch (error) {
       return { success: false, error: settingsRequestError(error).message };

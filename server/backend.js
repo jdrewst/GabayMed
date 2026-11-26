@@ -2,6 +2,7 @@ require('dotenv').config({ path: require('node:path').join(__dirname, '.env') })
 const http = require('node:http');
 const providerHandler = require('./api/providers');
 const firstPasswordHandler = require('./api/first-password');
+const resetPasswordHandler = require('./api/reset-password');
 const loginHandler = require('./api/login');
 const patientAuth = require('./api/patient-auth');
 const browseServicesHandler = require('./api/browse-services');
@@ -12,7 +13,8 @@ const patientClaimsHandler = require('./api/patient-claims');
 const healthRecordsHandler = require('./api/health-records');
 
 const routes = {
-  '/api/providers': providerHandler, '/api/first-password': firstPasswordHandler, '/api/login': loginHandler,
+  '/api/providers': providerHandler, '/api/first-password': firstPasswordHandler,
+  '/api/reset-password': resetPasswordHandler, '/api/login': loginHandler,
   '/api/patient-otp': patientAuth.otp, '/api/patient-register': patientAuth.register,
   '/api/patient-login': patientAuth.login, '/api/patient-session': patientAuth.session,
   '/api/patient-onboarding': patientAuth.onboarding, '/api/patient-profile': patientAuth.profile,
