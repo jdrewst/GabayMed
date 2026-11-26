@@ -1215,8 +1215,8 @@ function ProceduresTab({ procedures, setProcedures, loading, loadError }) {
         </Button>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader><TableRow>
+        <Table containerClassName="max-h-[60vh]">
+          <TableHeader className="sticky top-0 z-10 bg-card"><TableRow>
             {['Procedure Code', 'Description', 'Category', 'Base Price', 'Office Fee', 'PhilHealth Case Rate', 'Duration (minutes)', 'Actions'].map(label => (
               <TableHead key={label} className="whitespace-nowrap">{label}</TableHead>
             ))}

@@ -426,10 +426,10 @@ export const settingsAPI = {
     try {
       const { data, error } = await supabase.from('procedures')
         .insert(procedureRecord(values)).select().single();
-      if (error) throw settingsRequestError(error);
+      if (error) throw error;
       return { success: true, procedure: mapProcedure(data) };
     } catch (error) {
-      return { success: false, error: settingsRequestError(error).message };
+      return { success: false, error: settingsRequestError(error, 'Unable to add the procedure. Please try again.').message };
     }
   },
 
@@ -437,10 +437,10 @@ export const settingsAPI = {
     try {
       const { data, error } = await supabase.from('procedures')
         .update(procedureRecord(values)).eq('procedure_id', id).select().single();
-      if (error) throw settingsRequestError(error);
+      if (error) throw error;
       return { success: true, procedure: mapProcedure(data) };
     } catch (error) {
-      return { success: false, error: settingsRequestError(error).message };
+      return { success: false, error: settingsRequestError(error, 'Unable to update the procedure. Please try again.').message };
     }
   },
 
@@ -780,15 +780,17 @@ export const settingsAPI = {
 };
 function mapProcedure(p) {
   const desc = p.description || p.name || (p.procedure_id ? `Procedure ${p.procedure_id}` : 'General Procedure');
-  const fallbackFee = p.current_fee ?? p.currentFee ?? (Number(p.price || 0) + Number(p.office_fee ?? p.officeFee ?? 0));
+  const price = p.professional_fee ?? p.price ?? 0;
+  const officeFee = p.healthcare_institution_fee ?? p.office_fee ?? p.officeFee ?? 0;
+  const fallbackFee = p.current_fee ?? p.currentFee ?? (Number(price) + Number(officeFee));
   return {
     id: p.procedure_id,
     code: p.procedure_id,
     description: desc,
     name: desc,
     category: p.category || 'General',
-    price: p.price ?? 0,
-    officeFee: p.office_fee ?? p.officeFee ?? 0,
+    price,
+    officeFee,
     phCaseRate: p.PHcase_rate ?? p.ph_case_rate ?? 0,
     currentFee: Number(fallbackFee || 0),
     current_fee: Number(fallbackFee || 0),
@@ -811,8 +813,10 @@ function procedureRecord(values) {
     throw userSettingsError('Duration must be a positive whole number of minutes.');
   }
   return {
-    name: values.description.trim(), category: values.category.trim(),
-    price: Number(values.price), office_fee: Number(values.officeFee),
+    description: values.description.trim(),
+    category: values.category.trim(),
+    professional_fee: Number(values.price),
+    healthcare_institution_fee: Number(values.officeFee),
     PHcase_rate: Number(values.phCaseRate), duration: Number(values.duration)
   };
 }
