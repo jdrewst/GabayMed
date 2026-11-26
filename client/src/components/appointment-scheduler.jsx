@@ -15,55 +15,9 @@ import { appointmentAPI } from "../../services/appointment"
 
 const hours = Array.from({ length: 10 }, (_, i) => i + 8) // 8 AM to 5 PM
 
-function parseDateParam(dateStr) {
-  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
 export function AppointmentScheduler() {
-  const [selectedDate, setSelectedDate] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search)
-      const parsed = parseDateParam(params.get('date'))
-      if (parsed) return parsed
-    }
-    return new Date()
-  })
+  const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedSlot, setSelectedSlot] = useState(null)
-  const [pendingDeepLink, setPendingDeepLink] = useState(() => {
-    if (typeof window === 'undefined') return null
-    const params = new URLSearchParams(window.location.search)
-    const appointmentId = params.get('appointmentId') || ''
-    const providerId = params.get('providerId') || ''
-    const hour = params.get('hour')
-    const date = params.get('date') || ''
-    if (!appointmentId && !hour && !providerId && !date) return null
-    return { appointmentId, providerId, hour: hour != null ? Number(hour) : null, date }
-  })
-
-  // React to deep-link navigation while already on /appointments
-  useEffect(() => {
-    const syncFromUrl = () => {
-      const params = new URLSearchParams(window.location.search)
-      const dateStr = params.get('date') || ''
-      const appointmentId = params.get('appointmentId') || ''
-      const providerId = params.get('providerId') || ''
-      const hourParam = params.get('hour')
-      const parsed = parseDateParam(dateStr)
-      if (parsed) setSelectedDate(parsed)
-      if (appointmentId || hourParam != null || providerId || dateStr) {
-        setPendingDeepLink({
-          appointmentId,
-          providerId,
-          hour: hourParam != null ? Number(hourParam) : null,
-          date: dateStr,
-        })
-      }
-    }
-    window.addEventListener('popstate', syncFromUrl)
-    return () => window.removeEventListener('popstate', syncFromUrl)
-  }, [])
   
   // State for API Data
   const [providers, setProviders] = useState([])
@@ -116,29 +70,6 @@ export function AppointmentScheduler() {
 
     loadData();
   }, [selectedDate]);
-
-  // Automatically open the targeted appointment slot when arriving via a notification deep-link
-  useEffect(() => {
-    if (loading || !pendingDeepLink) return
-    const { appointmentId, providerId, hour } = pendingDeepLink
-    let match = null
-    if (appointmentId) {
-      match = bookedAppointments.find(a => String(a.id) === String(appointmentId))
-    }
-    if (!match && Number.isFinite(hour)) {
-      match = bookedAppointments.find(a =>
-        Number(a.time) === Number(hour) && (!providerId || String(a.providerId) === String(providerId))
-      )
-    }
-    if (match) {
-      handleSlotClick(match.providerId, match.time, match)
-      setPendingDeepLink(null)
-    } else if (Number.isFinite(hour) && (providerId || providers[0]?.id)) {
-      const targetProviderId = providerId || providers[0]?.id
-      handleSlotClick(targetProviderId, hour, null)
-      setPendingDeepLink(null)
-    }
-  }, [loading, bookedAppointments, providers, pendingDeepLink]);
 
   useEffect(() => {
     const term = procedureSearch.trim();

@@ -85,15 +85,6 @@ async function createProviderAccount(admin, token, body) {
       throw new RequestError(500, 'Provider creation failed. Check that the provider-accounts.sql migration is installed. No provider was saved.');
     }
   }
-  const { createNotification } = require('./notifications');
-  await createNotification(admin, {
-    facilityId: actor.facility_id,
-    recipientType: 'clinic',
-    type: 'admin',
-    title: 'New Provider Account Created',
-    message: `${provider.name} (${provider.type}) was added to your clinic.`
-  });
-
   return { success: true, provider: mapProvider(saved),
     credentials: { email: provider.email, password, role: 'Hospital Staff' } };
 }
@@ -234,16 +225,6 @@ async function resetProviderPassword(admin, token, body, { sendMail, auth } = {}
     }
   }
 
-  const { createNotification } = require('./notifications');
-  await createNotification(admin, {
-    facilityId: actor.facility_id,
-    userId: targetUserId,
-    recipientType: 'clinic',
-    type: 'admin',
-    title: 'Password Updated by Admin',
-    message: `Your clinic IT Administrator updated the password for your account (${finalEmail}).`
-  });
-
   return {
     success: true,
     emailSent,
@@ -341,16 +322,6 @@ async function changeOwnPassword(admin, auth, token, body) {
   if (updateError) {
     throw new RequestError(503, 'Could not update your password. Please try again later.');
   }
-
-  const { createNotification } = require('./notifications');
-  await createNotification(admin, {
-    facilityId: actor.facility_id,
-    userId: identity.user.id,
-    recipientType: 'clinic',
-    type: 'admin',
-    title: 'Password Changed',
-    message: 'Your GabayMed account password was updated successfully.'
-  });
 
   return { success: true };
 }
