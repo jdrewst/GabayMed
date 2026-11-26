@@ -22,7 +22,6 @@ export function AppointmentScheduler() {
   // State for API Data
   const [providers, setProviders] = useState([])
   const [bookedAppointments, setBookedAppointments] = useState([])
-  const [procedures, setProcedures] = useState([])
   const [loading, setLoading] = useState(true)
 
   // Search State
@@ -58,9 +57,6 @@ export function AppointmentScheduler() {
         const appointmentsData = await appointmentAPI.getAppointmentsByDate(selectedDate);
         setBookedAppointments(appointmentsData);
 
-        // const proceduresData = await appointmentAPI.getProcedures();
-        // setProcedures(proceduresData);
-
       } catch (error) {
         console.error("Failed to load scheduler data", error);
       } finally {
@@ -73,8 +69,9 @@ export function AppointmentScheduler() {
 
   useEffect(() => {
     const term = procedureSearch.trim();
-    if (!term || selectedProcedure) {
+    if (!term || formData.procedure) {
       setProcedureResults([]);
+      setIsSearchingProcedures(false);
       return;
     }
     let cancelled = false;
@@ -97,7 +94,7 @@ export function AppointmentScheduler() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [procedureSearch, selectedProcedure]);
+  }, [procedureSearch, formData.procedure]);
 
   const getAppointmentForSlot = (providerId, time) => {
     return bookedAppointments.find((apt) => 
@@ -141,6 +138,12 @@ export function AppointmentScheduler() {
   // Handle slot clicks to initialize form data
   const handleSlotClick = (providerId, time, appointment) => {
     setSelectedSlot({ providerId, time, date: selectedDate, appointment })
+    const procedure = String(appointment?.procedureId ?? appointment?.procedure ?? '')
+    setProcedureSearch(procedure)
+    setSelectedProcedure(null)
+    setProcedureResults([])
+    setShowProcedureResults(false)
+    setIsSearchingProcedures(false)
     
     if (!appointment) {
       // Initialize form data so "Save" button works smoothly
@@ -148,7 +151,7 @@ export function AppointmentScheduler() {
         patient: '',
         patientId: null,
         status: 'PENDING', 
-        procedure: procedures[0]?.id ? procedures[0].id.toString() : '',
+        procedure,
         operatory: 'Room 101',
         primaryProvider: providerId ? providerId.toString() : '', 
         additionalProvider: '',
@@ -157,15 +160,11 @@ export function AppointmentScheduler() {
       })
     } else {
       // POPULATE FORM FOR EDITING (with safe fallbacks to avoid crashes)
-      const procVal = appointment.procedureId 
-        ? appointment.procedureId.toString() 
-        : (appointment.procedure ? appointment.procedure.toString() : '');
-
       setFormData({
         patient: appointment.patient || '',
         patientId: appointment.patientId || null,
         status: appointment.status || 'PENDING',
-        procedure: procVal,
+        procedure,
         operatory: appointment.operatory || 'Room 101',
         primaryProvider: appointment.providerId ? appointment.providerId.toString() : (providerId ? providerId.toString() : ''),
         additionalProvider: '',
@@ -176,25 +175,7 @@ export function AppointmentScheduler() {
   }
 
   const handleNewAppointment = () => {
-    const defaultProviderId = providers.length > 0 && providers[0].id ? providers[0].id.toString() : ''
-    
-    setSelectedSlot({ 
-      providerId: defaultProviderId || (providers[0]?.id ?? 1), 
-      time: 8, 
-      date: selectedDate, 
-      appointment: null 
-    })
-    setFormData({
-      patient: '',
-      patientId: null,
-      status: 'PENDING',
-      procedure: procedures[0]?.id ? procedures[0].id.toString() : '',
-      operatory: 'Room 101',
-      primaryProvider: defaultProviderId,
-      additionalProvider: '',
-      length: '30',
-      notes: ''
-    })
+    handleSlotClick(providers[0]?.id, 8, null)
   }
 
   // --- Search Logic ---
@@ -520,7 +501,7 @@ export function AppointmentScheduler() {
                     autoComplete="off"
                   />
 
-                  {showProcedureResults && procedureSearch.trim() && (
+                  {showProcedureResults && !formData.procedure && procedureSearch.trim() && (
                     <div className="absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-white shadow-md">
                       {isSearchingProcedures ? (
                         <div className="p-3 text-sm text-gray-500">Searching procedures...</div>

@@ -1,27 +1,28 @@
 import { Card } from "@/components/ui/card"
+import { format, parseISO } from "date-fns"
 import { Clock } from "lucide-react"
 
 export function AppointmentsList({ appointments = [], loading = false }) {
   
   return (
-    <Card className="p-6">
-      <h3 className="text-2xl font-bold text-[#4B6368] mb-4">Appointments</h3>
-      <div className="space-y-4">
+    <Card className="flex max-h-[100dvh] flex-col p-6">
+      <h3 id="home-appointments-heading" className="mb-4 shrink-0 text-2xl font-bold text-[#4B6368]">Appointments</h3>
+      <div className="min-h-0 space-y-4 overflow-y-auto" role="region" aria-labelledby="home-appointments-heading" tabIndex={0}>
         {loading ? (
           <div className="text-sm text-muted-foreground">Loading appointments...</div>
         ) : appointments.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No appointments today</div>
+          <div className="text-sm text-muted-foreground">No confirmed appointments today</div>
         ) : (
           appointments.map((apt) => {
-            // Format the data from Supabase to match UI needs
-            const time = new Date(apt.appointment_date).toLocaleTimeString([], { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            });
+            const date = apt.appointment_date.slice(0, 10);
+            const dateLabel = format(parseISO(date), 'MMM d, yyyy');
+            const scheduledTime = apt.appointment_time
+              ? parseISO(`${date}T${apt.appointment_time}`)
+              : parseISO(apt.appointment_date);
+            const timeLabel = (apt.appointment_time || apt.appointment_date.length > 10)
+              && format(scheduledTime, 'h:mm a');
             const patientName = apt.patients?.full_name || "Unknown Patient";
-            const procId = apt.procedure_id || apt.procedures?.procedure_id;
-            const procedureName = procId ? `Procedure #${procId}` : "General Consultation";
-            const doctorName = apt.providers?.name; // Using doctor name instead of Room
+            const doctorName = apt.providers?.name;
 
             return (
               <div key={apt.appointment_id} className="flex gap-3">
@@ -37,15 +38,17 @@ export function AppointmentsList({ appointments = [], loading = false }) {
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-4 h-4 text-[#4B6368]" />
-                    <span className="font-bold text-sm text-[#4B6368]">{time}</span>
+                    <span className="font-bold text-sm text-[#4B6368]">
+                      {dateLabel}{timeLabel && ` · ${timeLabel}`}
+                    </span>
                   </div>
                   <div className="text-sm font-semibold text-[#4B6368] mb-1">{patientName}</div>
                   {doctorName && (
                     <div className="text-xs text-[#4B6368]/70 mb-2">{doctorName}</div>
                   )}
-                  <div className="text-xs text-[#4B6368]/60">
-                    {procedureName}
-                  </div>
+                  {apt.procedure_id && (
+                    <div className="text-xs text-[#4B6368]/60">Procedure #{apt.procedure_id}</div>
+                  )}
                 </div>
               </div>
             )

@@ -326,15 +326,17 @@ export const GabayAPI = {
       .select(`
         appointment_id,
         appointment_date,
+        appointment_time,
         status,
         procedure_id,
         patients ( full_name ), 
-        procedures ( procedure_id ),
         providers ( name, specialization )
       `)
       .eq('facility_id', facilityId) 
+      .eq('status', 'CONFIRMED')
       .gte('appointment_date', start)
       .lte('appointment_date', end)
+      .order('appointment_time', { ascending: true })
       .order('appointment_date', { ascending: true });
 
     if (error) throw error;
