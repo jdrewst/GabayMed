@@ -1145,6 +1145,14 @@ const currency = value => new Intl.NumberFormat('en-PH', { style: 'currency', cu
 
 function ProceduresTab({ procedures, setProcedures, loading, loadError }) {
   const toast = useSettingsToast()
+  const [procedureSearch, setProcedureSearch] = useState('')
+  const searchTerm = procedureSearch.trim().toLowerCase()
+  const visibleProcedures = searchTerm
+    ? procedures.filter(procedure =>
+        String(procedure.id).toLowerCase().includes(searchTerm) ||
+        procedure.description?.toLowerCase().includes(searchTerm)
+      )
+    : procedures
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -1205,28 +1213,38 @@ function ProceduresTab({ procedures, setProcedures, loading, loadError }) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle>Procedure Codes</CardTitle>
           <CardDescription>Manage procedures, prices, case rates, and duration</CardDescription>
         </div>
-        <Button className="bg-blue-500" onClick={() => openForm(null)}>
-          <Plus className="w-4 h-4 mr-2" />Add Procedure
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <Input
+            type="search"
+            aria-label="Search by procedure code or description"
+            placeholder="Search code or description"
+            className="w-full sm:w-56"
+            value={procedureSearch}
+            onChange={event => setProcedureSearch(event.target.value)}
+          />
+          <Button className="bg-blue-500" onClick={() => openForm(null)}>
+            <Plus className="w-4 h-4 mr-2" />Add Procedure
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
-        <Table containerClassName="max-h-[60vh]">
-          <TableHeader className="sticky top-0 z-10 bg-card"><TableRow>
+        <Table>
+          <TableHeader><TableRow>
             {['Procedure Code', 'Description', 'Category', 'Base Price', 'Office Fee', 'PhilHealth Case Rate', 'Duration (minutes)', 'Actions'].map(label => (
               <TableHead key={label} className="whitespace-nowrap">{label}</TableHead>
             ))}
           </TableRow></TableHeader>
           <TableBody>
-            {loading || procedures.length === 0 ? (
+            {loading || visibleProcedures.length === 0 ? (
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">
-                {loading ? 'Loading procedures...' : loadError ? 'Procedures unavailable.' : 'No procedures found. Click "Add Procedure" to get started.'}
+                {loading ? 'Loading procedures...' : loadError ? 'Procedures unavailable.' : searchTerm ? 'No procedures match your search.' : 'No procedures found. Click "Add Procedure" to get started.'}
               </TableCell></TableRow>
-            ) : procedures.map(p => (
+            ) : visibleProcedures.map(p => (
               <TableRow key={p.id}>
                 <TableCell className="font-mono">{p.id}</TableCell>
                 <TableCell>{p.description}</TableCell><TableCell>{p.category}</TableCell>
