@@ -46,6 +46,9 @@ async function createProviderAccount(admin, token, body) {
   if (actorError || actor?.role !== 'IT Admin' || !actor.facility_id) {
     throw new RequestError(403, 'Only an IT Admin assigned to a clinic can add providers.');
   }
+  if (identity.user.app_metadata?.must_change_password === true) {
+    throw new RequestError(403, 'Change your temporary password before adding providers.');
+  }
   const provider = providerInput(body);
   const readiness = await admin.from('providers').select('provider_id, user_id').limit(1);
   if (readiness.error) throw new RequestError(503, 'Run database/provider-accounts.sql before creating provider accounts.');
@@ -53,6 +56,7 @@ async function createProviderAccount(admin, token, body) {
   const password = `Gm!9${randomBytes(24).toString('base64url')}`;
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email: provider.email, password, email_confirm: true,
+    app_metadata: { must_change_password: true },
     user_metadata: { full_name: provider.name }
   });
   if (createError || !created?.user) {

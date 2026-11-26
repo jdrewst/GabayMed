@@ -28,6 +28,10 @@ export function PatientProfile({ patient, onPatientUpdated }) {
   const [upcomingAppointments, setUpcomingAppointments] = useState([]) // New State
   const [claimableRecords, setClaimableRecords] = useState([]) // New state for ledger records
   const [selectedClaimId, setSelectedClaimId] = useState(null) // Track selected claim
+  const [patientClaims, setPatientClaims] = useState([])
+  const [updatingClaimId, setUpdatingClaimId] = useState(null)
+  const [claimError, setClaimError] = useState("")
+  const [claimsRefreshKey, setClaimsRefreshKey] = useState(0)
 
   // Loading States
   const [loadingPlans, setLoadingPlans] = useState(true)
@@ -35,6 +39,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [loadingAppointments, setLoadingAppointments] = useState(true) // New State
   const [loadingClaims, setLoadingClaims] = useState(false)
+  const [loadingPatientClaims, setLoadingPatientClaims] = useState(false)
 
   // Initialize state safely mapping from the Table's data structure
   const [patientData, setPatientData] = useState({
@@ -132,6 +137,12 @@ export function PatientProfile({ patient, onPatientUpdated }) {
       const appointments = await appointmentAPI.getUpcomingAppointmentsByPatient(patientData.id);
       setUpcomingAppointments(appointments);
       setLoadingAppointments(false);
+
+      // F. Fetch Submitted Claims (from Mobile App or Web Portal)
+      setLoadingPatientClaims(true);
+      const submittedClaims = await claimsAPI.getPatientClaims(patientData.id);
+      setPatientClaims(submittedClaims);
+      setLoadingPatientClaims(false);
     };
 
     loadData();
@@ -143,6 +154,28 @@ export function PatientProfile({ patient, onPatientUpdated }) {
     const plans = await profileAPI.getInsurancePlans(patientData.id);
     setInsurancePlans(plans);
     setLoadingPlans(false);
+  }
+
+  const refreshPatientClaims = async (targetPatientId = patientData.id) => {
+    if (!targetPatientId) return;
+    setLoadingPatientClaims(true);
+    const submittedClaims = await claimsAPI.getPatientClaims(targetPatientId);
+    setPatientClaims(submittedClaims);
+    setLoadingPatientClaims(false);
+  }
+
+  const handleUpdateClaimStatus = async (claimId, nextStatus) => {
+    if (!claimId || !nextStatus) return;
+    setUpdatingClaimId(claimId);
+    const result = await claimsAPI.updateClaimStatus(claimId, nextStatus);
+    setUpdatingClaimId(null);
+
+    if (result.success) {
+      await refreshPatientClaims(patientData.id);
+      setClaimsRefreshKey((prev) => prev + 1);
+    } else {
+      alert("Failed to update claim status: " + result.error);
+    }
   }
 
   // 2. Handle Profile Update
@@ -210,6 +243,8 @@ export function PatientProfile({ patient, onPatientUpdated }) {
 
   // Handle opening the claim dialog and fetching ledger records
   const handleOpenClaimDialog = async () => {
+    setClaimError("");
+    setSelectedClaimId(null);
     setIsClaimDialogOpen(true);
     setLoadingClaims(true);
     const records = await claimsAPI.getEligibleClaims(patientData.id);
@@ -220,9 +255,15 @@ export function PatientProfile({ patient, onPatientUpdated }) {
   // Handle the submission of the selected claim
   const handleSendClaimSubmit = async () => {
     if (!selectedClaimId) return;
-    
+    setClaimError("");
+
     const selectedRecord = claimableRecords.find(r => r.ledger_id === selectedClaimId);
     if (!selectedRecord) return;
+
+    if (selectedRecord.hasActiveClaim) {
+      setClaimError("A claim has already been submitted for this charge.");
+      return;
+    }
 
     // Extract the insurance ID from the nested relationship
     const insuranceId = selectedRecord.patients?.insurance_id || null;
@@ -237,8 +278,10 @@ export function PatientProfile({ patient, onPatientUpdated }) {
       alert("Claim submitted successfully.");
       setIsClaimDialogOpen(false);
       setSelectedClaimId(null);
+      await refreshPatientClaims(patientData.id);
+      setClaimsRefreshKey((prev) => prev + 1);
     } else {
-      alert("Failed to submit claim: " + result.error);
+      setClaimError(result.error || "Failed to submit claim.");
     }
   }
   return (
@@ -376,12 +419,21 @@ export function PatientProfile({ patient, onPatientUpdated }) {
       {/* Send Claim Dialog */}
       <Dialog open={isClaimDialogOpen} onOpenChange={(open) => {
         setIsClaimDialogOpen(open);
-        if (!open) setSelectedClaimId(null); // reset selection on close
+        if (!open) {
+          setSelectedClaimId(null); // reset selection on close
+          setClaimError("");
+        }
       }}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Send Claims</DialogTitle>
           </DialogHeader>
+
+          {claimError && (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {claimError}
+            </div>
+          )}
           
           <div className="grid gap-4 py-4">
             <div className="border rounded-md">
@@ -392,59 +444,90 @@ export function PatientProfile({ patient, onPatientUpdated }) {
                     <TableHead>Patient</TableHead>
                     <TableHead>Service Date</TableHead>
                     <TableHead>Created On</TableHead>
-                    <TableHead>CProcedure</TableHead>
+                    <TableHead>Procedure</TableHead>
                     <TableHead>Provider</TableHead>
                     <TableHead>Carrier</TableHead>
+                    <TableHead>Claim Status</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loadingClaims ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                         Loading eligible claims...
                       </TableCell>
                     </TableRow>
                   ) : claimableRecords.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                         No pending charges available for claims.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    claimableRecords.map((record) => (
-                      <TableRow key={record.ledger_id} className="cursor-pointer" onClick={() => setSelectedClaimId(record.ledger_id)}>
-                        <TableCell className="text-center">
-                          <input 
-                            type="checkbox"
-                            className="w-4 h-4 cursor-pointer"
-                            checked={selectedClaimId === record.ledger_id}
-                            onChange={() => setSelectedClaimId(record.ledger_id)}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium text-black-500">
-                          {record.patients?.full_name || 'N/A'}
-                        </TableCell>
-                        <TableCell className="text-black-500">
-                          {record.date ? new Date(record.date).toLocaleDateString() : 'N/A'}
-                        </TableCell>
-                        <TableCell className="text-black-500">
-                          {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A'}
-                        </TableCell>
-                        <TableCell className="text-black-500">
-                          {record.procedures ? `[${record.procedures.procedure_id}] ${record.procedures.description}` : 'N/A'}
-                        </TableCell>
-                        <TableCell className="text-black-500">
-                          {record.providers?.name || 'N/A'}
-                        </TableCell>
-                        <TableCell className="text-black-500">
-                          {record.patients?.insurance_plans?.carrier?.name || 'No Carrier'}
-                        </TableCell>
-                        <TableCell className="text-right font-medium text-red-500">
-                          ${parseFloat(record.total_bill_amount || 0).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    claimableRecords.map((record) => {
+                      const alreadySent = Boolean(record.hasActiveClaim);
+                      return (
+                        <TableRow
+                          key={record.ledger_id}
+                          className={alreadySent ? "bg-slate-50/70 opacity-80" : "cursor-pointer"}
+                          onClick={() => {
+                            if (!alreadySent) setSelectedClaimId(record.ledger_id);
+                          }}
+                        >
+                          <TableCell className="text-center">
+                            <input 
+                              type="checkbox"
+                              className="w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
+                              disabled={alreadySent}
+                              checked={selectedClaimId === record.ledger_id}
+                              onChange={() => {
+                                if (!alreadySent) setSelectedClaimId(record.ledger_id);
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium text-black-500">
+                            {record.patients?.full_name || 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-black-500">
+                            {record.date ? new Date(record.date).toLocaleDateString() : 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-black-500">
+                            {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-black-500">
+                            {record.procedures ? `[${record.procedures.procedure_id}] ${record.procedures.description}` : (record.description || 'N/A')}
+                          </TableCell>
+                          <TableCell className="text-black-500">
+                            {record.providers?.name || 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-black-500">
+                            {record.patients?.insurance_plans?.carrier?.name || 'No Carrier'}
+                          </TableCell>
+                          <TableCell>
+                            {record.claimStatus ? (
+                              <Badge
+                                variant="outline"
+                                className={
+                                  alreadySent
+                                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                                    : "bg-red-50 text-red-700 border-red-200"
+                                }
+                              >
+                                {record.claimStatus}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                                Not Sent
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-medium text-red-500">
+                            ₱{parseFloat(record.total_bill_amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
@@ -462,11 +545,15 @@ export function PatientProfile({ patient, onPatientUpdated }) {
 
         {/* 4. Replace the entire Ledger Tab content */}
         <TabsContent value="ledger">
-          <PatientLedger patientId={patientData.id} />
+          <PatientLedger
+            patientId={patientData.id}
+            refreshTrigger={claimsRefreshKey}
+            onPaymentChanged={() => refreshPatientClaims(patientData.id)}
+          />
         </TabsContent>
 
         {/* INSURANCE TAB */}
-        <TabsContent value="insurance">
+        <TabsContent value="insurance" className="space-y-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Insurance Plans</CardTitle>
@@ -515,6 +602,87 @@ export function PatientProfile({ patient, onPatientUpdated }) {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Submitted Insurance Claims</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Claims submitted by the patient on the mobile app or by clinic staff appear here in real time.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleOpenClaimDialog}>
+                <ArrowRightFromLine className="w-4 h-4 mr-2" />
+                Send Claim
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {loadingPatientClaims ? (
+                <div className="text-sm text-muted-foreground">Loading submitted claims...</div>
+              ) : patientClaims.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No insurance claims submitted for this patient yet.</div>
+              ) : (
+                <div className="border rounded-md">
+                  <Table>
+                    <TableHeader className="bg-slate-50">
+                      <TableRow>
+                        <TableHead>Service Date</TableHead>
+                        <TableHead>Procedure</TableHead>
+                        <TableHead>Provider</TableHead>
+                        <TableHead>Carrier / Plan</TableHead>
+                        <TableHead>Submitted On</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="w-44">Claim Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {patientClaims.map((claim) => (
+                        <TableRow key={claim.id}>
+                          <TableCell>
+                            {claim.serviceDate ? new Date(claim.serviceDate).toLocaleDateString() : 'N/A'}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {claim.procedureCode ? `[${claim.procedureCode}] ${claim.procedure}` : claim.procedure}
+                          </TableCell>
+                          <TableCell>{claim.provider}</TableCell>
+                          <TableCell>
+                            <div>{claim.carrierName}</div>
+                            {claim.planName && (
+                              <div className="text-xs text-muted-foreground">{claim.planName}</div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {claim.submissionDate ? new Date(claim.submissionDate).toLocaleDateString() : 'N/A'}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            ₱{Number(claim.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={claim.status || "Submitted"}
+                              disabled={updatingClaimId === claim.id}
+                              onValueChange={(val) => handleUpdateClaimStatus(claim.id, val)}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Status" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Submitted">Submitted</SelectItem>
+                                <SelectItem value="In Review">In Review</SelectItem>
+                                <SelectItem value="Approved">Approved</SelectItem>
+                                <SelectItem value="Paid">Paid</SelectItem>
+                                <SelectItem value="Denied">Denied</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </CardContent>

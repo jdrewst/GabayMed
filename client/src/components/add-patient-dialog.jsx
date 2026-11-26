@@ -114,15 +114,16 @@ export function AddPatientDialog({ open, onOpenChange }) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="middleName">Middle Name</Label>
+              <Label htmlFor="middleName">Middle Name <span className="text-red-500">*</span></Label>
               <Input 
                 id="middleName" 
                 placeholder="Enter middle name" 
                 value={middleName}
                 onChange={(e) => setMiddleName(e.target.value)}
+                required 
               />
             </div>
-             <div className="space-y-2">
+            <div className="space-y-2">
               <Label htmlFor="lastName">Last Name <span className="text-red-500">*</span></Label>
               <Input 
                 id="lastName" 

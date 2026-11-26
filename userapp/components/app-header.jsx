@@ -1,53 +1,61 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MessageCircle, Bell } from 'lucide-react-native';
-import ProfileAPI from '../services/profileApi'; // Import ProfileAPI
+import ProfileAPI from '../services/profileApi';
+import { PatientAvatar } from './patient-avatar';
 
-export function AppHeader({ onOpenMessages, onOpenNotifications }) {
-  const [userData, setUserData] = useState({
-    firstName: '',
-    lastName: '',
-    initials: '',
-    avatar: null
-  });
+function buildHeaderUserData(profile) {
+  if (!profile) {
+    return {
+      firstName: '',
+      lastName: '',
+      initials: '',
+      avatar: '',
+      gender: '',
+    };
+  }
+  const first = profile.firstName || (profile.name || 'Guest').split(' ')[0] || 'Guest';
+  const last = profile.lastName || '';
+  const initials = `${first.charAt(0) || ''}${last.charAt(0) || ''}`.toUpperCase() || 'G';
+  return {
+    firstName: first,
+    lastName: last,
+    initials,
+    avatar: profile.avatar || '',
+    gender: profile.gender || '',
+  };
+}
+
+function computeGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }) {
+  const [userData, setUserData] = useState(() =>
+    buildHeaderUserData(ProfileAPI.getCachedProfile())
+  );
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [greeting, setGreeting] = useState('Hello');
+  const [greeting, setGreeting] = useState(computeGreeting);
 
   useEffect(() => {
     fetchUserData();
     fetchUnreadCounts();
-    updateGreeting();
+    setGreeting(computeGreeting());
+    const unsub = ProfileAPI.subscribe(profile => {
+      if (profile) setUserData(buildHeaderUserData(profile));
+    });
+    return unsub;
   }, []);
 
   const fetchUserData = async () => {
     try {
       const profile = await ProfileAPI.getProfile();
-      
       if (profile) {
-        // Handle full_name splitting
-        const fullName = profile.name || 'Guest';
-        const nameParts = fullName.split(' ');
-        const first = nameParts[0] || 'Guest';
-        const last = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
-        
-        // Generate initials safely
-        const initials = `${first.charAt(0) || ''}${last.charAt(0) || ''}`.toUpperCase() || 'G';
-
-        setUserData({
-          firstName: first,
-          lastName: last,
-          initials: initials,
-          avatar: profile.avatar // Ensure this matches your API response key
-        });
-      } else {
-        // Fallback state
-        setUserData({
-          firstName: 'Guest',
-          lastName: '',
-          initials: 'G',
-          avatar: null
-        });
+        setUserData(buildHeaderUserData(profile));
       }
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -83,23 +91,22 @@ export function AppHeader({ onOpenMessages, onOpenNotifications }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.leftSection}>
+      <TouchableOpacity
+        style={styles.leftSection}
+        onPress={onOpenProfile}
+        activeOpacity={onOpenProfile ? 0.75 : 1}
+        disabled={!onOpenProfile}
+      >
         <View style={styles.avatarContainer}>
-          {userData.avatar ? (
-            <Image source={{ uri: userData.avatar }} style={styles.avatarImage} />
-          ) : (
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{userData.initials}</Text>
-            </View>
-          )}
+          <PatientAvatar avatar={userData.avatar} gender={userData.gender} size={42} />
         </View>
-        <View>
-          <Text style={styles.greeting}>
+        <View style={styles.greetingContainer}>
+          <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
             <Text style={styles.helloText}>{greeting}, </Text>
             <Text style={styles.nameText}>{userData.firstName}</Text>
           </Text>
         </View>
-      </View>
+      </TouchableOpacity>
       <View style={styles.rightSection}>
         <TouchableOpacity onPress={onOpenMessages} style={styles.iconButton}>
           <MessageCircle size={24} color="#4b5563" fill={"#3A4D51"} />
@@ -135,13 +142,20 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f3f4f6',
   },
   leftSection: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    marginRight: 12,
+  },
+  greetingContainer: {
+    flex: 1,
+    minWidth: 0,
   },
   avatarContainer: {
     width: 40,
     height: 40,
+    flexShrink: 0,
   },
   avatar: {
     width: 40,
@@ -178,6 +192,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   iconButton: {
     width: 46,

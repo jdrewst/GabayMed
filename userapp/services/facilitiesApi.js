@@ -1,141 +1,192 @@
 import { supabase } from '../lib/supabase';
 import Session from './session';
 
+function resolveProcedureLabel(apt) {
+  if (apt?.procedures?.name) return apt.procedures.name;
+  if (apt?.procedures?.description) return apt.procedures.description;
+  if (typeof apt?.notes === 'string') {
+    const match = /^Service:\s*([^.]+)\./i.exec(apt.notes.trim());
+    if (match && match[1]) return match[1].trim();
+  }
+  if (apt?.procedure_id) return `Procedure #${apt.procedure_id}`;
+  return 'Consultation';
+}
+
 const FacilitiesAPI = {
   async getFacilitiesPageData() {
     try {
       const patientIds = await Session.getAssociatedPatientIds();
-      
-      if (patientIds.length === 0) {
-        return { facilities: [], schedules: [], activities: [], balances: [] };
-      }
 
-      // Fetch Appointments and Ledger in parallel
-      const [appointmentsResult, ledgerResult] = await Promise.all([
-        // 1. Appointments (Source for Facilities list and Schedules)
-        supabase
-          .from('appointments')
-          .select(`
-            appointment_id,
-            appointment_date,
-            status,
-            notes,
-            patient_id,
-            procedures ( name ),
-            providers ( 
-              name,
-              facilities ( facility_id, name, address ) 
-            )
-          `)
-          .in('patient_id', patientIds)
-          .order('appointment_date', { ascending: false }),
+      // Always fetch all registered healthcare facilities so the user can browse and book at any clinic
+      const allFacilitiesPromise = supabase
+        .from('facilities')
+        .select('*')
+        .order('name', { ascending: true });
 
-        // 2. Ledger (Updated to match facility-side logic and include payments)
-        supabase
-          .from('ledger')
-          .select(`
-            ledger_id,
-            created_at,
-            date,
-            code,
-            description,
-            total_bill_amount,
-            payment_status,
-            type,
-            patient_id,
-            appointments (
-              appointment_date,
-              reason_for_visit,
-              procedures ( name, code ),
-              providers ( 
-                name,
-                facilities ( facility_id, name ) 
-              )
-            )
-          `)
-          .in('patient_id', patientIds) // Filter by ledger.patient_id directly
-          .order('date', { ascending: false })
+      const [allFacilitiesResult, appointmentsResult, ledgerResult, patientsResult] = await Promise.all([
+        allFacilitiesPromise,
+        patientIds.length > 0
+          ? supabase
+              .from('appointments')
+              .select(`
+                *,
+                procedures ( * ),
+                providers (
+                  *,
+                  facilities ( * )
+                )
+              `)
+              .in('patient_id', patientIds)
+              .order('appointment_date', { ascending: false })
+          : Promise.resolve({ data: [] }),
+        patientIds.length > 0
+          ? supabase
+              .from('ledger')
+              .select(`
+                *,
+                appointments (
+                  appointment_date,
+                  notes,
+                  procedures ( * ),
+                  providers (
+                    *,
+                    facilities ( * )
+                  )
+                )
+              `)
+              .in('patient_id', patientIds)
+              .order('date', { ascending: false })
+          : Promise.resolve({ data: [] }),
+        patientIds.length > 0
+          ? supabase
+              .from('patients')
+              .select(`
+                patient_id,
+                facility_id,
+                facilities ( * )
+              `)
+              .in('patient_id', patientIds)
+          : Promise.resolve({ data: [] }),
       ]);
 
+      const allRegisteredFacilities = allFacilitiesResult.data || [];
       const appointments = appointmentsResult.data || [];
       const ledger = ledgerResult.data || [];
+      const patientRows = patientsResult.data || [];
 
-      // Helper: Map patient_id to facility_id (to handle ledger entries without appointments)
+      // Map patient_id to facility_id
       const patientFacilityMap = {};
-      appointments.forEach(apt => {
-        if (apt.patient_id && apt.providers?.facilities?.facility_id) {
-          patientFacilityMap[apt.patient_id] = apt.providers.facilities.facility_id;
+      const facilitiesMap = new Map();
+
+      patientRows.forEach(p => {
+        if (p.patient_id && p.facility_id) {
+          patientFacilityMap[p.patient_id] = p.facility_id;
+        }
+        const fac = p.facilities;
+        if (fac && fac.facility_id && !facilitiesMap.has(fac.facility_id)) {
+          facilitiesMap.set(fac.facility_id, {
+            id: fac.facility_id,
+            name: fac.name || 'Healthcare Facility',
+            address: fac.address || fac.location || '',
+            insurancePlan: 'Maxicare',
+            lastVisit: 'No visits yet',
+          });
         }
       });
 
-      // --- PROCESS FACILITIES ---
-      const facilitiesMap = new Map();
-      
       appointments.forEach(apt => {
         const facility = apt.providers?.facilities;
-        if (facility && facility.facility_id) {
-          const fId = facility.facility_id;
-
+        const fId = apt.facility_id || facility?.facility_id;
+        if (apt.patient_id && fId) {
+          patientFacilityMap[apt.patient_id] = fId;
+        }
+        if (facility && fId) {
           if (!facilitiesMap.has(fId)) {
             facilitiesMap.set(fId, {
               id: fId,
-              name: facility.name,
-              address: facility.address,
-              insurancePlan: 'Maxicare', 
-              lastVisit: 'No visits yet'
+              name: facility.name || 'Healthcare Facility',
+              address: facility.address || facility.location || '',
+              insurancePlan: 'Maxicare',
+              lastVisit: 'No visits yet',
             });
           }
 
-          // Update Last Visit only if appointment is COMPLETED
           const existing = facilitiesMap.get(fId);
           if (apt.status === 'COMPLETED' && existing.lastVisit === 'No visits yet') {
-             existing.lastVisit = new Date(apt.appointment_date).toLocaleDateString('en-US', {
-              month: 'short', day: 'numeric', year: 'numeric'
+            existing.lastVisit = new Date(apt.appointment_date).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
             });
           }
+        }
+      });
+
+      // Include all other registered healthcare facilities so all facilities are displayed
+      allRegisteredFacilities.forEach(fac => {
+        if (fac && fac.facility_id && !facilitiesMap.has(fac.facility_id)) {
+          facilitiesMap.set(fac.facility_id, {
+            id: fac.facility_id,
+            name: fac.name || 'Healthcare Facility',
+            address: fac.address || fac.location || '',
+            insurancePlan: 'Maxicare',
+            lastVisit: 'No visits yet',
+          });
         }
       });
       const facilitiesData = Array.from(facilitiesMap.values());
 
       // --- PROCESS SCHEDULES ---
       const schedulesData = appointments.map(apt => {
-        const dateObj = new Date(apt.appointment_date);
+        let dateObj = new Date(apt.appointment_date);
+        if (apt.appointment_time && typeof apt.appointment_date === 'string' && !apt.appointment_date.includes('T')) {
+          const [y, m, d] = apt.appointment_date.split('-').map(Number);
+          const [hh, mm] = apt.appointment_time.split(':').map(Number);
+          dateObj = new Date(y, m - 1, d, hh || 0, mm || 0, 0);
+        }
+
+        const timeLabel = dateObj.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        });
+
         return {
           id: apt.appointment_id,
-          facilityId: apt.providers?.facilities?.facility_id, 
+          facilityId: apt.facility_id || apt.providers?.facilities?.facility_id || patientFacilityMap[apt.patient_id],
           month: dateObj.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
           date: dateObj.getDate().toString(),
           fullDate: dateObj.toLocaleDateString(),
-          status: apt.status === 'CONFIRMED' ? 'Scheduled' : 
-                  apt.status === 'COMPLETED' ? 'Done' : 
-                  apt.status === 'CANCELLED' ? 'Cancelled' : apt.status,
-          procedure: apt.procedures?.name || 'Consultation',
+          status:
+            apt.status === 'CONFIRMED' || apt.status === 'PENDING'
+              ? 'Scheduled'
+              : apt.status === 'COMPLETED'
+              ? 'Done'
+              : apt.status === 'CANCELLED'
+              ? 'Cancelled'
+              : apt.status,
+          rawStatus: apt.status,
+          procedure: resolveProcedureLabel(apt),
           doctor: apt.providers?.name || 'Unknown Provider',
-          room: apt.notes || 'General Area'
+          room: apt.operatory ? `${apt.operatory} • ${timeLabel}` : timeLabel,
         };
       });
 
       // --- PROCESS ACTIVITIES (All Ledger Entries) ---
       const activitiesData = ledger.map(entry => {
-        // Logic from snippet:
-        // Date fallback: entry.date -> appointment.date -> created_at
         const rawDate = entry.date || entry.appointments?.appointment_date || entry.created_at;
         const dateObj = new Date(rawDate);
-        
-        // Description fallback
-        const description = entry.description || entry.appointments?.reason_for_visit || 'Transaction';
-        
-        // Facility ID fallback
+        const description = entry.description || 'Transaction';
         const facilityId = entry.appointments?.providers?.facilities?.facility_id || patientFacilityMap[entry.patient_id];
 
         return {
           id: entry.ledger_id,
-          facilityId: facilityId,
-          description: description,
+          facilityId,
+          description,
           time: dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          amount: parseFloat(entry.total_bill_amount),
+          amount: parseFloat(entry.total_bill_amount) || 0,
           type: parseFloat(entry.total_bill_amount) < 0 ? 'payment' : 'charge',
-          code: entry.code || entry.appointments?.procedures?.code || '-'
+          code: entry.code || entry.procedure_id || entry.appointments?.procedures?.procedure_id || '-',
         };
       });
 
@@ -143,29 +194,30 @@ const FacilitiesAPI = {
       const balancesData = ledger
         .filter(entry => entry.payment_status !== 'PAID' && parseFloat(entry.total_bill_amount) > 0)
         .map(entry => {
-            const facilityId = entry.appointments?.providers?.facilities?.facility_id || patientFacilityMap[entry.patient_id];
-            return {
-              id: entry.ledger_id,
-              patientId: entry.patient_id, // ADDED: Needed for payment
-              facilityId: facilityId,
-              procedure: entry.appointments?.procedures?.name || entry.description || 'Service Charge',
-              date: new Date(entry.created_at).toLocaleDateString(),
-              amount: parseFloat(entry.total_bill_amount)
-            };
+          const facilityId = entry.appointments?.providers?.facilities?.facility_id || patientFacilityMap[entry.patient_id];
+          return {
+            id: entry.ledger_id,
+            patientId: entry.patient_id,
+            facilityId,
+            procedure:
+              entry.appointments?.procedures?.name ||
+              entry.appointments?.procedures?.description ||
+              entry.description ||
+              'Service Charge',
+            date: new Date(entry.created_at || entry.date).toLocaleDateString(),
+            amount: parseFloat(entry.total_bill_amount) || 0,
+          };
         });
 
-      // Calculate Total Pending Balance
-      // FIX: Sum all ledger entries (Charges are positive, Payments are negative) to get the net balance
-      const totalPendingBalance = ledger.reduce((sum, entry) => sum + parseFloat(entry.total_bill_amount), 0);
+      const totalPendingBalance = ledger.reduce((sum, entry) => sum + (parseFloat(entry.total_bill_amount) || 0), 0);
 
       return {
         facilities: facilitiesData,
         schedules: schedulesData,
         activities: activitiesData,
         balances: balancesData,
-        totalPendingBalance
+        totalPendingBalance,
       };
-
     } catch (error) {
       console.error('FacilitiesAPI Error:', error);
       return { facilities: [], schedules: [], activities: [], balances: [], totalPendingBalance: 0 };
@@ -176,23 +228,26 @@ const FacilitiesAPI = {
     try {
       const { error } = await supabase
         .from('ledger')
-        .insert([{
-          patient_id: paymentData.patientId,
-          date: new Date().toISOString(),
-          type: 'PAYMENT',
-          code: paymentData.method, // e.g., 'GCash', 'Credit Card'
-          description: `Payment via ${paymentData.method}`,
-          total_bill_amount: -Math.abs(parseFloat(paymentData.amount)), // Store as negative
-          payment_status: 'PAID' 
-        }]);
+        .insert([
+          {
+            patient_id: paymentData.patientId,
+            date: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            type: 'PAYMENT',
+            code: paymentData.method,
+            description: `Payment via ${paymentData.method}`,
+            total_bill_amount: -Math.abs(parseFloat(paymentData.amount)),
+            payment_status: 'PAID',
+          },
+        ]);
 
       if (error) throw error;
       return { success: true };
     } catch (error) {
-      console.error("Add Payment Error:", error.message);
+      console.error('Add Payment Error:', error.message);
       return { success: false, error: error.message };
     }
-  }
+  },
 };
 
 export default FacilitiesAPI;

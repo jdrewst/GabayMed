@@ -1,75 +1,129 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
-import { ArrowLeft, Calendar, CreditCard, Gift, Bell } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { ArrowLeft, Calendar, CreditCard, Gift, Bell, MessageCircle, ShieldCheck } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import ProfileAPI, { getDisplayConfig } from '../services/profileApi';
+import AppointmentAPI from '../services/appointmentApi';
+
+const CATEGORY_MAP = [
+  { key: 'notifyAppointments', type: 'reminder', label: 'Appointments', icon: Calendar },
+  { key: 'notifyBilling', type: 'payment', label: 'Billing', icon: CreditCard },
+  { key: 'notifyInsurance', type: 'news', label: 'Insurance', icon: ShieldCheck },
+  { key: 'notifyMessages', type: 'message', label: 'Messages', icon: MessageCircle },
+  { key: 'notifyPromos', type: 'promo', label: 'Promos', icon: Gift },
+];
 
 export function NotificationsPage({ onBack }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [perms, setPerms] = useState(() => ProfileAPI.getCachedPermissions() || {
+    notificationsAllowed: true,
+    notifyAppointments: true,
+    notifyBilling: true,
+    notifyInsurance: true,
+    notifyMessages: true,
+    notifyPromos: true,
+    language: 'en',
+    themeMode: 'light',
+    textSize: 'medium',
+    highContrast: false,
+  });
 
   useEffect(() => {
+    ProfileAPI.getPermissions()
+      .then(loaded => {
+        if (loaded) setPerms(loaded);
+      })
+      .catch(() => {});
     fetchNotifications();
+    const unsub = ProfileAPI.subscribePermissions(next => {
+      if (next) setPerms(next);
+    });
+    return unsub;
   }, []);
 
   const fetchNotifications = async () => {
     try {
       setLoading(true);
-      // TODO: Replace with actual API call
-      // const response = await fetch('YOUR_API_ENDPOINT/notifications');
-      // const data = await response.json();
-      
-      // Simulated data for now
-      setTimeout(() => {
-        const mockNotifications = [
-          {
-            id: "1",
-            type: "reminder",
-            icon: Calendar,
-            title: "Appointment Reminder",
-            message: "Your appointment at Philippine General Hospital is tomorrow at 10:30 AM.",
-            time: "2 hours ago",
-            timestamp: Date.now() - 2 * 60 * 60 * 1000,
-            unread: true,
-          },
-          {
-            id: "2",
-            type: "payment",
-            icon: CreditCard,
-            title: "Payment Due",
-            message: "You have an outstanding balance of ₱2,500 for Laboratory Tests.",
-            time: "1 day ago",
-            timestamp: Date.now() - 24 * 60 * 60 * 1000,
-            unread: true,
-          },
-          {
-            id: "3",
-            type: "promo",
-            icon: Gift,
-            title: "Special Offer",
-            message: "Get 20% off on your next general check-up at UERM Medical Center!",
-            time: "2 days ago",
-            timestamp: Date.now() - 48 * 60 * 60 * 1000,
-            unread: true,
-          },
-          {
-            id: "4",
-            type: "news",
-            icon: Bell,
-            title: "Insurance Update",
-            message: "Your insurance coverage has been renewed for another year.",
-            time: "1 week ago",
-            timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000,
-            unread: false,
-          },
-        ];
-        setNotifications(mockNotifications);
-        setUnreadCount(mockNotifications.filter(n => n.unread).length);
-        setLoading(false);
-      }, 500);
+      let realAppointmentNotifs = [];
+      try {
+        const schedule = await AppointmentAPI.getPatientSchedule();
+        realAppointmentNotifs = (schedule || []).slice(0, 3).map((apt, idx) => ({
+          id: `apt-notif-${apt.id || idx}`,
+          type: 'reminder',
+          icon: Calendar,
+          title:
+            (apt.status || '').toUpperCase() === 'CANCELLED'
+              ? 'Appointment Cancelled'
+              : 'Appointment Scheduled',
+          message: `${apt.procedureName || 'Consultation'} with ${apt.providerName} at ${apt.facilityName} on ${apt.formattedDate} at ${apt.formattedTime}.`,
+          timestamp: apt.createdAt ? new Date(apt.createdAt).getTime() : Date.now() - (idx + 1) * 1800000,
+          unread: idx === 0,
+        }));
+      } catch {}
+
+      const baseNotifications = [
+        ...realAppointmentNotifs,
+        {
+          id: '1',
+          type: 'reminder',
+          icon: Calendar,
+          title: 'Appointment Reminder',
+          message: 'Your appointment at Philippine General Hospital is tomorrow at 10:30 AM.',
+          timestamp: Date.now() - 2 * 60 * 60 * 1000,
+          unread: true,
+        },
+        {
+          id: '2',
+          type: 'payment',
+          icon: CreditCard,
+          title: 'Payment Due',
+          message: 'You have an outstanding balance of ₱2,500 for Laboratory Tests.',
+          timestamp: Date.now() - 18 * 60 * 60 * 1000,
+          unread: true,
+        },
+        {
+          id: '5',
+          type: 'message',
+          icon: MessageCircle,
+          title: 'Message from Clinic Staff',
+          message: 'Please bring a valid ID and your latest lab results 15 minutes before your consultation.',
+          timestamp: Date.now() - 26 * 60 * 60 * 1000,
+          unread: true,
+        },
+        {
+          id: '3',
+          type: 'promo',
+          icon: Gift,
+          title: 'Special Offer',
+          message: 'Get 20% off on your next general check-up at UERM Medical Center!',
+          timestamp: Date.now() - 48 * 60 * 60 * 1000,
+          unread: true,
+        },
+        {
+          id: '4',
+          type: 'news',
+          icon: ShieldCheck,
+          title: 'Insurance Update',
+          message: 'Your PhilHealth & HMO insurance coverage has been verified and renewed.',
+          timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000,
+          unread: false,
+        },
+      ];
+
+      setNotifications(baseNotifications);
     } catch (error) {
       console.error('Error fetching notifications:', error);
+    } finally {
       setLoading(false);
     }
   };
@@ -80,115 +134,201 @@ export function NotificationsPage({ onBack }) {
     setRefreshing(false);
   };
 
-  const markAsRead = async (notificationId) => {
-    try {
-      // TODO: Replace with actual API call
-      // await fetch(`YOUR_API_ENDPOINT/notifications/${notificationId}/read`, { method: 'POST' });
-      
-      setNotifications(prevNotifications =>
-        prevNotifications.map(notif =>
-          notif.id === notificationId ? { ...notif, unread: false } : notif
-        )
-      );
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch (error) {
-      console.error('Error marking notification as read:', error);
-    }
+  const isCategoryEnabled = type => {
+    if (perms?.notificationsAllowed === false) return false;
+    if (type === 'reminder') return perms?.notifyAppointments !== false;
+    if (type === 'payment') return perms?.notifyBilling !== false;
+    if (type === 'news') return perms?.notifyInsurance !== false;
+    if (type === 'message') return perms?.notifyMessages !== false;
+    if (type === 'promo') return perms?.notifyPromos !== false;
+    return true;
+  };
+
+  const visibleNotifications = notifications.filter(n => isCategoryEnabled(n.type));
+  const unreadCount = visibleNotifications.filter(n => n.unread).length;
+  const notificationsAllowed = perms?.notificationsAllowed !== false;
+  const display = getDisplayConfig(perms);
+  const fs = size => Math.round(size * display.fontScale * 10) / 10;
+
+  const toggleCategoryChip = async key => {
+    const current = perms?.[key] !== false;
+    await ProfileAPI.setPermissions({
+      notificationsAllowed: true,
+      [key]: !current,
+    });
+  };
+
+  const markAsRead = async notificationId => {
+    setNotifications(prev =>
+      prev.map(notif => (notif.id === notificationId ? { ...notif, unread: false } : notif))
+    );
   };
 
   const markAllAsRead = async () => {
-    try {
-      // TODO: Replace with actual API call
-      // await fetch('YOUR_API_ENDPOINT/notifications/read-all', { method: 'POST' });
-      
-      setNotifications(prevNotifications =>
-        prevNotifications.map(notif => ({ ...notif, unread: false }))
-      );
-      setUnreadCount(0);
-    } catch (error) {
-      console.error('Error marking all as read:', error);
-    }
+    setNotifications(prev => prev.map(notif => ({ ...notif, unread: false })));
   };
 
-  const getRelativeTime = (timestamp) => {
+  const getRelativeTime = timestamp => {
     const now = Date.now();
-    const diff = now - timestamp;
+    const diff = Math.max(0, now - timestamp);
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
 
+    if (minutes < 1) return 'Just now';
     if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
     if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
     if (days < 7) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
     return `${Math.floor(days / 7)} ${Math.floor(days / 7) === 1 ? 'week' : 'weeks'} ago`;
   };
 
-  const getIconStyle = (type) => {
+  const getIconStyle = type => {
     switch (type) {
-      case "reminder":
+      case 'reminder':
         return { bg: '#dbeafe', color: '#3b82f6' };
-      case "payment":
+      case 'payment':
         return { bg: '#fee2e2', color: '#ef4444' };
-      case "promo":
+      case 'promo':
         return { bg: '#dcfce7', color: '#22c55e' };
+      case 'message':
+        return { bg: '#e0f2fe', color: '#0284c7' };
       default:
         return { bg: '#f3f4f6', color: '#6b7280' };
     }
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: display.bg }]}>
       {/* Header */}
-      <LinearGradient
-        colors={['#66BAFF', '#83BFF0']}
-        style={styles.header}
-      >
+      <LinearGradient colors={['#66BAFF', '#83BFF0']} style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <ArrowLeft size={20} color="#fff" />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Notifications</Text>
-          {unreadCount > 0 && (
+          <Text style={[styles.headerTitle, { fontSize: fs(18) }]}>Notifications</Text>
+          {notificationsAllowed && unreadCount > 0 && (
             <View style={styles.headerBadge}>
               <Text style={styles.headerBadgeText}>{unreadCount}</Text>
             </View>
           )}
         </View>
-        {unreadCount > 0 && (
+        {notificationsAllowed && unreadCount > 0 && (
           <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
             <Text style={styles.markAllText}>Mark all</Text>
           </TouchableOpacity>
         )}
       </LinearGradient>
 
+      {/* Active Notification Category Filter / Preferences Bar */}
+      {notificationsAllowed && (
+        <View
+          style={[
+            styles.categoryBar,
+            { backgroundColor: display.cardBg, borderBottomColor: display.border },
+          ]}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryScroll}
+          >
+            {CATEGORY_MAP.map(cat => {
+              const enabled = perms?.[cat.key] !== false;
+              const CatIcon = cat.icon;
+              return (
+                <TouchableOpacity
+                  key={cat.key}
+                  onPress={() => toggleCategoryChip(cat.key)}
+                  style={[
+                    styles.categoryChip,
+                    { backgroundColor: display.subCardBg, borderColor: display.border },
+                    enabled && styles.categoryChipActive,
+                  ]}
+                >
+                  <CatIcon size={13} color={enabled ? '#0284c7' : '#94a3b8'} />
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      { fontSize: fs(12) },
+                      enabled ? styles.categoryChipTextActive : styles.categoryChipTextMuted,
+                    ]}
+                  >
+                    {cat.label} {enabled ? 'On' : 'Off'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Notifications List */}
-      {loading ? (
+      {!notificationsAllowed ? (
+        <View style={styles.emptyContainer}>
+          <Bell size={48} color="#94a3b8" />
+          <Text style={[styles.emptyText, { color: display.textPrimary, fontSize: fs(18) }]}>
+            Notifications are turned off
+          </Text>
+          <Text
+            style={[
+              styles.emptySubtext,
+              { textAlign: 'center', color: display.textSecondary, fontSize: fs(14) },
+            ]}
+          >
+            Enable notifications in Settings or tap below to receive appointment, billing, and coverage updates.
+          </Text>
+          <TouchableOpacity
+            style={styles.turnOnBtn}
+            onPress={() => ProfileAPI.setPermissions({ notificationsAllowed: true })}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: fs(14) }}>
+              Turn On Notifications
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0ea5e9" />
         </View>
-      ) : notifications.length === 0 ? (
+      ) : visibleNotifications.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Bell size={48} color="#d1d5db" />
-          <Text style={styles.emptyText}>No notifications yet</Text>
-          <Text style={styles.emptySubtext}>You're all caught up!</Text>
+          <Text style={[styles.emptyText, { color: display.textPrimary, fontSize: fs(18) }]}>
+            No matching notifications
+          </Text>
+          <Text
+            style={[
+              styles.emptySubtext,
+              { textAlign: 'center', color: display.textSecondary, fontSize: fs(14) },
+            ]}
+          >
+            You have muted the active notification categories, or you're all caught up!
+          </Text>
         </View>
       ) : (
-        <ScrollView 
+        <ScrollView
           style={styles.listContainer}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#0ea5e9']} />
           }
         >
-          {notifications.map((notif) => {
+          {visibleNotifications.map((notif, idx) => {
             const iconStyle = getIconStyle(notif.type);
             const IconComponent = notif.icon;
 
             return (
               <TouchableOpacity
-                key={notif.id}
+                key={`${notif.id}-${idx}`}
                 style={[
                   styles.notificationItem,
-                  notif.unread && styles.notificationItemUnread
+                  {
+                    backgroundColor: notif.unread
+                      ? display.isDark
+                        ? '#1e293b'
+                        : '#f0f9ff'
+                      : display.cardBg,
+                    borderBottomColor: display.border,
+                  },
                 ]}
                 onPress={() => notif.unread && markAsRead(notif.id)}
               >
@@ -197,11 +337,27 @@ export function NotificationsPage({ onBack }) {
                 </View>
                 <View style={styles.contentContainer}>
                   <View style={styles.titleRow}>
-                    <Text style={styles.notificationTitle}>{notif.title}</Text>
+                    <Text
+                      style={[
+                        styles.notificationTitle,
+                        { color: display.textPrimary, fontSize: fs(15) },
+                      ]}
+                    >
+                      {notif.title}
+                    </Text>
                     {notif.unread && <View style={styles.unreadDot} />}
                   </View>
-                  <Text style={styles.notificationMessage}>{notif.message}</Text>
-                  <Text style={styles.notificationTime}>{getRelativeTime(notif.timestamp)}</Text>
+                  <Text
+                    style={[
+                      styles.notificationMessage,
+                      { color: display.textSecondary, fontSize: fs(14) },
+                    ]}
+                  >
+                    {notif.message}
+                  </Text>
+                  <Text style={[styles.notificationTime, { fontSize: fs(12) }]}>
+                    {getRelativeTime(notif.timestamp)}
+                  </Text>
                 </View>
               </TouchableOpacity>
             );
@@ -266,6 +422,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: '#fff',
+  },
+  categoryBar: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+    paddingVertical: 10,
+  },
+  categoryScroll: {
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#f8fafc',
+  },
+  categoryChipActive: {
+    borderColor: '#7dd3fc',
+    backgroundColor: '#e0f2fe',
+  },
+  categoryChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  categoryChipTextActive: {
+    color: '#0284c7',
+  },
+  categoryChipTextMuted: {
+    color: '#94a3b8',
+  },
+  turnOnBtn: {
+    marginTop: 18,
+    backgroundColor: '#0ea5e9',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
   },
   loadingContainer: {
     flex: 1,

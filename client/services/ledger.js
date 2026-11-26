@@ -130,25 +130,54 @@ export const ledgerAPI = {
 
       if (error) throw error;
 
-      const transactions = data.map(t => ({
-        id: t.ledger_id, 
-        date: (t.date || t.appointments?.appointment_date) 
-          ? new Date(t.date || t.appointments?.appointment_date).toLocaleDateString() 
-          : '-',
-        created: new Date(t.created_at).toLocaleDateString(),
-        // Ensure it falls back to the direct procedure_id if code is empty
-        code: t.code || t.procedure_id || t.appointments?.procedures?.procedure_id || '-',
-        description: t.description || t.appointments?.reason_for_visit || 'Visit Charge',
-        providerId: t.provider_id || t.appointments?.providers?.provider_id || null,
-        // Fetch name from the direct provider relation first
-        provider: t.providers?.name || t.appointments?.providers?.name || '-',
-        appointmentDate: t.appointments?.appointment_date || null,
-        amount: parseFloat(t.total_bill_amount),
-        type: t.type,
-        appointmentId: t.appointment_id,
-        procedureId: t.procedure_id,
-        paymentStatus: t.payment_status
-      }));
+      // Fetch submitted claims for this patient so ledger charges reflect mobile & web claim statuses
+      let latestClaimByLedger = new Map();
+      try {
+        const { data: claimsData } = await supabase
+          .from('claims')
+          .select('*')
+          .eq('patient_id', patientId)
+          .order('submission_date', { ascending: false });
+
+        (claimsData || []).forEach(c => {
+          const key = String(c.ledger_id);
+          if (!latestClaimByLedger.has(key)) {
+            latestClaimByLedger.set(key, c);
+          }
+        });
+      } catch (_) {}
+
+      const activeStatuses = new Set(['SUBMITTED', 'PENDING', 'IN_REVIEW', 'IN REVIEW', 'PROCESSING', 'APPROVED', 'PAID']);
+
+      const transactions = data.map(t => {
+        const claim = latestClaimByLedger.get(String(t.ledger_id)) || null;
+        const claimStatus = claim?.status || null;
+        const hasSubmittedClaim = claimStatus ? activeStatuses.has(String(claimStatus).trim().toUpperCase()) : false;
+
+        return {
+          id: t.ledger_id, 
+          date: (t.date || t.appointments?.appointment_date) 
+            ? new Date(t.date || t.appointments?.appointment_date).toLocaleDateString() 
+            : '-',
+          created: new Date(t.created_at).toLocaleDateString(),
+          // Ensure it falls back to the direct procedure_id if code is empty
+          code: t.code || t.procedure_id || t.appointments?.procedures?.procedure_id || '-',
+          description: t.description || t.appointments?.reason_for_visit || 'Visit Charge',
+          providerId: t.provider_id || t.appointments?.providers?.provider_id || null,
+          // Fetch name from the direct provider relation first
+          provider: t.providers?.name || t.appointments?.providers?.name || '-',
+          appointmentDate: t.appointments?.appointment_date || null,
+          amount: parseFloat(t.total_bill_amount),
+          type: t.type,
+          appointmentId: t.appointment_id,
+          procedureId: t.procedure_id,
+          paymentStatus: t.payment_status,
+          claimId: claim?.claim_id ?? claim?.id ?? null,
+          claimStatus,
+          claimSubmissionDate: claim?.submission_date || null,
+          hasSubmittedClaim
+        };
+      });
 
       // Calculate Financials
       const totalBalance = transactions.reduce((sum, t) => sum + t.amount, 0);
@@ -190,6 +219,39 @@ export const ledgerAPI = {
   // Add Payment
   async addPayment(patientId, paymentData) {
     try {
+      const isInsurancePayment = paymentData.method === 'ins_check' || paymentData.method === 'ins_eft';
+
+      // Guard: Insurance payments require a submitted claim on the target charge
+      if (isInsurancePayment) {
+        if (!paymentData.chargeId) {
+          return {
+            success: false,
+            error: 'Insurance payments must be allocated to a specific charge that has a submitted claim.'
+          };
+        }
+
+        const { data: claimRows, error: claimErr } = await supabase
+          .from('claims')
+          .select('*')
+          .eq('patient_id', patientId)
+          .eq('ledger_id', paymentData.chargeId)
+          .order('submission_date', { ascending: false });
+
+        if (claimErr) throw claimErr;
+
+        const activeStatuses = new Set(['SUBMITTED', 'PENDING', 'IN_REVIEW', 'IN REVIEW', 'PROCESSING', 'APPROVED', 'PAID']);
+        const activeClaim = (claimRows || []).find(
+          c => c.status && activeStatuses.has(String(c.status).trim().toUpperCase())
+        );
+
+        if (!activeClaim) {
+          return {
+            success: false,
+            error: `Insurance payment cannot proceed: The claim for Charge #${paymentData.chargeId} has not been submitted yet. Please send the claim first.`
+          };
+        }
+      }
+
       const methodLabels = {
         'cash': 'Cash',
         'check': 'Check',
@@ -219,9 +281,48 @@ export const ledgerAPI = {
         }]);
 
       if (error) throw error;
+
+      // Sync claim status to 'Approved' when an insurance payment is posted against it
+      if (isInsurancePayment && paymentData.chargeId) {
+        try {
+          await supabase
+            .from('claims')
+            .update({ status: 'Approved' })
+            .eq('patient_id', patientId)
+            .eq('ledger_id', paymentData.chargeId);
+        } catch (_) {}
+      }
+
       return { success: true };
     } catch (error) {
       console.error("Add Payment Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Update a charge's payment_status (and sync claim status to 'Paid' when settled)
+  async updateChargeStatus(ledgerId, status) {
+    try {
+      const { error } = await supabase
+        .from('ledger')
+        .update({ payment_status: status })
+        .eq('ledger_id', ledgerId);
+
+      if (error) throw error;
+
+      if (String(status).toUpperCase() === 'PAID') {
+        try {
+          await supabase
+            .from('claims')
+            .update({ status: 'Paid' })
+            .eq('ledger_id', ledgerId)
+            .neq('status', 'Denied');
+        } catch (_) {}
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error("Update Charge Status Error:", error.message);
       return { success: false, error: error.message };
     }
   },
@@ -290,50 +391,103 @@ export const ledgerAPI = {
       return { totalBalance: 0, insurancePortion: 0, patientPortion: 0 };
     }
   },
-  
-  // Update a charge's payment_status (e.g. after applying a payment)
-  async updateChargeStatus(ledgerId, status) {
-    try {
-      const { error } = await supabase
-        .from('ledger')
-        .update({ payment_status: status })
-        .eq('ledger_id', ledgerId);
-
-      if (error) throw error;
-      return { success: true };
-    } catch (error) {
-      console.error("Update Charge Status Error:", error.message);
-      return { success: false, error: error.message };
-    }
-  },
-// Get specific procedure fee based on provider's fee schedule
+  // Get specific procedure fee based on provider's fee schedule (fee_schedule_items.current_fee)
   async getProcedureFee(providerId, procedureCode) {
+    if (!providerId || !procedureCode) {
+      return { amount: null, scheduleName: null, source: 'none' };
+    }
+
     try {
-      // 1. Get the provider's assigned fee schedule
+      const normalizedProcId = !isNaN(Number(procedureCode))
+        ? Number(procedureCode)
+        : procedureCode;
+
+      // Helper to fetch current_fee from fee_schedule_items for a given schedule_id
+      const fetchFeeForSchedule = async (scheduleId) => {
+        if (scheduleId == null) return null;
+        const { data: items, error: feeError } = await supabase
+          .from('fee_schedule_items')
+          .select('*')
+          .eq('schedule_id', scheduleId)
+          .eq('procedure_id', normalizedProcId)
+          .limit(1);
+
+        if (feeError) throw feeError;
+        const item = Array.isArray(items) ? items[0] : null;
+        if (!item) return null;
+
+        const rawFee = item.current_fee ?? item.custom_price ?? null;
+        return rawFee != null && rawFee !== '' && Number.isFinite(Number(rawFee))
+          ? Number(rawFee)
+          : null;
+      };
+
+      // 1. Get the provider's assigned fee schedule and facility
       const { data: provider, error: providerError } = await supabase
         .from('providers')
-        .select('schedule_id')
+        .select('*')
         .eq('provider_id', providerId)
-        .single();
+        .maybeSingle();
 
       if (providerError) throw providerError;
-      if (!provider?.schedule_id) return ''; 
 
-      // 2. Get the fee from fee_schedule_items using the schedule_id and procedure code
-      const { data: feeItem, error: feeError } = await supabase
-        .from('fee_schedule_items')
-        .select('current_fee')
-        .eq('schedule_id', provider.schedule_id)
-        .eq('procedure_id', procedureCode)
-        .single();
+      const providerScheduleId = provider?.schedule_id ?? provider?.fee_schedule_id ?? null;
 
-      // PGRST116 is the PostgREST error code for "no rows returned"
-      if (feeError && feeError.code !== 'PGRST116') throw feeError;
+      // 2. Check the provider's assigned fee schedule first
+      if (providerScheduleId != null) {
+        const fee = await fetchFeeForSchedule(providerScheduleId);
+        if (fee !== null) {
+          let scheduleName = null;
+          try {
+            const { data: sched } = await supabase
+              .from('fee_schedules')
+              .select('schedule_name')
+              .eq('schedule_id', providerScheduleId)
+              .maybeSingle();
+            scheduleName = sched?.schedule_name || null;
+          } catch {}
+          return { amount: fee, scheduleName, source: 'provider_schedule' };
+        }
+      }
 
-      return feeItem?.current_fee || '';
+      // 3. Fallback: check the facility's active Standard fee schedule
+      const facilityId = provider?.facility_id || Session.getFacilityId();
+      if (facilityId) {
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+        const { data: schedules, error: schedErr } = await supabase
+          .from('fee_schedules')
+          .select('schedule_id, schedule_name, insurance_id, effective_from, effective_to')
+          .eq('facility_id', facilityId)
+          .order('effective_from', { ascending: false });
+
+        if (!schedErr && Array.isArray(schedules) && schedules.length > 0) {
+          const activeStandard = schedules.find(
+            s => !s.insurance_id &&
+              (!s.effective_from || s.effective_from <= today) &&
+              (!s.effective_to || today < s.effective_to)
+          );
+          const candidateSchedules = [
+            ...(activeStandard ? [activeStandard] : []),
+            ...schedules.filter(s => s.schedule_id !== activeStandard?.schedule_id && s.schedule_id !== providerScheduleId)
+          ];
+
+          for (const sched of candidateSchedules) {
+            const fee = await fetchFeeForSchedule(sched.schedule_id);
+            if (fee !== null) {
+              return {
+                amount: fee,
+                scheduleName: sched.schedule_name || null,
+                source: 'standard_schedule'
+              };
+            }
+          }
+        }
+      }
+
+      return { amount: null, scheduleName: null, source: 'none' };
     } catch (error) {
       console.error("Get Procedure Fee Error:", error.message);
-      return '';
+      return { amount: null, scheduleName: null, source: 'none' };
     }
   },
   // Add Charge (Procedure)

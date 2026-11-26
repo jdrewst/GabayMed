@@ -1,77 +1,122 @@
-import { supabase } from '../lib/supabase';
+import * as SecureStore from '../lib/secureStorage';
+import { supabase, setAccessTokenProvider } from '../lib/supabase';
+import AuthAPI from './authApi';
 
-// Hardcoded ID for development/testing (This is now a Profile/User ID)
-const FALLBACK_USER_ID = '10fd052c-2166-40d1-87c8-914f3aa4967f'; 
+// Only the refresh token is kept on the device, in the encrypted keystore/keychain.
+const REFRESH_KEY = 'gabay_refresh_token';
+
+let current = null; // { accessToken, refreshToken, expiresAt, profile }
+let refreshing = null;
+const listeners = new Set();
+
+function notify() {
+  listeners.forEach(listener => listener(current));
+}
+
+async function store(result, requiresPin = false) {
+  current = {
+    accessToken: result.access_token,
+    refreshToken: result.refresh_token,
+    expiresAt: Number(result.expires_at) || Math.floor(Date.now() / 1000) + 3600,
+    profile: result.profile,
+    requiresPin,
+  };
+  await SecureStore.setItemAsync(REFRESH_KEY, result.refresh_token);
+  notify();
+  return current;
+}
+
+async function forget() {
+  current = null;
+  try { await SecureStore.deleteItemAsync(REFRESH_KEY); } catch {}
+  notify();
+}
+
+// Refresh once at a time; a 401 means the session is gone and the user must log in again.
+async function refresh(refreshToken, requiresPin = current?.requiresPin ?? false) {
+  if (!refreshing) {
+    refreshing = AuthAPI.refresh(refreshToken)
+      .then(result => store(result, requiresPin))
+      .catch(async error => {
+        if (error.status === 401) await forget();
+        throw error;
+      })
+      .finally(() => { refreshing = null; });
+  }
+  return refreshing;
+}
+
+setAccessTokenProvider(async () => {
+  if (!current) return null;
+  if (current.expiresAt - Date.now() / 1000 > 60) return current.accessToken;
+  try { return (await refresh(current.refreshToken)).accessToken; } catch { return current?.accessToken ?? null; }
+});
 
 const Session = {
-  _cachedId: null,
-
-  /**
-   * Initialize session on App startup
-   */
-  async init() {
-    try {
-      const id = await AsyncStorage.getItem('gabay_user_id'); // Changed storage key
-      this._cachedId = id;
-      console.log('Session initialized for User:', this.getUserId());
-      return this.getUserId();
-    } catch (e) {
-      console.warn('Failed to load session:', e);
-      return FALLBACK_USER_ID;
-    }
+  /** Subscribe to sign-in / sign-out changes. Returns an unsubscribe function. */
+  subscribe(listener) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   },
 
-  /**
-   * Get the current User/Profile ID (Synchronous)
-   */
+  /** Restore a saved session on app start. Returns the session, or null when the user must log in. */
+  async restore() {
+    const saved = await SecureStore.getItemAsync(REFRESH_KEY);
+    if (!saved) return null;
+    return refresh(saved, true);
+  },
+
+  /** Save the result of a successful login. */
+  start(loginResult) {
+    return store(loginResult);
+  },
+
+  current() {
+    return current;
+  },
+
+  /** Update the cached profile (e.g. after onboarding). */
+  setProfile(profile) {
+    if (!current) return;
+    current = { ...current, profile };
+    notify();
+  },
+
+  async getAccessToken() {
+    if (!current) return null;
+    if (current.expiresAt - Date.now() / 1000 > 60) return current.accessToken;
+    return (await refresh(current.refreshToken)).accessToken;
+  },
+
+  /** The signed-in patient's profile ID (same as their account ID). */
   getUserId() {
-    return this._cachedId || FALLBACK_USER_ID;
+    return current?.profile?.id ?? null;
   },
 
-  /**
-   * Set the current User/Profile ID
-   */
-  async setUserId(id) {
-    this._cachedId = id.toString();
-    try {
-      await AsyncStorage.setItem('gabay_user_id', id.toString());
-    } catch (e) {
-      console.error('Failed to save session:', e);
-    }
+  /** Sign out on this device and revoke the session on the server. */
+  async signOut() {
+    const token = current?.accessToken;
+    await forget();
+    if (token) { try { await AuthAPI.logout(token); } catch {} }
   },
 
-  /**
-   * Clear session (Logout)
-   */
-  async clear() {
-    this._cachedId = null;
-    try {
-      await AsyncStorage.removeItem('gabay_user_id');
-    } catch (e) {
-      console.error('Failed to clear session:', e);
-    }
-  },
-
-  /**
-   * Fetch User Profile from 'profiles' table
-   */
   async getProfile() {
     try {
       const id = this.getUserId();
-      // Updated: Query 'profiles' table instead of 'patients'
+      if (!id) return null;
       const { data, error } = await supabase
         .from('profiles')
-        .select('first_name, last_name, date_of_birth') 
+        .select('first_name, last_name, date_of_birth')
         .eq('id', id)
         .single();
 
       if (error) throw error;
-      
+
       return {
         firstName: data.first_name,
         lastName: data.last_name,
         initials: `${data.first_name?.[0] || ''}${data.last_name?.[0] || ''}`,
-        avatar: null 
+        avatar: null,
       };
     } catch (error) {
       console.error('Get Profile Error:', error.message);
@@ -79,17 +124,15 @@ const Session = {
     }
   },
 
-  /**
-   * Helper: Get all patient_ids associated with this user profile
-   * Used to query facility-specific data (like appointments)
-   */
+  /** All patient_ids linked to this user profile (one per facility). */
   async getAssociatedPatientIds() {
     try {
       const userId = this.getUserId();
+      if (!userId) return [];
       const { data, error } = await supabase
         .from('patients')
         .select('patient_id')
-        .eq('user_id', userId);
+        .eq('profile_id', userId);
 
       if (error) throw error;
       return data.map(row => row.patient_id);
@@ -99,35 +142,25 @@ const Session = {
     }
   },
 
-  /**
-   * Get Unread Counts
-   * Aggregates counts across all linked patient records
-   */
   async getUnreadCounts() {
     try {
-      // 1. Get all patient IDs for this user
       const patientIds = await this.getAssociatedPatientIds();
-      
       if (patientIds.length === 0) {
         return { messages: 0, notifications: 0 };
       }
 
-      // 2. Count pending appointments for ANY of the user's patient records
       const { count: notifCount } = await supabase
         .from('appointments')
         .select('*', { count: 'exact', head: true })
-        .in('patient_id', patientIds) // Use IN operator for multiple IDs
+        .in('patient_id', patientIds)
         .eq('status', 'PENDING');
 
-      return {
-        messages: 0, 
-        notifications: notifCount || 0
-      };
+      return { messages: 0, notifications: notifCount || 0 };
     } catch (error) {
       console.error('Get Counts Error:', error);
       return { messages: 0, notifications: 0 };
     }
-  }
+  },
 };
 
 export default Session;

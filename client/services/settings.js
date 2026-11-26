@@ -40,10 +40,17 @@ export const settingsAPI = {
   async saveBranch(facilityId, id, form) {
     if (!facilityId) throw new Error('Your account has no clinic assignment.');
     const values = branchRecord(form);
-    const query = id
-      ? supabase.from('clinic_branches').update(values).eq('branch_id', id).eq('facility_id', facilityId)
-      : supabase.from('clinic_branches').insert({ ...values, facility_id: facilityId });
-    const { data, error } = await query.select().single();
+    const runSave = payload => id
+      ? supabase.from('clinic_branches').update(payload).eq('branch_id', id).eq('facility_id', facilityId)
+      : supabase.from('clinic_branches').insert({ ...payload, facility_id: facilityId });
+    let { data, error } = await runSave(values).select().single();
+    // Graceful fallback if `lat`/`long` columns haven't been added to clinic_branches yet
+    if (error && (error.message?.includes('lat') || error.message?.includes('long') || error.code === 'PGRST204')) {
+      const { lat, long, ...withoutCoords } = values;
+      const retry = await runSave(withoutCoords).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) throw settingsLocationError(error, 'This branch code already exists in your clinic.');
     return data;
   },
@@ -306,7 +313,31 @@ export const settingsAPI = {
     const { data, error } = await supabase.from('procedures')
       .select('*').order('procedure_id');
     if (error) throw settingsRequestError(error);
-    return data.map(mapProcedure);
+
+    let feeByProcId = {};
+    try {
+      const { data: feeItems } = await supabase
+        .from('fee_schedule_items')
+        .select('procedure_id, current_fee, custom_price');
+      if (feeItems) {
+        for (const item of feeItems) {
+          const val = item.current_fee ?? item.custom_price;
+          if (val != null && Number(val) > 0) {
+            feeByProcId[String(item.procedure_id)] = Number(val);
+          }
+        }
+      }
+    } catch (_) {}
+
+    return (data || []).map(p => {
+      const proc = mapProcedure(p);
+      const feeFromItems = feeByProcId[String(p.procedure_id)];
+      if (feeFromItems != null) {
+        proc.currentFee = feeFromItems;
+        proc.current_fee = feeFromItems;
+      }
+      return proc;
+    });
   },
 
   async createProcedure(values) {
@@ -377,19 +408,48 @@ export const settingsAPI = {
 
       if (error) throw error;
 
-      return (data || []).map(s => ({
-        id: s.schedule_id,
-        facilityId: s.facility_id,
-        scheduleName: s.schedule_name,
-        insuranceId: s.insurance_id == null ? '' : String(s.insurance_id),
-        planName: s.insurance_plans?.plan_name || '',
-        effectiveFrom: s.effective_from,
-        effectiveTo: s.effective_to || '',
-        procedureFees: (s.fee_schedule_items || []).map(i => ({
-          code: i.procedure_id,
-          scheduleFee: i.custom_price ?? i.price ?? i.fee ?? i.amount ?? 0
-        }))
-      }));
+      const scheduleIds = (data || []).map(s => s.schedule_id).filter(Boolean);
+      let itemsMap = {};
+      if (scheduleIds.length > 0) {
+        try {
+          const { data: directItems } = await supabase
+            .from('fee_schedule_items')
+            .select('*')
+            .in('schedule_id', scheduleIds);
+          if (directItems) {
+            for (const item of directItems) {
+              if (!itemsMap[item.schedule_id]) itemsMap[item.schedule_id] = [];
+              itemsMap[item.schedule_id].push(item);
+            }
+          }
+        } catch (_) {}
+      }
+
+      return (data || []).map(s => {
+        const rawItems = (s.fee_schedule_items && s.fee_schedule_items.length > 0)
+          ? s.fee_schedule_items
+          : (itemsMap[s.schedule_id] || []);
+
+        return {
+          id: s.schedule_id,
+          facilityId: s.facility_id,
+          scheduleName: s.schedule_name,
+          insuranceId: s.insurance_id == null ? '' : String(s.insurance_id),
+          planName: s.insurance_plans?.plan_name || '',
+          effectiveFrom: String(s.effective_from || '').slice(0, 10),
+          effectiveTo: String(s.effective_to || '').slice(0, 10),
+          procedureFees: rawItems.map(i => {
+            const fee = Number(i.current_fee ?? i.custom_price ?? i.price ?? i.fee ?? i.amount ?? 0);
+            return {
+              code: i.procedure_id,
+              currentFee: fee,
+              current_fee: fee,
+              scheduleFee: fee,
+              newFee: fee
+            };
+          })
+        };
+      });
     } catch (error) {
       console.error("Get Fee Schedules Error:", error.message);
       throw error;
@@ -411,41 +471,152 @@ export const settingsAPI = {
     }
   },
 
-  async saveFeeSchedule(id, form) {
-    const facilityId = Session.getFacilityId();
+  // Update or remove a single procedure's fee without modifying the rest of the schedule
+  async updateFeeScheduleItem(scheduleId, procedureCode, feeValue, included = true) {
+    if (!scheduleId) throw new Error('Schedule ID is required to update an individual fee.');
+    const procId = isNaN(Number(procedureCode)) ? procedureCode : parseInt(procedureCode, 10);
 
-    const formattedItems = form.procedureFees.map(p => ({
-      procedure_id: isNaN(Number(p.code)) ? p.code : parseInt(p.code, 10),
-      custom_price: parseFloat(p.scheduleFee)
-    }));
-
-    // 1. Try RPC save_fee_schedule first if available in Supabase
-    try {
-      const { data, error } = await supabase.rpc('save_fee_schedule', {
-        p_schedule_id: id ? parseInt(id, 10) : null,
-        p_schedule_name: form.scheduleName.trim(),
-        p_insurance_id: form.insuranceId ? parseInt(form.insuranceId, 10) : null,
-        p_effective_from: form.effectiveFrom,
-        p_effective_to: form.effectiveTo || null,
-        p_items: formattedItems
-      });
-
-      if (!error) return data;
-      // If error is other than function not found, throw it
-      if (error.code !== 'PGRST202' && !error.message?.includes('save_fee_schedule')) {
-        if (error.code === '23505') {
-          throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
-        }
-        throw error;
-      }
-    } catch (rpcErr) {
-      if (rpcErr.code !== 'PGRST202' && !rpcErr.message?.includes('save_fee_schedule')) {
-        throw rpcErr;
-      }
+    if (!included) {
+      const { error: delErr } = await supabase
+        .from('fee_schedule_items')
+        .delete()
+        .eq('schedule_id', scheduleId)
+        .eq('procedure_id', procId);
+      if (delErr) throw settingsRequestError(delErr, 'Failed to remove procedure fee from schedule.');
+      return { code: procId, included: false, currentFee: 0 };
     }
 
-    // 2. Direct table fallback (works directly via Supabase client without custom RPC)
-    let savedScheduleId = id;
+    const val = parseFloat(feeValue);
+    if (!Number.isFinite(val) || val < 0 || val > 9999999999.99) {
+      throw userSettingsError('Enter a valid non-negative price with at most two decimal places.');
+    }
+
+    // Check if an item row already exists for (schedule_id, procedure_id)
+    const { data: existing, error: findErr } = await supabase
+      .from('fee_schedule_items')
+      .select('*')
+      .eq('schedule_id', scheduleId)
+      .eq('procedure_id', procId)
+      .limit(1);
+
+    if (findErr) throw settingsRequestError(findErr, 'Failed to look up procedure fee.');
+
+    if (Array.isArray(existing) && existing.length > 0) {
+      let { error: updErr } = await supabase
+        .from('fee_schedule_items')
+        .update({ current_fee: val })
+        .eq('schedule_id', scheduleId)
+        .eq('procedure_id', procId);
+
+      if (updErr) {
+        const retry = await supabase
+          .from('fee_schedule_items')
+          .update({ custom_price: val })
+          .eq('schedule_id', scheduleId)
+          .eq('procedure_id', procId);
+        updErr = retry.error;
+      }
+      if (updErr) throw settingsRequestError(updErr, 'Failed to update procedure fee.');
+    } else {
+      let { error: insErr } = await supabase
+        .from('fee_schedule_items')
+        .insert([{ schedule_id: scheduleId, procedure_id: procId, current_fee: val }]);
+
+      if (insErr) {
+        const retry = await supabase
+          .from('fee_schedule_items')
+          .insert([{ schedule_id: scheduleId, procedure_id: procId, custom_price: val }]);
+        insErr = retry.error;
+      }
+      if (insErr) throw settingsRequestError(insErr, 'Failed to add procedure fee.');
+    }
+
+    return { code: procId, included: true, currentFee: val };
+  },
+
+  async saveFeeSchedule(id, form, original = null) {
+    const facilityId = Session.getFacilityId();
+
+    const formattedItems = form.procedureFees.map(p => {
+      const val = parseFloat(p.current_fee ?? p.newFee ?? p.scheduleFee);
+      const procId = isNaN(Number(p.code)) ? p.code : parseInt(p.code, 10);
+      return {
+        procedure_id: procId,
+        current_fee: val,
+        custom_price: val
+      };
+    });
+
+    // When updating an existing schedule, only update modified header fields & modified fee items
+    if (id) {
+      const headerPatch = {};
+      const nextName = form.scheduleName.trim();
+      const nextIns = form.insuranceId ? parseInt(form.insuranceId, 10) : null;
+      const nextFrom = form.effectiveFrom;
+      const nextTo = form.effectiveTo || null;
+
+      if (!original || nextName !== (original.scheduleName || '').trim()) {
+        headerPatch.schedule_name = nextName;
+      }
+      if (!original || String(form.insuranceId || '') !== String(original.insuranceId || '')) {
+        headerPatch.insurance_id = nextIns;
+      }
+      if (!original || nextFrom !== original.effectiveFrom) {
+        headerPatch.effective_from = nextFrom;
+      }
+      if (!original || (form.effectiveTo || '') !== (original.effectiveTo || '')) {
+        headerPatch.effective_to = nextTo;
+      }
+
+      if (Object.keys(headerPatch).length > 0) {
+        const { error: updateErr } = await supabase
+          .from('fee_schedules')
+          .update(headerPatch)
+          .eq('schedule_id', id);
+
+        if (updateErr) {
+          if (updateErr.code === '23505') {
+            throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
+          }
+          throw updateErr;
+        }
+      }
+
+      // Selective per-item diff: only update, insert, or delete individual fee items that changed
+      const { data: currentRows, error: fetchErr } = await supabase
+        .from('fee_schedule_items')
+        .select('*')
+        .eq('schedule_id', id);
+
+      if (fetchErr) throw fetchErr;
+
+      const existingByProc = new Map(
+        (currentRows || []).map(r => [
+          String(r.procedure_id),
+          Number(r.current_fee ?? r.custom_price ?? r.price ?? r.fee ?? r.amount ?? 0)
+        ])
+      );
+      const wantedByProc = new Map(formattedItems.map(i => [String(i.procedure_id), i]));
+
+      // 1. Delete only items that were removed/unchecked
+      for (const [procKey] of existingByProc.entries()) {
+        if (!wantedByProc.has(procKey)) {
+          await this.updateFeeScheduleItem(id, procKey, 0, false);
+        }
+      }
+
+      // 2. Insert or update only items whose fee changed or were newly included
+      for (const [procKey, item] of wantedByProc.entries()) {
+        const prevFee = existingByProc.get(procKey);
+        if (prevFee === undefined || Math.abs(prevFee - item.current_fee) > 0.0001) {
+          await this.updateFeeScheduleItem(id, item.procedure_id, item.current_fee, true);
+        }
+      }
+
+      return id;
+    }
+
+    // Creating a new schedule (id == null)
     const schedulePayload = {
       facility_id: facilityId,
       schedule_name: form.scheduleName.trim(),
@@ -454,43 +625,42 @@ export const settingsAPI = {
       effective_to: form.effectiveTo || null
     };
 
-    if (id) {
-      const { error: updateErr } = await supabase
-        .from('fee_schedules')
-        .update(schedulePayload)
-        .eq('schedule_id', id);
+    const { data: newSchedule, error: insertErr } = await supabase
+      .from('fee_schedules')
+      .insert([schedulePayload])
+      .select()
+      .single();
 
-      if (updateErr) throw updateErr;
-
-      // Delete old items before reinserting
-      await supabase
-        .from('fee_schedule_items')
-        .delete()
-        .eq('schedule_id', id);
-    } else {
-      const { data: newSchedule, error: insertErr } = await supabase
-        .from('fee_schedules')
-        .insert([schedulePayload])
-        .select()
-        .single();
-
-      if (insertErr) throw insertErr;
-      savedScheduleId = newSchedule.schedule_id;
+    if (insertErr) {
+      if (insertErr.code === '23505') {
+        throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
+      }
+      throw insertErr;
     }
+    const savedScheduleId = newSchedule.schedule_id;
 
-    // Insert fee schedule items
     if (formattedItems.length > 0) {
-      const itemsToInsert = formattedItems.map(item => ({
+      const itemsWithCurrentFee = formattedItems.map(item => ({
         schedule_id: savedScheduleId,
         procedure_id: item.procedure_id,
-        custom_price: item.custom_price
+        current_fee: item.current_fee
       }));
 
       const { error: itemsErr } = await supabase
         .from('fee_schedule_items')
-        .insert(itemsToInsert);
+        .insert(itemsWithCurrentFee);
 
-      if (itemsErr) throw itemsErr;
+      if (itemsErr) {
+        const fallbackItems = formattedItems.map(item => ({
+          schedule_id: savedScheduleId,
+          procedure_id: item.procedure_id,
+          custom_price: item.current_fee
+        }));
+        const { error: fallbackErr } = await supabase
+          .from('fee_schedule_items')
+          .insert(fallbackItems);
+        if (fallbackErr) throw fallbackErr;
+      }
     }
 
     return savedScheduleId;
@@ -527,10 +697,19 @@ export const settingsAPI = {
 
 };
 function mapProcedure(p) {
+  const desc = p.description || p.name || (p.procedure_id ? `Procedure ${p.procedure_id}` : 'General Procedure');
+  const fallbackFee = p.current_fee ?? p.currentFee ?? (Number(p.price || 0) + Number(p.office_fee ?? p.officeFee ?? 0));
   return {
-    id: p.procedure_id, code: p.procedure_id, description: p.name,
-    category: p.category || 'General', price: p.price ?? 0,
-    officeFee: p.office_fee ?? 0, phCaseRate: p.PHcase_rate ?? 0,
+    id: p.procedure_id,
+    code: p.procedure_id,
+    description: desc,
+    name: desc,
+    category: p.category || 'General',
+    price: p.price ?? 0,
+    officeFee: p.office_fee ?? p.officeFee ?? 0,
+    phCaseRate: p.PHcase_rate ?? p.ph_case_rate ?? 0,
+    currentFee: Number(fallbackFee || 0),
+    current_fee: Number(fallbackFee || 0),
     duration: p.duration ?? 30
   };
 }

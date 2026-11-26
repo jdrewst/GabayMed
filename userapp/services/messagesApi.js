@@ -19,7 +19,7 @@ const MessagesAPI = {
             image_url
           )
         `)
-        .eq('user_id', userId);
+        .eq('profile_id', userId);
 
       if (patientError) throw patientError;
       if (!patientRecords || patientRecords.length === 0) return [];

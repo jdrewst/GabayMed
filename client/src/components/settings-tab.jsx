@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, useMemo, createContext } from "react"
-import { Building2, Plus, X, Pencil, Trash2, Eye, Check, Copy, TriangleAlert, Info } from "lucide-react"
+import { Building2, Plus, X, Pencil, Trash2, Eye, Check, Copy, TriangleAlert, Info, MapPin, Search } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -994,6 +994,8 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
   const draft = useSettingsDraft('fee', form)
   const [, setError] = useSettingsFeedback()
   const [busy, setBusy] = useState(false)
+  const [savingItemCode, setSavingItemCode] = useState(null)
+  const [procedureSearch, setProcedureSearch] = useState('')
   const [deleting, setDeleting] = useState(null)
 
   const load = async () => {
@@ -1013,6 +1015,7 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
 
   const openForm = schedule => {
     setError('')
+    setProcedureSearch('')
     const next = buildFeeForm(procedures, schedules, schedule)
     setForm(next)
     draft.start(schedule ? next : null)
@@ -1022,6 +1025,71 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
     procedureFees: previous.procedureFees.map(item => item.code === code ? { ...item, ...patch } : item)
   }))
 
+  const isItemModified = item => {
+    if (!draft.original) return false
+    const orig = draft.original.procedureFees?.find(p => String(p.code) === String(item.code))
+    if (!orig) return true
+    if (Boolean(orig.included) !== Boolean(item.included)) return true
+    if (!item.included) return false
+    const prevFee = Number(orig.newFee ?? orig.scheduleFee)
+    const nextFee = Number(item.newFee ?? item.scheduleFee)
+    return !Number.isFinite(nextFee) || Math.abs(prevFee - nextFee) > 0.0001
+  }
+
+  const saveIndividualFee = async item => {
+    if (!form?.id || busy || savingItemCode !== null) return
+    if (draft.errors[`price:${item.code}`]) {
+      draft.touch(`price:${item.code}`)
+      return
+    }
+    const nextIncludedCount = form.procedureFees.filter(p => p.included).length
+    if (nextIncludedCount === 0) {
+      setError('Include at least one procedure in the schedule.')
+      return
+    }
+
+    setError('')
+    setSavingItemCode(item.code)
+    try {
+      const feeVal = item.newFee ?? item.scheduleFee
+      const res = await settingsAPI.updateFeeScheduleItem(form.id, item.code, feeVal, item.included)
+      const origItem = draft.original?.procedureFees?.find(p => String(p.code) === String(item.code))
+      const beforeText = origItem?.included ? money(Number(origItem.newFee ?? origItem.scheduleFee)) : 'Not included'
+      const afterText = item.included ? money(res.currentFee) : 'Not included'
+
+      const nextForm = {
+        ...form,
+        procedureFees: form.procedureFees.map(p =>
+          p.code === item.code
+            ? {
+                ...p,
+                included: res.included,
+                currentFee: res.included ? res.currentFee : p.currentFee,
+                current_fee: res.included ? res.currentFee : p.current_fee,
+                scheduleFee: res.included ? String(res.currentFee) : p.scheduleFee,
+                newFee: res.included ? String(res.currentFee) : p.newFee
+              }
+            : p
+        )
+      }
+      setForm(nextForm)
+      if (draft.original) {
+        draft.start({
+          ...draft.original,
+          procedureFees: draft.original.procedureFees.map(p =>
+            p.code === item.code ? nextForm.procedureFees.find(n => n.code === item.code) : p
+          )
+        })
+      }
+      toast.edited('Procedure fee updated.', [{ field: item.name, before: beforeText, after: afterText }], form.scheduleName)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingItemCode(null)
+    }
+  }
+
   const planLabel = id => id === 'Not set' ? 'Standard Rates' : plans.find(plan => String(plan.insurance_id) === id)?.plan_name || id
   const save = async event => {
     event.preventDefault()
@@ -1030,7 +1098,7 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
     try {
       const payload = feeFormPayload(form)
       setBusy(true)
-      await settingsAPI.saveFeeSchedule(form.id, payload)
+      await settingsAPI.saveFeeSchedule(form.id, payload, draft.original)
       setForm(null)
       if (form.id != null) toast.edited('Fee schedule updated.', draft.changes.map(change => change.field === 'Insurance Plan' ? { ...change, before: planLabel(change.before), after: planLabel(change.after) } : change), form.scheduleName)
       else toast.success('Fee schedule saved.', form.scheduleName)
@@ -1085,40 +1153,142 @@ function FeeSchedulesTab({ procedures, loadingProcedures, procedureLoadError }) 
             </TableRow>)}
         </TableBody></Table>
       </CardContent>
-      <Dialog open={form !== null} onOpenChange={value => { if (!value && !busy) setForm(null) }}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+      <Dialog open={form !== null} onOpenChange={value => { if (!value && !busy) { setForm(null); setProcedureSearch('') } }}>
+        <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{form?.id != null ? 'Edit Fee Schedule' : 'Add Fee Schedule'}</DialogTitle>
-            <DialogDescription>Choose the plan, effective dates, and complete procedure prices. HMO procedures without a rate fall back to Standard Rates.</DialogDescription>
+            <DialogDescription>
+              {form?.id != null
+                ? 'Modify only the fields or individual procedure fees you want to change. Unchanged fields and fees are preserved.'
+                : 'Choose the plan, effective dates, and set procedure fees. Reference rates reflect PhilHealth case rates.'}
+            </DialogDescription>
           </DialogHeader>
-          {form && <form onSubmit={save} className="space-y-6" onBlurCapture={event => draft.touch(event.target.id?.replace(/^fee-/, ''))}>
-            <fieldset disabled={busy} className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2"><Label htmlFor="fee-name">Schedule Name *</Label><Input id="fee-name" onBlur={() => draft.touch('scheduleName')} required value={form.scheduleName} onChange={e => change('scheduleName', e.target.value)} /><SettingsFieldError draft={draft} field="scheduleName" /></div>
-                <div className="space-y-2"><Label htmlFor="fee-plan">Insurance Plan</Label>
-                  <Select disabled={busy} value={form.insuranceId || 'standard'} onValueChange={value => change('insuranceId', value === 'standard' ? '' : value)}>
-                    <SelectTrigger id="fee-plan"><SelectValue /></SelectTrigger><SelectContent>
-                      <SelectItem value="standard">Standard Rates (no insurance plan)</SelectItem>
-                      {form.insuranceId && !plans.some(p => String(p.insurance_id) === form.insuranceId) && <SelectItem value={form.insuranceId}>Plan {form.insuranceId}</SelectItem>}
-                      {plans.map(p => <SelectItem key={p.insurance_id} value={String(p.insurance_id)}>{p.plan_name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2"><Label htmlFor="fee-from">Effective From *</Label><Input id="fee-from" type="date" required value={form.effectiveFrom} onChange={e => change('effectiveFrom', e.target.value)} onBlur={() => draft.touch('effectiveFrom')} /><SettingsFieldError draft={draft} field="effectiveFrom" /></div>
-                <div className="space-y-2"><Label htmlFor="fee-to">Effective To (exclusive)</Label><Input id="fee-to" type="date" min={form.effectiveFrom} value={form.effectiveTo} onChange={e => change('effectiveTo', e.target.value)} onBlur={() => draft.touch('effectiveTo')} /><SettingsFieldError draft={draft} field="effectiveTo" /></div>
-              </div>
-              <p className="text-sm text-muted-foreground">New schedules start with the current Standard prices, or base price + office fee if no Standard price exists. Edit the complete amount below; office fees are already included. For future rate changes, add a new schedule version with a later start date.</p>
-              <Table><TableHeader><TableRow><TableHead>Include</TableHead><TableHead>Procedure Code</TableHead><TableHead>Description</TableHead><TableHead>Reference Rate</TableHead><TableHead>Schedule Price *</TableHead></TableRow></TableHeader>
-                <TableBody>{form.procedureFees.map(item => <TableRow key={item.code}>
-                  <TableCell><input type="checkbox" aria-label={`Include ${item.name}`} checked={item.included} onChange={e => { changeItem(item.code, { included: e.target.checked }); draft.touch('procedureFees') }} /></TableCell>
-                  <TableCell>{item.code}</TableCell><TableCell>{item.name}</TableCell><TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
-                  <TableCell><Input aria-label={`Price for ${item.name}`} type="number" min="0" max="9999999999.99" step="0.01" required={item.included} disabled={!item.included || busy} value={item.scheduleFee} onBlur={() => draft.touch(`price:${item.code}`)} onChange={e => changeItem(item.code, { scheduleFee: e.target.value })} /><SettingsFieldError draft={draft} field={`price:${item.code}`} /></TableCell>
-                </TableRow>)}</TableBody>
-              </Table>
-              <SettingsFieldError draft={draft} field="procedureFees" />
-              {form.procedureFees.length === 0 && <p>No procedures available. Add procedures first.</p>}
-            </fieldset>
-            <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => setForm(null)}>Cancel</Button><Button type="submit" className="bg-blue-500" disabled={busy || !draft.canSave}>{busy ? 'Saving...' : 'Save Fee Schedule'}</Button></div>
-          </form>}
+          {form && (() => {
+            const searchTerm = procedureSearch.trim().toLowerCase()
+            const filteredProcedureFees = searchTerm
+              ? form.procedureFees.filter(item =>
+                  String(item.code ?? '').toLowerCase().includes(searchTerm) ||
+                  String(item.name ?? '').toLowerCase().includes(searchTerm)
+                )
+              : form.procedureFees
+
+            return (
+              <form onSubmit={save} className="space-y-6" onBlurCapture={event => draft.touch(event.target.id?.replace(/^fee-/, ''))}>
+                <fieldset disabled={busy} className="space-y-6">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2"><Label htmlFor="fee-name">Schedule Name *</Label><Input id="fee-name" onBlur={() => draft.touch('scheduleName')} required value={form.scheduleName} onChange={e => change('scheduleName', e.target.value)} /><SettingsFieldError draft={draft} field="scheduleName" /></div>
+                    <div className="space-y-2"><Label htmlFor="fee-plan">Insurance Plan</Label>
+                      <Select disabled={busy} value={form.insuranceId || 'standard'} onValueChange={value => change('insuranceId', value === 'standard' ? '' : value)}>
+                        <SelectTrigger id="fee-plan"><SelectValue /></SelectTrigger><SelectContent>
+                          <SelectItem value="standard">Standard Rates (no insurance plan)</SelectItem>
+                          {form.insuranceId && !plans.some(p => String(p.insurance_id) === form.insuranceId) && <SelectItem value={form.insuranceId}>Plan {form.insuranceId}</SelectItem>}
+                          {plans.map(p => <SelectItem key={p.insurance_id} value={String(p.insurance_id)}>{p.plan_name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2"><Label htmlFor="fee-from">Effective From *</Label><Input id="fee-from" type="date" required value={form.effectiveFrom} onChange={e => change('effectiveFrom', e.target.value)} onBlur={() => draft.touch('effectiveFrom')} /><SettingsFieldError draft={draft} field="effectiveFrom" /></div>
+                    <div className="space-y-2"><Label htmlFor="fee-to">Effective To (exclusive)</Label><Input id="fee-to" type="date" min={form.effectiveFrom} value={form.effectiveTo} onChange={e => change('effectiveTo', e.target.value)} onBlur={() => draft.touch('effectiveTo')} /><SettingsFieldError draft={draft} field="effectiveTo" /></div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      {form.id != null
+                        ? 'You can update an individual procedure fee right on its row using "Update Fee", or modify multiple fields and click "Save Fee Schedule".'
+                        : 'Reference Rate reflects the PhilHealth Case Rate. Current Fee shows the existing fee from the fee schedule. Enter the New Fee for each included procedure.'}
+                    </p>
+                    <div className="relative w-full sm:w-80 shrink-0">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <Input
+                        type="text"
+                        aria-label="Search procedures by code or description"
+                        placeholder="Search procedure code or description..."
+                        className="pl-9 pr-8"
+                        value={procedureSearch}
+                        onChange={e => setProcedureSearch(e.target.value)}
+                      />
+                      {procedureSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setProcedureSearch('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          aria-label="Clear procedure search"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {searchTerm && (
+                    <p className="text-xs text-slate-500 -mt-3">
+                      Showing {filteredProcedureFees.length} of {form.procedureFees.length} procedures
+                    </p>
+                  )}
+                  <Table><TableHeader><TableRow>
+                    <TableHead className="w-16">Include</TableHead>
+                    <TableHead className="w-28 whitespace-nowrap">Procedure Code</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-32 whitespace-nowrap">Reference Rate</TableHead>
+                    <TableHead className="w-32 whitespace-nowrap">Current Fee</TableHead>
+                    <TableHead className="min-w-[150px] w-40 whitespace-nowrap">New Fee *</TableHead>
+                    {form.id != null && <TableHead className="w-32 text-right whitespace-nowrap">Individual Update</TableHead>}
+                  </TableRow></TableHeader>
+                    <TableBody>{filteredProcedureFees.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={form.id != null ? 7 : 6} className="text-center text-muted-foreground py-6">
+                          {form.procedureFees.length === 0
+                            ? 'No procedures available. Add procedures first.'
+                            : `No procedures match "${procedureSearch}".`}
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredProcedureFees.map(item => {
+                      const rowChanged = form.id != null && isItemModified(item)
+                      const rowInvalid = !!draft.errors[`price:${item.code}`]
+                      const isRowSaving = savingItemCode === item.code
+                      return (
+                        <TableRow key={item.code}>
+                          <TableCell><input type="checkbox" aria-label={`Include ${item.name}`} checked={item.included} onChange={e => { changeItem(item.code, { included: e.target.checked }); draft.touch('procedureFees') }} /></TableCell>
+                          <TableCell className="font-mono whitespace-nowrap">{item.code}</TableCell>
+                          <TableCell className="max-w-md leading-snug">{item.name}</TableCell>
+                          <TableCell className="whitespace-nowrap">{money(item.referenceFee)}</TableCell>
+                          <TableCell className="whitespace-nowrap font-medium text-slate-700">{money(item.currentFee ?? item.current_fee ?? 0)}</TableCell>
+                          <TableCell className="min-w-[150px] w-40">
+                            <Input
+                              aria-label={`New Fee for ${item.name}`}
+                              type="number"
+                              min="0"
+                              max="9999999999.99"
+                              step="0.01"
+                              required={item.included}
+                              disabled={!item.included || busy || isRowSaving}
+                              className="min-w-[135px] w-36 font-medium"
+                              value={item.scheduleFee}
+                              onBlur={() => draft.touch(`price:${item.code}`)}
+                              onChange={e => changeItem(item.code, { scheduleFee: e.target.value, newFee: e.target.value })}
+                            />
+                            <SettingsFieldError draft={draft} field={`price:${item.code}`} />
+                          </TableCell>
+                          {form.id != null && (
+                            <TableCell className="text-right whitespace-nowrap">
+                              <Button
+                                type="button"
+                                variant={rowChanged ? "default" : "outline"}
+                                size="sm"
+                                className={rowChanged ? "bg-blue-500 hover:bg-blue-600 text-white" : ""}
+                                disabled={!rowChanged || rowInvalid || busy || savingItemCode !== null}
+                                onClick={() => saveIndividualFee(item)}
+                              >
+                                {isRowSaving ? 'Updating...' : 'Update Fee'}
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      )
+                    })}</TableBody>
+                  </Table>
+                  <SettingsFieldError draft={draft} field="procedureFees" />
+                </fieldset>
+                <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy || savingItemCode !== null} onClick={() => { setForm(null); setProcedureSearch('') }}>Close</Button><Button type="submit" className="bg-blue-500" disabled={busy || savingItemCode !== null || !draft.canSave}>{busy ? 'Saving...' : 'Save Fee Schedule'}</Button></div>
+              </form>
+            )
+          })()}
         </DialogContent>
       </Dialog>
       <Dialog open={deleting !== null} onOpenChange={value => { if (!value && !busy) setDeleting(null) }}>
@@ -1204,9 +1374,22 @@ function SettingsBranchesTab({ account, branches, setBranches, loading, loadErro
             <fieldset disabled={busy || !canManage} className="grid gap-4 md:grid-cols-2">
               {[
                 ['name', 'Branch Name', 'text', true, 160], ['abbreviation', 'Branch Code', 'text', true, 30],
-                ['address', 'Address', 'text', true, 1000], ['contact_num', 'Phone', 'tel', true, 50],
-                ['email', 'Email', 'email', false, 254]
-              ].map(([key, label, type, required, max]) => <div key={key} className={`space-y-2 ${key === 'address' ? 'md:col-span-2' : ''}`}><Label htmlFor={`branch-${key}`}>{label}{required && <span className="text-red-500"> *</span>}</Label><Input id={`branch-${key}`} type={type} required={required} maxLength={max} value={form[key]} aria-invalid={draft.touched[key] && !!draft.errors[key]} onChange={event => setForm(previous => ({ ...previous, [key]: event.target.value }))} /><SettingsFieldError draft={draft} field={key} /></div>)}
+                ['contact_num', 'Phone', 'tel', true, 50], ['email', 'Email', 'email', false, 254]
+              ].map(([key, label, type, required, max]) => <div key={key} className="space-y-2"><Label htmlFor={`branch-${key}`}>{label}{required && <span className="text-red-500"> *</span>}</Label><Input id={`branch-${key}`} type={type} required={required} maxLength={max} value={form[key]} aria-invalid={draft.touched[key] && !!draft.errors[key]} onChange={event => setForm(previous => ({ ...previous, [key]: event.target.value }))} /><SettingsFieldError draft={draft} field={key} /></div>)}
+              <div className="space-y-2 md:col-span-2">
+                <BranchLocationMapPicker
+                  address={form.address}
+                  lat={form.lat}
+                  lng={form.long}
+                  disabled={busy || !canManage}
+                  invalid={draft.touched.address && !!draft.errors.address}
+                  onChange={({ address, lat, lng }) => {
+                    draft.touch('address')
+                    setForm(previous => ({ ...previous, address, lat, long: lng }))
+                  }}
+                />
+                <SettingsFieldError draft={draft} field="address" />
+              </div>
               <label className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-sm font-medium ${form.is_active ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200'}`}><span>Active Branch</span><Checkbox className="h-5 w-5 rounded-md" checked={form.is_active} disabled={busy || !canManage} onCheckedChange={checked => setForm(previous => ({ ...previous, is_active: checked === true }))} /></label>
             </fieldset>
             <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => setForm(null)}>{canManage ? 'Cancel' : 'Close'}</Button>{canManage && <Button type="submit" className="bg-blue-500" disabled={busy || !draft.canSave}>{busy ? 'Saving...' : 'Save Branch'}</Button>}</div>
@@ -1544,11 +1727,290 @@ function useSettingsDraft(type, values) {
   const errors = validateSettingsForm(type, values || {})
   const changes = settingsChanges(type, original, values)
   return {
-    errors, changes, touched,
+    original, errors, changes, touched,
     canSave: Object.keys(errors).length === 0 && (!original || changes.length > 0),
     start: value => { setOriginal(value ? structuredClone(value) : null); setTouched({}) },
     touch: field => { if (field) setTouched(previous => previous[field] ? previous : { ...previous, [field]: true }) }
   }
+}
+
+function BranchLocationMapPicker({ address = '', lat = null, lng = null, disabled = false, invalid = false, onChange }) {
+  const [query, setQuery] = useState(address || '')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [reverseBusy, setReverseBusy] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [coords, setCoords] = useState(() => {
+    const nLat = Number(lat)
+    const nLng = Number(lng)
+    return Number.isFinite(nLat) && Number.isFinite(nLng) && nLat !== 0 && nLng !== 0
+      ? { lat: nLat, lng: nLng }
+      : null
+  })
+  const mapDivRef = useRef(null)
+  const leafletMapRef = useRef(null)
+  const leafletMarkerRef = useRef(null)
+
+  useEffect(() => {
+    setQuery(address || '')
+  }, [address])
+
+  // Reverse-geocodes dropped/dragged pin coordinates into a real street address and updates the form
+  const reverseGeocodeAndSet = useCallback(async (pickedLat, pickedLng) => {
+    const roundedLat = Number(pickedLat.toFixed(6))
+    const roundedLng = Number(pickedLng.toFixed(6))
+    setCoords({ lat: roundedLat, lng: roundedLng })
+    setShowDropdown(false)
+    setReverseBusy(true)
+    let resolvedAddress = `${roundedLat}, ${roundedLng}`
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(roundedLat)}&lon=${encodeURIComponent(roundedLng)}&zoom=18&addressdetails=1`,
+        { headers: { Accept: 'application/json' } }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.display_name) {
+          resolvedAddress = data.display_name
+        }
+      }
+    } catch {}
+    finally {
+      setReverseBusy(false)
+    }
+    setQuery(resolvedAddress)
+    onChange({ address: resolvedAddress, lat: roundedLat, lng: roundedLng })
+  }, [onChange])
+
+  // Load Leaflet once & initialize interactive click-to-pin / drag-to-pin map
+  useEffect(() => {
+    let cancelled = false
+
+    const ensureLeaflet = () =>
+      new Promise(resolve => {
+        if (window.L) return resolve(window.L)
+        if (!document.getElementById('leaflet-css-cdn')) {
+          const link = document.createElement('link')
+          link.id = 'leaflet-css-cdn'
+          link.rel = 'stylesheet'
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+          document.head.appendChild(link)
+        }
+        const existingScript = document.getElementById('leaflet-js-cdn')
+        if (existingScript) {
+          existingScript.addEventListener('load', () => resolve(window.L))
+          return
+        }
+        const script = document.createElement('script')
+        script.id = 'leaflet-js-cdn'
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+        script.onload = () => resolve(window.L)
+        document.body.appendChild(script)
+      })
+
+    ensureLeaflet().then(L => {
+      if (cancelled || !L || !mapDivRef.current || leafletMapRef.current) return
+      const startCenter = coords || { lat: 14.5995, lng: 120.9842 }
+      const map = L.map(mapDivRef.current).setView([startCenter.lat, startCenter.lng], coords ? 16 : 12)
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap',
+      }).addTo(map)
+
+      const placeOrMoveMarker = (latVal, lngVal) => {
+        if (!leafletMarkerRef.current) {
+          const marker = L.marker([latVal, lngVal], { draggable: !disabled }).addTo(map)
+          marker.on('dragend', ev => {
+            const pos = ev.target.getLatLng()
+            reverseGeocodeAndSet(pos.lat, pos.lng)
+          })
+          leafletMarkerRef.current = marker
+        } else {
+          leafletMarkerRef.current.setLatLng([latVal, lngVal])
+        }
+      }
+
+      if (coords) {
+        placeOrMoveMarker(coords.lat, coords.lng)
+      }
+
+      map.on('click', ev => {
+        if (disabled) return
+        const { lat: cLat, lng: cLng } = ev.latlng
+        placeOrMoveMarker(cLat, cLng)
+        reverseGeocodeAndSet(cLat, cLng)
+      })
+
+      leafletMapRef.current = map
+      setTimeout(() => map.invalidateSize(), 200)
+    })
+
+    return () => {
+      cancelled = true
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove()
+        leafletMapRef.current = null
+        leafletMarkerRef.current = null
+      }
+    }
+  }, [disabled])
+
+  // Sync map view & marker whenever coords change (e.g. from search suggestion)
+  useEffect(() => {
+    const L = window.L
+    const map = leafletMapRef.current
+    if (!L || !map || !coords) return
+    map.setView([coords.lat, coords.lng], 16)
+    if (!leafletMarkerRef.current) {
+      const marker = L.marker([coords.lat, coords.lng], { draggable: !disabled }).addTo(map)
+      marker.on('dragend', ev => {
+        const pos = ev.target.getLatLng()
+        reverseGeocodeAndSet(pos.lat, pos.lng)
+      })
+      leafletMarkerRef.current = marker
+    } else {
+      leafletMarkerRef.current.setLatLng([coords.lat, coords.lng])
+    }
+  }, [coords])
+
+  // Debounced live location search in the Philippines via OpenStreetMap Nominatim
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!showDropdown || trimmed.length < 3) {
+      setResults([])
+      return undefined
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=ph&q=${encodeURIComponent(trimmed)}`,
+          { headers: { Accept: 'application/json' } }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          setResults(Array.isArray(data) ? data : [])
+        }
+      } catch {}
+      finally { setSearching(false) }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [query, showDropdown])
+
+  // If editing an existing branch that has an address string but no coordinates yet, resolve it once for the map preview
+  useEffect(() => {
+    if (coords || !address || address.trim().length < 4) return undefined
+    let active = true
+    fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(address.trim())}`,
+      { headers: { Accept: 'application/json' } }
+    )
+      .then(r => (r.ok ? r.json() : []))
+      .then(data => {
+        if (active && Array.isArray(data) && data[0]?.lat && data[0]?.lon) {
+          setCoords({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) })
+        }
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
+  const selectSuggestion = item => {
+    const pickedLat = parseFloat(item.lat)
+    const pickedLng = parseFloat(item.lon)
+    const pickedAddress = item.display_name
+    setQuery(pickedAddress)
+    setCoords({ lat: pickedLat, lng: pickedLng })
+    setShowDropdown(false)
+    onChange({ address: pickedAddress, lat: pickedLat, lng: pickedLng })
+  }
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="branch-address">
+        Location / Address (Search or Click Map to Pin) <span className="text-red-500">*</span>
+      </Label>
+      <div className="relative">
+        <div className="relative flex items-center">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
+          <Input
+            id="branch-address"
+            type="text"
+            required
+            maxLength={1000}
+            disabled={disabled}
+            placeholder="Search a street/building/city OR click directly on the map below to drop a pin..."
+            className="pl-9 pr-9"
+            value={query}
+            aria-invalid={invalid}
+            onFocus={() => setShowDropdown(true)}
+            onChange={e => {
+              const nextVal = e.target.value
+              setQuery(nextVal)
+              setShowDropdown(true)
+              onChange({ address: nextVal, lat: coords?.lat ?? null, lng: coords?.lng ?? null })
+            }}
+          />
+          {query && !disabled && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('')
+                setCoords(null)
+                setResults([])
+                if (leafletMarkerRef.current && leafletMapRef.current) {
+                  leafletMapRef.current.removeLayer(leafletMarkerRef.current)
+                  leafletMarkerRef.current = null
+                }
+                onChange({ address: '', lat: null, lng: null })
+              }}
+              className="absolute right-3 text-slate-400 hover:text-slate-600"
+              aria-label="Clear location"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {showDropdown && (searching || results.length > 0) && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-[1000] rounded-lg border border-slate-200 bg-white shadow-lg max-h-56 overflow-y-auto">
+            {searching && results.length === 0 ? (
+              <div className="px-3 py-2.5 text-xs text-slate-500">Searching locations...</div>
+            ) : (
+              results.map(item => (
+                <button
+                  key={item.place_id}
+                  type="button"
+                  onClick={() => selectSuggestion(item)}
+                  className="w-full text-left px-3 py-2.5 text-sm hover:bg-sky-50 flex items-start gap-2.5 border-b last:border-b-0 border-slate-100"
+                >
+                  <MapPin className="w-4 h-4 text-sky-500 shrink-0 mt-0.5" />
+                  <span className="text-slate-700 leading-snug">{item.display_name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 overflow-hidden bg-slate-50">
+        <div className="flex items-center justify-between px-3 py-1.5 bg-slate-100/80 border-b border-slate-200 text-xs text-slate-600">
+          <span className="flex items-center gap-1.5 font-medium">
+            <MapPin className="w-3.5 h-3.5 text-sky-600" />
+            {reverseBusy
+              ? 'Fetching address for dropped pin...'
+              : coords
+                ? `Pinned on Patient Map (${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}) — Click anywhere or drag pin to adjust`
+                : 'Click anywhere on the map below to drop a pin (or search above)'}
+          </span>
+        </div>
+        <div
+          ref={mapDivRef}
+          className="w-full h-56 z-0 cursor-crosshair"
+        />
+      </div>
+    </div>
+  )
 }
 
 function SettingsFieldError({ draft, field }) {

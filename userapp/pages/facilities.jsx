@@ -6,7 +6,7 @@ import { AppointmentBooking } from '../components/appointment';
 import { GradientButton, GradientText, GradientIcon } from '../components/ui/gradient-button';
 import FacilitiesAPI from '../services/facilitiesApi';
 
-export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
+export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfile, onOpenMyAppointments, refreshTrigger }) {
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAllBalances, setShowAllBalances] = useState(false);
   const [showAllSchedules, setShowAllSchedules] = useState(false);
@@ -43,7 +43,11 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
     const { badge, text } = statusStyles[schedule.status] || { badge: styles.scheduledBadge, text: styles.scheduledText };
 
     return (
-      <View style={isSmall ? styles.scheduleCardGrid : styles.scheduleCard}>
+      <TouchableOpacity
+        activeOpacity={0.88}
+        onPress={onOpenMyAppointments}
+        style={isSmall ? styles.scheduleCardGrid : styles.scheduleCard}
+      >
         <View style={styles.scheduleTopRow}>
           <GradientIcon style={[styles.scheduleCalendarIcon, isSmall && { width: 35, height: 35, marginTop: 12 }]}>
             <Calendar size={isSmall ? 18 : 24} color="#fff" />
@@ -67,13 +71,13 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
           <Text style={styles.scheduleDoctor}>{schedule.doctor}</Text>
           <Text style={styles.scheduleRoom}>{schedule.room}</Text>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   useEffect(() => {
     fetchFacilitiesData();
-  }, []);
+  }, [refreshTrigger]);
 
   const fetchFacilitiesData = async () => {
     try {
@@ -144,10 +148,10 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
 
   const currentFacility = facilities.find((f) => f.id === selectedFacility);
 
-  const renderActivityItem = (activity) => {
+  const renderActivityItem = (activity, index) => {
     const isCharge = activity.amount > 0;
     return (
-      <View key={activity.id} style={styles.activityItem}>
+      <View key={`act-${activity.id || index}-${index}`} style={styles.activityItem}>
         <View style={styles.activityLeft}>
           <View style={[
             styles.activityIcon,
@@ -177,7 +181,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
   if (loading) {
     return (
       <View style={styles.container}>
-        <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} />
+        <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} onOpenProfile={onOpenProfile} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0ea5e9" />
           <Text style={styles.loadingText}>Loading facilities...</Text>
@@ -188,7 +192,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
 
   return (
     <View style={styles.container}>
-      <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} />
+      <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} onOpenProfile={onOpenProfile} />
 
       <ScrollView style={styles.scrollContainer}>
         <View style={styles.section}>
@@ -227,9 +231,9 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
           {!selectedFacility && (
             <View style={styles.facilitySelectorContainer}>
               {facilities.length > 0 ? (
-                facilities.map((facility) => (
+                facilities.map((facility, idx) => (
                   <TouchableOpacity
-                    key={facility.id}
+                    key={`fac-${facility.id}-${idx}`}
                     onPress={() => setSelectedFacility(facility.id)}
                     style={styles.facilitySelectorCard}
                   >
@@ -246,9 +250,18 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
                   </TouchableOpacity>
                 ))
               ) : (
-                <Text style={{ textAlign: 'center', color: '#6b7280', marginTop: 20 }}>
-                  No facilities linked to your account.
-                </Text>
+                <View style={{ alignItems: 'center', marginTop: 20 }}>
+                  <Text style={{ textAlign: 'center', color: '#6b7280', marginBottom: 14 }}>
+                    No facilities linked to your account yet.
+                  </Text>
+                  <GradientButton
+                    onPress={() => setShowAppointment(true)}
+                    style={[styles.scheduleButton, { paddingHorizontal: 24 }]}
+                  >
+                    <Calendar size={20} color="#66BAFF" fill="#fff" />
+                    <Text style={styles.scheduleButtonText}>Schedule New Appointment</Text>
+                  </GradientButton>
+                </View>
               )}
             </View>
           )}
@@ -259,25 +272,32 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Your Schedule</Text>
-                {schedules.length > 2 && (
-                  <TouchableOpacity onPress={() => setShowAllSchedules(!showAllSchedules)}>
-                    <Text style={styles.seeAllButton}>{showAllSchedules ? 'Show Less' : 'See All'}</Text>
-                  </TouchableOpacity>
-                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  {onOpenMyAppointments && (
+                    <TouchableOpacity onPress={onOpenMyAppointments}>
+                      <Text style={[styles.seeAllButton, { color: '#0ea5e9' }]}>Manage</Text>
+                    </TouchableOpacity>
+                  )}
+                  {schedules.length > 2 && (
+                    <TouchableOpacity onPress={() => setShowAllSchedules(!showAllSchedules)}>
+                      <Text style={styles.seeAllButton}>{showAllSchedules ? 'Show Less' : 'See All'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
 
               {schedules.length === 0 ? (
                 <Text style={{ color: '#9ca3af', marginTop: 12, fontStyle: 'italic' }}>No appointments scheduled.</Text>
               ) : showAllSchedules ? (
                 <View style={styles.scheduleGrid}>
-                  {schedules.map((schedule) => (
-                    <ScheduleCard key={schedule.id} schedule={schedule} isSmall />
+                  {schedules.map((schedule, idx) => (
+                    <ScheduleCard key={`sched-grid-${schedule.id}-${idx}`} schedule={schedule} isSmall />
                   ))}
                 </View>
               ) : (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scheduleScroll}>
-                  {schedules.map((schedule) => (
-                    <ScheduleCard key={schedule.id} schedule={schedule} />
+                  {schedules.map((schedule, idx) => (
+                    <ScheduleCard key={`sched-scroll-${schedule.id}-${idx}`} schedule={schedule} />
                   ))}
                 </ScrollView>
               )}
@@ -455,7 +475,12 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications }) {
 
       <AppointmentBooking
         visible={showAppointment}
-        onClose={() => setShowAppointment(false)}
+        onBooked={fetchFacilitiesData}
+        onClose={() => {
+          setShowAppointment(false);
+          fetchFacilitiesData();
+        }}
+        facilityId={selectedFacility}
       />
     </View>
   );

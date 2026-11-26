@@ -1,10 +1,19 @@
 import { supabase } from '../lib/supabase';
 import Session from './session';
 
+function resolveAppointmentType(apt) {
+  if (apt?.procedures?.name) return apt.procedures.name;
+  if (apt?.procedures?.description) return apt.procedures.description;
+  if (typeof apt?.notes === 'string') {
+    const match = /^Service:\s*([^.]+)\./i.exec(apt.notes.trim());
+    if (match && match[1]) return match[1].trim();
+  }
+  return 'Consultation';
+}
+
 const HomeAPI = {
   async getHomeData() {
     try {
-      // Updated: Get all patient IDs associated with the user
       const patientIds = await Session.getAssociatedPatientIds();
       const now = new Date().toISOString();
 
@@ -12,61 +21,65 @@ const HomeAPI = {
         return { upcomingAppointment: null };
       }
 
-      // Fetch all dashboard data in parallel
       const [appointmentResult] = await Promise.all([
-        // 1. Get nearest upcoming appointment across ALL facilities
         supabase
           .from('appointments')
           .select(`
+            appointment_id,
             appointment_date,
+            appointment_time,
             duration,
             status,
-            procedures ( name ),
-            providers ( 
-              name,
-              facilities ( name ) 
+            notes,
+            procedures ( * ),
+            providers (
+              *,
+              facilities ( * )
             )
           `)
-          .in('patient_id', patientIds) // Updated: Use .in() with array
+          .in('patient_id', patientIds)
           .gte('appointment_date', now)
           .in('status', ['PENDING', 'CONFIRMED', 'ONGOING'])
           .order('appointment_date', { ascending: true })
-          .limit(1)
+          .limit(1),
       ]);
 
-      // Process Appointment Data
       let upcomingAppointment = null;
-      
+
       if (appointmentResult.data && appointmentResult.data.length > 0) {
         const apt = appointmentResult.data[0];
-        const dateObj = new Date(apt.appointment_date);
-        
-        // Format Date: "Thursday, 27 Nov"
+        let dateObj = new Date(apt.appointment_date);
+        if (apt.appointment_time && typeof apt.appointment_date === 'string' && !apt.appointment_date.includes('T')) {
+          const [y, m, d] = apt.appointment_date.split('-').map(Number);
+          const [hh, mm] = apt.appointment_time.split(':').map(Number);
+          dateObj = new Date(y, m - 1, d, hh || 0, mm || 0, 0);
+        }
+
         const dateOptions = { weekday: 'long', day: 'numeric', month: 'short' };
         const dateStr = dateObj.toLocaleDateString('en-US', dateOptions);
 
-        // Format Time: "10:30 AM - 11:30 AM"
         const startTime = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-        const endTimeObj = new Date(dateObj.getTime() + (apt.duration || 30) * 60000);
+        const endTimeObj = new Date(dateObj.getTime() + (apt.duration || 60) * 60000);
         const endTime = endTimeObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
         upcomingAppointment = {
+          id: apt.appointment_id,
           hospital: apt.providers?.facilities?.name || apt.providers?.name || 'Medical Center',
-          type: apt.procedures?.name || 'Consultation',
+          type: resolveAppointmentType(apt),
           date: dateStr,
-          time: `${startTime} - ${endTime}`
+          time: `${startTime} - ${endTime}`,
+          status: apt.status || 'PENDING',
         };
       }
 
       return {
         upcomingAppointment,
       };
-
     } catch (error) {
       console.error('HomeAPI Error:', error);
       return { upcomingAppointment: null };
     }
-  }
+  },
 };
 
 export default HomeAPI;

@@ -59,6 +59,7 @@ test('creates a random password and ignores submitted credentials and clinic ove
   assert.notEqual(result.credentials.password, 'chosen');
   assert.ok(result.credentials.password.length >= 32);
   assert.equal(calls.created[0].password, result.credentials.password);
+  assert.deepEqual(calls.created[0].app_metadata, { must_change_password: true });
   assert.equal(calls.rpc[0].args.p_actor_id, 'admin-id');
   assert.equal(calls.rpc[0].args.p_user_id, 'new-id');
   assert.equal(calls.rpc[0].args.p_provider.working_hrs, 8);

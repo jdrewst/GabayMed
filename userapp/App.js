@@ -1,138 +1,248 @@
 import './global.css';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { HomePage } from './pages/home';
-import { SettingsPage } from './pages/settings';
+import { SettingsPage, ProfilePage } from './pages/settings';
+import { MfaSettingsPage } from './pages/mfa-settings';
+import { UnlockPatientApp } from './components/patient-pin';
 import { MessagesPage } from './pages/message';
 import { SeekMedicalCare } from './pages/seekmedicalcare';
 import { MyFacilities } from './pages/facilities';
 import { NotificationsPage } from './pages/notifications';
 import { BottomNav } from './components/bottom-nav';
-import { SintomasAI } from './components/chatbot';
 import { AppointmentBooking } from './components/appointment';
+import { MyAppointmentsModal } from './components/my-appointments';
+import { BillingPaymentsModal } from './components/billing-payments';
+import { DigitalClaimsModal } from './components/digital-claims';
+import { HealthRecordVaultModal } from './components/health-record-vault';
+import { LoginPage } from './pages/auth/login';
+import { RegisterPage } from './pages/auth/register';
+import { ForgotPasswordPage } from './pages/auth/forgot-password';
+import { OnboardingPage } from './pages/auth/onboarding';
+import Session from './services/session';
+import ProfileAPI from './services/profileApi';
 import 'react-native-url-polyfill/auto';
 
 export default function App() {
+  const [booting, setBooting] = useState(true);
+  const [session, setSession] = useState(() => Session.current());
+  const [authScreen, setAuthScreen] = useState('login'); // 'login' | 'register'
+  const [prefillEmail, setPrefillEmail] = useState('');
   const [activeTab, setActiveTab] = useState('home');
+  const [showMfaSettings, setShowMfaSettings] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
-  const [showChatbot, setShowChatbot] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAppointment, setShowAppointment] = useState(false);
+  const [preselectedService, setPreselectedService] = useState(null);
+  const [showMyAppointments, setShowMyAppointments] = useState(false);
+  const [showBilling, setShowBilling] = useState(false);
+  const [showClaims, setShowClaims] = useState(false);
+  const [showRecordVault, setShowRecordVault] = useState(false);
+  const [vaultRefreshKey, setVaultRefreshKey] = useState(0);
+  const [appointmentRefreshKey, setAppointmentRefreshKey] = useState(0);
 
-  const handleOpenMessages = () => {
-    setShowMessages(true);
+  const triggerAppointmentRefresh = () => {
+    setAppointmentRefreshKey(k => k + 1);
   };
 
-  const handleCloseMessages = () => {
-    setShowMessages(false);
+  const handleOpenProfilePage = () => {
+    setShowProfile(true);
   };
 
-  const handleOpenNotifications = () => {
-    setShowNotifications(true);
-  };
+  useEffect(() => {
+    const unsubscribe = Session.subscribe(next => {
+      setSession(next);
+      if (next) {
+        ProfileAPI.getProfile().catch(() => {});
+        ProfileAPI.getPermissions().catch(() => {});
+      } else {
+        setShowMfaSettings(false);
+        setShowProfile(false);
+        setShowMessages(false);
+        setShowNotifications(false);
+        setShowAppointment(false);
+        setShowMyAppointments(false);
+        setShowBilling(false);
+        setShowClaims(false);
+        setShowRecordVault(false);
+        setActiveTab('home');
+      }
+    });
+    Session.restore()
+      .then(restored => {
+        if (restored) {
+          return Promise.all([
+            ProfileAPI.getProfile().catch(() => {}),
+            ProfileAPI.getPermissions().catch(() => {}),
+          ]);
+        }
+        return null;
+      })
+      .catch(() => {})
+      .finally(() => setBooting(false));
+    return unsubscribe;
+  }, []);
 
-  const handleCloseNotifications = () => {
-    setShowNotifications(false);
-  };
-
-  const handleOpenAI = () => {
-    setShowChatbot(true);
-  };
-
-  const handleCloseChatbot = () => {
-    setShowChatbot(false);
-  };
-
-  const handleOpenAppointmentBooking = () => {
-    setShowAppointment(true);
-  };
-
-  const handleCloseAppointment = () => {
-    setShowAppointment(false);
-  };
-
-  const handleTabChange = (tab) => {
-    console.log('Tab changed to:', tab);
-    setActiveTab(tab);
-  };
-
-  if (showMessages) {
-    return <MessagesPage onBack={handleCloseMessages} />;
+  if (booting) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#3BA5EC" />
+        <StatusBar style="dark" />
+      </View>
+    );
   }
 
-  if (showChatbot) {
-    return <SintomasAI onBack={handleCloseChatbot} isModal={false} />;
+  // 1. Unauthenticated: Login, Registration, or Forgot Password flow
+  if (!session) {
+    return (
+      <View style={styles.container}>
+        {authScreen === 'register' ? (
+          <RegisterPage
+            onBack={() => setAuthScreen('login')}
+            onRegistered={registeredEmail => {
+              setPrefillEmail(registeredEmail || '');
+              setAuthScreen('login');
+            }}
+          />
+        ) : authScreen === 'forgot' ? (
+          <ForgotPasswordPage
+            onBack={() => setAuthScreen('login')}
+            onResetDone={resetEmail => {
+              setPrefillEmail(resetEmail || '');
+              setAuthScreen('login');
+            }}
+          />
+        ) : (
+          <LoginPage
+            initialEmail={prefillEmail}
+            onSignUp={() => setAuthScreen('register')}
+            onForgotPassword={() => setAuthScreen('forgot')}
+          />
+        )}
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
+
+  const lock = screen => (
+    <UnlockPatientApp key={session.profile.id} patientId={session.profile.id} requiresPin={session.requiresPin}>
+      {screen}
+    </UnlockPatientApp>
+  );
+
+  // 2. First-time user: Onboarding walkthrough + care profile setup
+  if (!session.profile?.onboardingCompleted) {
+    return lock(
+      <View style={styles.container}>
+        <OnboardingPage
+          onComplete={() => {
+            Session.setProfile({ ...session.profile, onboardingCompleted: true });
+          }}
+        />
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
+
+  // 3. Authenticated & onboarded: Main patient app
+  if (showMfaSettings) return lock(<MfaSettingsPage onBack={() => setShowMfaSettings(false)} />);
+  if (showMessages) {
+    return lock(<MessagesPage onBack={() => setShowMessages(false)} />);
   }
 
   if (showNotifications) {
-    return <NotificationsPage onBack={handleCloseNotifications} />;
+    return lock(<NotificationsPage onBack={() => setShowNotifications(false)} />);
   }
 
-  const renderPage = () => {
-    switch (activeTab) {
-      case 'home':
-        return (
-          <HomePage
-            onOpenMessages={handleOpenMessages}
-            onOpenNotifications={handleOpenNotifications}
-            onOpenAI={handleOpenAI}
-            onOpenAppointmentBooking={handleOpenAppointmentBooking}
-            onNavigateToCases={() => setActiveTab('cases')}
-          />
-        );
-      case 'cases':
-        return (
-          <SeekMedicalCare
-            onOpenMessages={handleOpenMessages}
-            onOpenNotifications={handleOpenNotifications}
-          />
-        );
-      case 'facilities':
-        return (
-          <MyFacilities
-            onOpenMessages={handleOpenMessages}
-            onOpenNotifications={handleOpenNotifications}
-          />
-        );
-      case 'chatbot':
-        return (
-          <SintomasAI
-            onBack={() => setActiveTab('home')}
-            onOpenMessages={handleOpenMessages}
-            onOpenNotifications={handleOpenNotifications}
-          />
-        );
-      case 'settings':
-        return (
-          <SettingsPage
-            onOpenMessages={handleOpenMessages}
-            onOpenNotifications={handleOpenNotifications}
-          />
-        );
-      default:
-        return (
-          <HomePage
-            onOpenMessages={handleOpenMessages}
-            onOpenNotifications={handleOpenNotifications}
-            onOpenAI={handleOpenAI}
-            onOpenAppointmentBooking={handleOpenAppointmentBooking}
-          />
-        );
-    }
-  };
-
-  return (
+  return lock(
     <View style={styles.container}>
-      {renderPage()}
-      <BottomNav 
+      {showProfile ? (
+        <ProfilePage onBack={() => setShowProfile(false)} />
+      ) : (
+        <View style={styles.container}>
+          <View style={[styles.tabLayer, activeTab !== 'home' && styles.hiddenTab]}>
+            <HomePage
+              isActive={activeTab === 'home'}
+              onOpenMessages={() => setShowMessages(true)}
+              onOpenNotifications={() => setShowNotifications(true)}
+              onOpenProfile={handleOpenProfilePage}
+              onOpenAppointmentBooking={serviceLabel => {
+                setPreselectedService(typeof serviceLabel === 'string' ? serviceLabel : null);
+                setShowAppointment(true);
+              }}
+              onOpenMyAppointments={() => setShowMyAppointments(true)}
+              onNavigateToCases={() => setActiveTab('cases')}
+              onOpenRecordVault={() => setShowRecordVault(true)}
+              vaultRefreshTrigger={vaultRefreshKey}
+              refreshTrigger={appointmentRefreshKey}
+            />
+          </View>
+          <View style={[styles.tabLayer, activeTab !== 'cases' && styles.hiddenTab]}>
+            <SeekMedicalCare
+              isActive={activeTab === 'cases'}
+              onOpenMessages={() => setShowMessages(true)}
+              onOpenNotifications={() => setShowNotifications(true)}
+              onOpenProfile={handleOpenProfilePage}
+              onAppointmentBooked={triggerAppointmentRefresh}
+            />
+          </View>
+          <View style={[styles.tabLayer, activeTab !== 'facilities' && styles.hiddenTab]}>
+            <MyFacilities
+              onOpenMessages={() => setShowMessages(true)}
+              onOpenNotifications={() => setShowNotifications(true)}
+              onOpenProfile={handleOpenProfilePage}
+              onOpenMyAppointments={() => setShowMyAppointments(true)}
+              refreshTrigger={appointmentRefreshKey}
+            />
+          </View>
+          <View style={[styles.tabLayer, activeTab !== 'settings' && styles.hiddenTab]}>
+            <SettingsPage
+              onOpenMessages={() => setShowMessages(true)}
+              onOpenNotifications={() => setShowNotifications(true)}
+              onOpenProfile={handleOpenProfilePage}
+              onOpenBilling={() => setShowBilling(true)}
+              onOpenClaims={() => setShowClaims(true)}
+              onOpenMfaSettings={() => setShowMfaSettings(true)}
+              onOpenRecordVault={() => setShowRecordVault(true)}
+              onSignOut={() => setAuthScreen('login')}
+            />
+          </View>
+        </View>
+      )}
+      <BottomNav
         activeTab={activeTab}
-        onTabChange={handleTabChange}
-        onAIClick={handleOpenAI}
+        onTabChange={tab => {
+          setShowProfile(false);
+          setActiveTab(tab);
+        }}
       />
-      <AppointmentBooking 
+      <AppointmentBooking
         visible={showAppointment}
-        onClose={handleCloseAppointment}
+        initialService={preselectedService}
+        onBooked={triggerAppointmentRefresh}
+        onClose={() => {
+          setShowAppointment(false);
+          setPreselectedService(null);
+          triggerAppointmentRefresh();
+        }}
+      />
+      <MyAppointmentsModal
+        visible={showMyAppointments}
+        onChanged={triggerAppointmentRefresh}
+        onClose={() => {
+          setShowMyAppointments(false);
+          triggerAppointmentRefresh();
+        }}
+        onScheduleNew={() => setShowAppointment(true)}
+      />
+      <BillingPaymentsModal visible={showBilling} onClose={() => setShowBilling(false)} />
+      <DigitalClaimsModal visible={showClaims} onClose={() => setShowClaims(false)} />
+      <HealthRecordVaultModal
+        visible={showRecordVault}
+        onChanged={() => setVaultRefreshKey(k => k + 1)}
+        onClose={() => setShowRecordVault(false)}
       />
       <StatusBar style="dark" />
     </View>
@@ -140,7 +250,8 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  tabLayer: { flex: 1 },
+  hiddenTab: { display: 'none' },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
 });

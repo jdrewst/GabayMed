@@ -4,7 +4,7 @@ export const LOGO_MAX_BYTES = 2 * 1024 * 1024
 
 export const newBranchForm = () => ({
   branch_id: null, name: '', abbreviation: '', address: '', contact_num: '',
-  email: '', is_active: true
+  email: '', is_active: true, lat: null, long: null
 })
 export const newRoomForm = branchId => ({
   room_id: null, branch_id: branchId || '', code: '', name: '',
@@ -32,11 +32,18 @@ export function branchRecord(form) {
   const email = optional(form.email, 'Email', 254)
   if (email && !validEmail(email)) throw new Error('Enter a valid branch email address.')
   if (!validPhone(form.contact_num)) throw new Error('Enter a valid phone number, such as 09123456789 or +63 2 8123 4567.')
-  return {
+  const record = {
     name: required(form.name, 'Branch name'), abbreviation: required(form.abbreviation, 'Branch code', 30).toUpperCase(),
     address: required(form.address, 'Address', 1000), contact_num: required(form.contact_num, 'Phone', 50),
     email: email || null, is_active: form.is_active === true
   }
+  const lat = Number(form.lat)
+  const lng = Number(form.long)
+  if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0) {
+    record.lat = lat
+    record.long = lng
+  }
+  return record
 }
 export function roomRecord(form) {
   if (!form.branch_id) throw new Error('Select a branch.')
