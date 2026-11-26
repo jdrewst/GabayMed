@@ -143,6 +143,21 @@ async function findOwnedRecord(admin, userId, id) {
   return data;
 }
 
+/**
+ * Account-level privacy (US-4.0): clinic staff only see shared files while "Hospital Data Sharing"
+ * (profiles.data_sharing_consent) is explicitly on. Lets the vault tell the patient what clinics can see.
+ * accountSharing is null when the setting could not be read.
+ */
+async function accountSharingStatus(admin, userId, records) {
+  const sharedCount = records.filter(record => record.shareWithProviders).length;
+  let accountSharing = null;
+  try {
+    const { data, error } = await admin.from('profiles').select('data_sharing_consent').eq('id', userId).maybeSingle();
+    if (!error && data) accountSharing = data.data_sharing_consent === true;
+  } catch {}
+  return { accountSharing, sharedCount, visibleToProviders: accountSharing === true ? sharedCount : 0 };
+}
+
 /** List the patient's records, newest first, with a per-category summary. */
 async function listRecords(admin, userId, { category } = {}) {
   requireUser(userId);
@@ -165,6 +180,7 @@ async function listRecords(admin, userId, { category } = {}) {
   }
   return {
     records,
+    sharing: await accountSharingStatus(admin, userId, records),
     summary: { total: records.length, totalBytes, counts },
     categories: Object.entries(CATEGORIES).map(([id, label]) => ({ id, label })),
     limits: { maxFileBytes: MAX_FILE_BYTES, maxRecords: MAX_RECORDS_PER_PATIENT, allowedTypes: Object.keys(ALLOWED_TYPES) },

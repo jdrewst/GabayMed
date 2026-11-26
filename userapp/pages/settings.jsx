@@ -1088,7 +1088,7 @@ export function SettingsPage({
     cachedPerms ? !!cachedPerms.insuranceConsent : true
   );
   const [dataSharingConsent, setDataSharingConsent] = useState(
-    cachedPerms ? !!cachedPerms.dataSharingConsent : true
+    cachedPerms ? !!cachedPerms.dataSharingConsent : false
   );
   const [locationAllowed, setLocationAllowed] = useState(
     cachedPerms ? !!cachedPerms.locationAllowed : false

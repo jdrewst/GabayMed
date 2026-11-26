@@ -35,10 +35,13 @@ import {
   ChevronLeft,
   ArrowDownUp,
   AlertCircle,
+  ShieldCheck,
+  ShieldOff,
 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { DatePickerField } from './auth/auth-ui';
+import ProfileAPI from '../services/profileApi';
 import HealthRecordsAPI, {
   RECORD_CATEGORIES,
   SUPPORTED_TYPES,
@@ -97,10 +100,19 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState(''); // 'view' | 'download' | 'delete'
   const [previewUrl, setPreviewUrl] = useState('');
+  // Account-level "Hospital Data Sharing" as the server sees it (US-4.0). null = unknown.
+  const [accountSharing, setAccountSharing] = useState(null);
+  const [sharingBusy, setSharingBusy] = useState(false);
 
   useEffect(() => {
     if (visible) load();
     else closeSheet();
+  }, [visible]);
+
+  // If Hospital Data Sharing changes in Settings, re-read what clinics can see.
+  useEffect(() => {
+    if (!visible) return undefined;
+    return ProfileAPI.subscribePermissions(() => load(true));
   }, [visible]);
 
   const load = async (isRefresh = false) => {
@@ -109,6 +121,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       setLoadError('');
       const data = await HealthRecordsAPI.list();
       setRecords(Array.isArray(data.records) ? data.records : []);
+      setAccountSharing(typeof data.sharing?.accountSharing === 'boolean' ? data.sharing.accountSharing : null);
     } catch (error) {
       setLoadError(error.message || 'Could not load your health records.');
     } finally {
@@ -124,6 +137,8 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   }, [records]);
 
   const totalBytes = useMemo(() => records.reduce((sum, r) => sum + (r.sizeBytes || 0), 0), [records]);
+  const sharedCount = useMemo(() => records.filter(r => r.shareWithProviders).length, [records]);
+  const sharingPaused = accountSharing === false;
 
   const visibleRecords = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -332,6 +347,53 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
     }
   };
 
+  // ---- Sharing with care providers (US-4.0) ---------------------------------
+  // Changing sharing only flips a permission flag; the file itself is never touched.
+
+  const toggleShare = async next => {
+    const target = selected;
+    if (!target || sharingBusy) return;
+    const apply = value => {
+      setSelected(r => (r && r.id === target.id ? { ...r, shareWithProviders: value } : r));
+      setRecords(list => list.map(r => (r.id === target.id ? { ...r, shareWithProviders: value } : r)));
+    };
+    apply(next);
+    setSharingBusy(true);
+    try {
+      const updated = await HealthRecordsAPI.update(target.id, { shareWithProviders: next });
+      setSelected(r => (r && r.id === updated.id ? updated : r));
+      setRecords(list => list.map(r => (r.id === updated.id ? updated : r)));
+      onChanged?.();
+    } catch (error) {
+      apply(!next);
+      showNotice('Sharing not changed', error.message || 'Please try again.');
+    } finally {
+      setSharingBusy(false);
+    }
+  };
+
+  const enableAccountSharing = async () => {
+    setSharingBusy(true);
+    try {
+      await ProfileAPI.setPermissions({ dataSharingConsent: true });
+      const data = await HealthRecordsAPI.list();
+      setRecords(Array.isArray(data.records) ? data.records : []);
+      const on = data.sharing?.accountSharing === true;
+      setAccountSharing(typeof data.sharing?.accountSharing === 'boolean' ? data.sharing.accountSharing : null);
+      if (!on) showNotice('Not turned on yet', 'We could not update Hospital Data Sharing. Please try again from Settings.');
+    } catch (error) {
+      showNotice('Not turned on yet', error.message || 'Please try again from Settings.');
+    } finally {
+      setSharingBusy(false);
+    }
+  };
+
+  const shareStatusText = record => {
+    if (!record.shareWithProviders) return 'Private. Only you can see this file.';
+    if (sharingPaused) return 'Hidden from your clinic while Hospital Data Sharing is off in Settings.';
+    return 'Your clinic\'s staff and providers can view and download this file.';
+  };
+
   // ---- Render ---------------------------------------------------------------
 
   const renderRecord = record => {
@@ -513,7 +575,12 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
           <Users size={18} color="#0284c7" />
           <View style={{ flex: 1 }}>
             <Text style={styles.shareTitle}>Share with my care providers</Text>
-            <Text style={styles.sourceDesc}>Off by default. Only you can see this file unless you turn this on.</Text>
+            <Text style={styles.sourceDesc}>
+              Off by default. When on, your clinic can view and download this file with its name, category, date and notes.
+            </Text>
+            {form.shareWithProviders && sharingPaused && (
+              <Text style={styles.shareWarn}>Hospital Data Sharing is off in Settings, so your clinic won't see it yet.</Text>
+            )}
           </View>
           <Switch
             value={form.shareWithProviders}
@@ -561,13 +628,31 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
             ['Uploaded', formatDate(selected.createdAt)],
             ['File', `${selected.fileName} · ${formatBytes(selected.sizeBytes)}`],
             ['Added by', selected.source === 'facility' ? 'Your clinic' : 'You'],
-            ['Sharing', selected.shareWithProviders ? 'Shared with your care providers' : 'Private (only you)'],
           ].map(([label, value]) => (
             <View key={label} style={styles.detailRow}>
               <Text style={styles.detailLabel}>{label}</Text>
               <Text style={styles.detailValue}>{value}</Text>
             </View>
           ))}
+          <View style={[styles.shareRow, selected.shareWithProviders && sharingPaused && styles.shareRowPaused]}>
+            <Users size={18} color={selected.shareWithProviders && sharingPaused ? '#b45309' : '#0284c7'} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.shareTitle}>Share with my care providers</Text>
+              <Text style={styles.sourceDesc}>{shareStatusText(selected)}</Text>
+            </View>
+            {sharingBusy
+              ? <ActivityIndicator size="small" color="#0284c7" />
+              : (
+                <Switch
+                  value={!!selected.shareWithProviders}
+                  onValueChange={toggleShare}
+                  disabled={!!busyAction}
+                  trackColor={{ false: '#E2E8F0', true: '#7DD3FC' }}
+                  thumbColor={selected.shareWithProviders ? '#0284C7' : '#94A3B8'}
+                  accessibilityLabel="Share this file with my care providers"
+                />
+              )}
+          </View>
           {!!selected.notes && (
             <View style={styles.notesBox}>
               <Text style={styles.detailLabel}>Notes</Text>
@@ -666,13 +751,41 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
           <View style={styles.summaryRow}>
             <View>
               <Text style={styles.summaryCount}>{records.length} {records.length === 1 ? 'file' : 'files'}</Text>
-              <Text style={styles.mutedSmall}>{formatBytes(totalBytes)} stored · private to you</Text>
+              <Text style={styles.mutedSmall}>
+                {formatBytes(totalBytes)} stored · {sharedCount === 0
+                  ? 'private to you'
+                  : sharingPaused ? 'clinic sharing off' : `${sharedCount} shared with your clinic`}
+              </Text>
             </View>
             <TouchableOpacity style={styles.uploadBtn} onPress={() => setSheet('source')}>
               <Upload size={16} color="#fff" />
               <Text style={styles.primaryBtnText}>Upload</Text>
             </TouchableOpacity>
           </View>
+
+          {sharedCount > 0 && sharingPaused && (
+            <View style={styles.sharingBanner}>
+              <ShieldOff size={18} color="#b45309" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sharingBannerTitle}>Clinic sharing is off</Text>
+                <Text style={styles.sharingBannerText}>
+                  {sharedCount === 1 ? '1 file you marked as shared is' : `${sharedCount} files you marked as shared are`} hidden
+                  from your clinic because Hospital Data Sharing is off.
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.sharingBannerBtn} onPress={enableAccountSharing} disabled={sharingBusy}>
+                {sharingBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.sharingBannerBtnText}>Turn on</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+          {sharedCount > 0 && accountSharing === true && (
+            <View style={[styles.sharingBanner, styles.sharingBannerOn]}>
+              <ShieldCheck size={18} color="#047857" />
+              <Text style={[styles.sharingBannerText, { flex: 1, color: '#065f46' }]}>
+                Your clinic can see {sharedCount === 1 ? '1 shared file' : `${sharedCount} shared files`}. Turn sharing off on any file at any time.
+              </Text>
+            </View>
+          )}
 
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
@@ -818,6 +931,17 @@ const styles = StyleSheet.create({
   linkText: { color: '#0284c7', fontSize: 12.5, fontWeight: '600', marginTop: 6 },
   shareRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16, padding: 12, borderRadius: 12, backgroundColor: '#f0f9ff' },
   shareTitle: { fontSize: 14, fontWeight: '600', color: '#0f172a' },
+  shareRowPaused: { backgroundColor: '#fffbeb' },
+  shareWarn: { fontSize: 12, color: '#b45309', marginTop: 4 },
+  sharingBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 20, marginTop: 10, padding: 12,
+    borderRadius: 12, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a',
+  },
+  sharingBannerOn: { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' },
+  sharingBannerTitle: { fontSize: 13, fontWeight: '700', color: '#92400e' },
+  sharingBannerText: { fontSize: 12, color: '#92400e', marginTop: 2 },
+  sharingBannerBtn: { backgroundColor: '#d97706', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, minWidth: 72, alignItems: 'center' },
+  sharingBannerBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   errorBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 10, borderRadius: 10, backgroundColor: '#fef2f2' },
   errorText: { flex: 1, color: '#b91c1c', fontSize: 13 },
 
