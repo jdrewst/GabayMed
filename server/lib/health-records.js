@@ -171,7 +171,9 @@ async function listRecords(admin, userId, { category } = {}) {
   const { data, error } = await query;
   if (error) throw new RequestError(503, 'Could not load your health records right now.');
 
-  const records = (data || []).map(mapRecord);
+  // Show all patient-uploaded records, plus clinic-uploaded records where the provider allowed patient access (share_with_providers === true)
+  const visibleRows = (data || []).filter(row => row.source !== 'facility' || row.share_with_providers === true);
+  const records = visibleRows.map(mapRecord);
   const counts = Object.fromEntries(Object.keys(CATEGORIES).map(key => [key, 0]));
   let totalBytes = 0;
   for (const record of records) {
@@ -274,6 +276,13 @@ async function confirmUpload(admin, userId, body = {}, { now = new Date() } = {}
     await discard();
     throw new RequestError(503, 'Could not save this record right now. Please try again.');
   }
+  // When the patient explicitly turns on "Share with my care providers" during upload,
+  // ensure their account-level data_sharing_consent is enabled so the provider can see it immediately.
+  if (body.shareWithProviders) {
+    try {
+      await admin.from('profiles').update({ data_sharing_consent: true }).eq('id', userId);
+    } catch {}
+  }
   return { record: mapRecord(data) };
 }
 
@@ -310,6 +319,13 @@ async function updateRecord(admin, userId, body = {}, { now = new Date() } = {})
     .select(RECORD_COLUMNS)
     .single();
   if (error || !data) throw new RequestError(503, 'Could not update this record right now.');
+  // When the patient explicitly toggles "Share with my care providers" ON,
+  // ensure their account-level data_sharing_consent is enabled so the provider can see it immediately.
+  if (body.shareWithProviders === true) {
+    try {
+      await admin.from('profiles').update({ data_sharing_consent: true }).eq('id', userId);
+    } catch {}
+  }
   return { record: mapRecord(data) };
 }
 

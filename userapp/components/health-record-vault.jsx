@@ -634,25 +634,37 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
               <Text style={styles.detailValue}>{value}</Text>
             </View>
           ))}
-          <View style={[styles.shareRow, selected.shareWithProviders && sharingPaused && styles.shareRowPaused]}>
-            <Users size={18} color={selected.shareWithProviders && sharingPaused ? '#b45309' : '#0284c7'} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.shareTitle}>Share with my care providers</Text>
-              <Text style={styles.sourceDesc}>{shareStatusText(selected)}</Text>
+          {selected.source === 'facility' ? (
+            <View style={styles.shareRow}>
+              <ShieldCheck size={18} color="#0284c7" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.shareTitle}>Shared by your clinic</Text>
+                <Text style={styles.sourceDesc}>
+                  Your healthcare provider uploaded and shared this record with your mobile Health Record Vault.
+                </Text>
+              </View>
             </View>
-            {sharingBusy
-              ? <ActivityIndicator size="small" color="#0284c7" />
-              : (
-                <Switch
-                  value={!!selected.shareWithProviders}
-                  onValueChange={toggleShare}
-                  disabled={!!busyAction}
-                  trackColor={{ false: '#E2E8F0', true: '#7DD3FC' }}
-                  thumbColor={selected.shareWithProviders ? '#0284C7' : '#94A3B8'}
-                  accessibilityLabel="Share this file with my care providers"
-                />
-              )}
-          </View>
+          ) : (
+            <View style={[styles.shareRow, selected.shareWithProviders && sharingPaused && styles.shareRowPaused]}>
+              <Users size={18} color={selected.shareWithProviders && sharingPaused ? '#b45309' : '#0284c7'} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.shareTitle}>Share with my care providers</Text>
+                <Text style={styles.sourceDesc}>{shareStatusText(selected)}</Text>
+              </View>
+              {sharingBusy
+                ? <ActivityIndicator size="small" color="#0284c7" />
+                : (
+                  <Switch
+                    value={!!selected.shareWithProviders}
+                    onValueChange={toggleShare}
+                    disabled={!!busyAction}
+                    trackColor={{ false: '#E2E8F0', true: '#7DD3FC' }}
+                    thumbColor={selected.shareWithProviders ? '#0284C7' : '#94A3B8'}
+                    accessibilityLabel="Share this file with my care providers"
+                  />
+                )}
+            </View>
+          )}
           {!!selected.notes && (
             <View style={styles.notesBox}>
               <Text style={styles.detailLabel}>Notes</Text>

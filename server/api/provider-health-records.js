@@ -1,9 +1,10 @@
 const { createClient } = require('@supabase/supabase-js');
 const sharing = require('../lib/provider-health-records');
+const { isAllowedOrigin } = require('../lib/origin');
 
-// Gabay 1.0 Patient Portal access to patient-shared Health Record Vault files (US-4.0).
-// POST { action: 'list' | 'get_url', patientId, recordId?, mode? } with the clinic user's bearer token.
-// Access control (staff role, same facility, account-level consent, per-file share flag) lives in the lib.
+// Gabay 1.0 Patient Portal access to patient-shared and clinic-uploaded Health Record Vault files (US-4.0).
+// POST { action: 'list' | 'get_url' | 'create_upload' | 'confirm_upload' | 'update' | 'delete', patientId, recordId?, mode?, ... }
+// with the clinic user's bearer token.
 
 function client() {
   const url = process.env.SUPABASE_URL;
@@ -19,9 +20,7 @@ module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const origin = req.headers.origin;
   if (origin) {
-    let sameHost = false;
-    try { sameHost = new URL(origin).host === req.headers.host; } catch {}
-    if (!sameHost && origin !== (process.env.CLIENT_ORIGIN || 'http://localhost:5173')) {
+    if (!isAllowedOrigin(origin, req.headers.host)) {
       return res.status(403).json({ error: 'Origin is not allowed.' });
     }
     res.setHeader('Access-Control-Allow-Origin', origin);
