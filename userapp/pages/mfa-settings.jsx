@@ -7,6 +7,7 @@ import { createPatientAuthClient } from '../lib/supabase';
 import { PatientPinSettings } from '../components/patient-pin';
 import AuthAPI from '../services/authApi';
 import Session from '../services/session';
+import { useTheme } from '../context/ThemeContext';
 
 const validCode = value => /^\d{6}$/.test(value);
 
@@ -21,6 +22,7 @@ async function getAuthClient() {
 }
 
 export function MfaSettingsPage({ onBack }) {
+  const { display } = useTheme();
   const [factors, setFactors] = useState(null);
   const [pending, setPending] = useState(null);
   const [removing, setRemoving] = useState(null);
@@ -110,24 +112,24 @@ export function MfaSettingsPage({ onBack }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={[styles.content, { backgroundColor: display.bg }]} keyboardShouldPersistTaps="handled">
       <BackButton onPress={onBack} />
-      <Text style={authText.title}>Account security</Text>
+      <Text style={[authText.title, { color: display.textPrimary }]}>Account security</Text>
       <ErrorBanner message={error} />
-      {status ? <Text accessibilityLiveRegion="polite">{status}</Text> : null}
-      <View style={styles.section}>
-        <Text style={styles.heading}>Authenticator app (MFA)</Text>
+      {status ? <Text accessibilityLiveRegion="polite" style={{ color: display.accent }}>{status}</Text> : null}
+      <View style={[styles.section, { backgroundColor: display.cardBg, borderColor: display.border, borderWidth: 1 }]}>
+        <Text style={[styles.heading, { color: display.textPrimary }]}>Authenticator app (MFA)</Text>
         {removing ? (
           <>
-            <Text>Enter a current code to remove this authenticator. If you lost access to your codes, contact GabayMed support for an authenticator reset.</Text>
+            <Text style={{ color: display.textSecondary }}>Enter a current code to remove this authenticator. If you lost access to your codes, contact GabayMed support for an authenticator reset.</Text>
             <TextField label="Authenticator code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6} />
             <PrimaryButton title="Verify and remove authenticator" disabled={busy} onPress={() => run(() => verify(removing))} />
             <OutlineButton title="Cancel removal" disabled={busy} onPress={() => { setRemoving(null); setCode(''); setError(''); }} />
           </>
         ) : pending ? (
           <>
-            <Text>Add this setup key to your authenticator app, then enter its six-digit code.</Text>
-            <Text selectable style={styles.setupKey}>{pending.totp.secret}</Text>
+            <Text style={{ color: display.textSecondary }}>Add this setup key to your authenticator app, then enter its six-digit code.</Text>
+            <Text selectable style={[styles.setupKey, { color: display.accent }]}>{pending.totp.secret}</Text>
             <TextField label="Authenticator code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6} />
             <PrimaryButton title="Verify and enable MFA" disabled={busy} onPress={() => run(() => verify(pending.id))} />
             <OutlineButton title="Cancel setup" disabled={busy} onPress={() => run(() => unenroll(pending.id))} />
@@ -143,8 +145,8 @@ export function MfaSettingsPage({ onBack }) {
           <PrimaryButton title="Set up authenticator" disabled={busy} onPress={() => run(enroll)} />
         )}
       </View>
-      <View style={styles.section}>
-        <Text style={styles.heading}>Password</Text>
+      <View style={[styles.section, { backgroundColor: display.cardBg, borderColor: display.border, borderWidth: 1 }]}>
+        <Text style={[styles.heading, { color: display.textPrimary }]}>Password</Text>
         <TextField label="Current password" value={currentPassword} onChangeText={setCurrentPassword} secure autoComplete="current-password" />
         <TextField label="New password" value={password} onChangeText={setPassword} secure autoComplete="new-password" />
         <TextField label="Confirm new password" value={confirmation} onChangeText={setConfirmation} secure />

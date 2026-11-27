@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Keyboa
 import { ArrowLeft, Send, Hospital } from 'lucide-react-native';
 import { GradientView } from './ui/gradient-button';
 import MessagesAPI from '../services/messagesApi';
+import { useTheme } from '../context/ThemeContext';
 
 function createMessageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -16,6 +17,7 @@ function createMessageId() {
 }
 
 export function ConversationView({ patientId, branchKey, name, branchName, onBack, onSent, embedded }) {
+  const { display, isDark } = useTheme();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +75,7 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
 
   return (
     <KeyboardAvoidingView 
-      style={styles.container}
+      style={[styles.container, { backgroundColor: display.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <GradientView
@@ -83,7 +85,7 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
         {onBack && <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityLabel="Back to conversations" accessibilityRole="button">
           <ArrowLeft size={20} color="#fff" />
         </TouchableOpacity>}
-        <View style={styles.avatar}>
+        <View style={[styles.avatar, { backgroundColor: isDark ? '#1e3a8a' : '#e0f2fe' }]}>
           <Hospital size={22} color="#0369a1" />
         </View>
         <View style={styles.headerInfo}>
@@ -104,7 +106,7 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
         >
           {loadError ? (
             <View style={styles.threadState}>
-              <Text accessibilityRole="alert" style={styles.emptyThread}>Unable to load messages.</Text>
+              <Text accessibilityRole="alert" style={[styles.emptyThread, { color: display.textSecondary }]}>Unable to load messages.</Text>
               <TouchableOpacity accessibilityRole="button" onPress={loadMessages} style={styles.retryButton}>
                 <Text style={styles.threadTitle}>Try again</Text>
               </TouchableOpacity>
@@ -112,7 +114,7 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
           ) : messages.length === 0 && (
             <View style={styles.threadState}>
               <Text style={styles.threadTitle}>Start a conversation</Text>
-              <Text style={styles.emptyThread}>Send a message to {name} using the field below.</Text>
+              <Text style={[styles.emptyThread, { color: display.textSecondary }]}>Send a message to {name} using the field below.</Text>
             </View>
           )}
           {messages.map((msg) => (
@@ -136,11 +138,11 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
                   </Text>
                 </GradientView>
               ) : (
-                <View style={[styles.messageBubble, styles.receivedBubble]}>
-                  <Text style={[styles.messageText, styles.receivedText]}>
+                <View style={[styles.messageBubble, styles.receivedBubble, { backgroundColor: display.cardBg, borderColor: display.border }]}>
+                  <Text style={[styles.messageText, styles.receivedText, { color: display.textPrimary }]}>
                     {msg.text}
                   </Text>
-                  <Text style={[styles.messageTime, styles.receivedTime]}>
+                  <Text style={[styles.messageTime, styles.receivedTime, { color: display.textSecondary }]}>
                     {msg.timestamp}
                   </Text>
                 </View>
@@ -151,10 +153,11 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
       )}
 
       {sendError && <Text accessibilityRole="alert" style={styles.sendError}>Could not confirm delivery. Check your connection and try again.</Text>}
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, { backgroundColor: display.cardBg, borderTopColor: display.border }]}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: display.subCardBg, color: display.textPrimary }]}
           placeholder="Type a message..."
+          placeholderTextColor={display.placeholder}
           value={message}
           onChangeText={setMessage}
           accessibilityLabel="Message"

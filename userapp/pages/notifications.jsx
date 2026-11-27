@@ -10,8 +10,9 @@ import {
 } from 'react-native';
 import { ArrowLeft, Calendar, CreditCard, Gift, Bell, MessageCircle, ShieldCheck } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import ProfileAPI, { getDisplayConfig } from '../services/profileApi';
+import ProfileAPI from '../services/profileApi';
 import NotificationsAPI, { notificationCategories } from '../services/notificationsApi';
+import { useTheme } from '../context/ThemeContext';
 
 const CATEGORY_MAP = [
   { key: 'notifyAppointments', type: 'reminder', label: 'Appointments', icon: Calendar },
@@ -97,8 +98,7 @@ export function NotificationsPage({ onBack }) {
   };
 
   const notificationsAllowed = perms?.notificationsAllowed !== false;
-  const display = getDisplayConfig(perms);
-  const fs = size => Math.round(size * display.fontScale * 10) / 10;
+  const { display, isDark, t, fs } = useTheme();
 
   const toggleCategoryChip = async key => {
     const current = perms?.[key] !== false;
@@ -135,15 +135,15 @@ export function NotificationsPage({ onBack }) {
   const getIconStyle = type => {
     switch (type) {
       case 'reminder':
-        return { bg: '#dbeafe', color: '#3b82f6' };
+        return { bg: isDark ? '#1e3a5f' : '#dbeafe', color: '#38bdf8' };
       case 'payment':
-        return { bg: '#fee2e2', color: '#ef4444' };
+        return { bg: isDark ? '#451a1a' : '#fee2e2', color: '#f87171' };
       case 'promo':
-        return { bg: '#dcfce7', color: '#22c55e' };
+        return { bg: isDark ? '#14432a' : '#dcfce7', color: '#4ade80' };
       case 'message':
-        return { bg: '#e0f2fe', color: '#0284c7' };
+        return { bg: isDark ? '#164e63' : '#e0f2fe', color: '#38bdf8' };
       default:
-        return { bg: '#f3f4f6', color: '#6b7280' };
+        return { bg: isDark ? '#334155' : '#f3f4f6', color: isDark ? '#94a3b8' : '#6b7280' };
     }
   };
 
@@ -155,7 +155,7 @@ export function NotificationsPage({ onBack }) {
           <ArrowLeft size={20} color="#fff" />
         </TouchableOpacity>
         <View style={styles.headerContent}>
-          <Text style={[styles.headerTitle, { fontSize: fs(18) }]}>Notifications</Text>
+          <Text style={[styles.headerTitle, { fontSize: fs(18) }]}>{t?.notificationsTitle || 'Notifications'}</Text>
           {notificationsAllowed && unreadCount > 0 && (
             <View style={styles.headerBadge}>
               <Text style={styles.headerBadgeText}>{unreadCount}</Text>
@@ -164,7 +164,7 @@ export function NotificationsPage({ onBack }) {
         </View>
         {notificationsAllowed && unreadCount > 0 && (
           <TouchableOpacity onPress={() => markAsRead()} style={styles.markAllButton}>
-            <Text style={styles.markAllText}>Mark all</Text>
+            <Text style={[styles.markAllText, { fontSize: fs(12) }]}>{t?.markAll || 'Mark all'}</Text>
           </TouchableOpacity>
         )}
       </LinearGradient>
@@ -192,7 +192,7 @@ export function NotificationsPage({ onBack }) {
                   style={[
                     styles.categoryChip,
                     { backgroundColor: display.subCardBg, borderColor: display.border },
-                    enabled && styles.categoryChipActive,
+                    enabled && (isDark ? { backgroundColor: '#1e3a5f', borderColor: '#38bdf8' } : styles.categoryChipActive),
                   ]}
                 >
                   <CatIcon size={13} color={enabled ? '#0284c7' : '#94a3b8'} />
@@ -203,7 +203,7 @@ export function NotificationsPage({ onBack }) {
                       enabled ? styles.categoryChipTextActive : styles.categoryChipTextMuted,
                     ]}
                   >
-                    {cat.label} {enabled ? 'On' : 'Off'}
+                    {cat.label} {enabled ? (t?.on || 'On') : (t?.off || 'Off')}
                   </Text>
                 </TouchableOpacity>
               );
@@ -313,7 +313,7 @@ export function NotificationsPage({ onBack }) {
                   >
                     {notif.message}
                   </Text>
-                  <Text style={[styles.notificationTime, { fontSize: fs(12) }]}>
+                  <Text style={[styles.notificationTime, { color: display.textSecondary, fontSize: fs(12) }]}>
                     {getRelativeTime(notif.timestamp)}
                   </Text>
                 </View>

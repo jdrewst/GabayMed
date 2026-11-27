@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme } from '../context/ThemeContext';
+import { getLocalizedService } from '../services/profileApi';
 import {
   Hospital,
   Brain,
@@ -16,6 +18,7 @@ import {
 } from 'lucide-react-native';
 
 export function BrowseServices({ showTitle = true, initialShowAll = false, onServiceSelect, onSeeAll }) {
+  const { display, language, t, fs } = useTheme();
   const [showAllServices, setShowAllServices] = useState(initialShowAll);
 
   const allServices = [
@@ -53,9 +56,13 @@ export function BrowseServices({ showTitle = true, initialShowAll = false, onSer
     <View style={styles.container}>
       {showTitle && (
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Browse by Services</Text>
+          <Text style={[styles.sectionTitle, { color: display.textPrimary, fontSize: fs(24) }]}>
+            {t?.browseByServices || 'Browse by Services'}
+          </Text>
           <TouchableOpacity onPress={handleSeeAllPress}>
-            <Text style={styles.seeAllText}>{showAllServices ? 'Show Less' : 'See All'}</Text>
+            <Text style={[styles.seeAllText, { color: display.accent, fontSize: fs(14) }]}>
+              {showAllServices ? (t?.showLess || 'Show Less') : (t?.seeAll || 'See All')}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -66,7 +73,7 @@ export function BrowseServices({ showTitle = true, initialShowAll = false, onSer
           return (
             <TouchableOpacity 
               key={index} 
-              style={styles.serviceCard}
+              style={[styles.serviceCard, { backgroundColor: display.cardBg, borderColor: display.border, borderWidth: 1 }]}
               onPress={() => handleServicePress(service)}
             >
               <LinearGradient
@@ -75,7 +82,9 @@ export function BrowseServices({ showTitle = true, initialShowAll = false, onSer
               >
                 <IconComponent size={24} color="#fff" strokeWidth={2} />
               </LinearGradient>
-              <Text style={styles.serviceLabel}>{service.label}</Text>
+              <Text style={[styles.serviceLabel, { color: display.textPrimary, fontSize: fs(10) }]}>
+                {getLocalizedService(service.label, language)}
+              </Text>
             </TouchableOpacity>
           );
         })}

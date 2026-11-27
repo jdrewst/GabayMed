@@ -25,6 +25,7 @@ import {
   RotateCcw,
 } from 'lucide-react-native';
 import BillingAPI, { PAYMENT_STATUS_LABELS, formatPeso } from '../services/billingApi';
+import { useTheme } from '../context/ThemeContext';
 
 const FILTERS = [
   { key: 'all', label: 'All Charges' },
@@ -61,10 +62,11 @@ function StatusBadge({ status }) {
 }
 
 function Row({ label, value, strong, negative, color }) {
+  const { display } = useTheme();
   return (
     <View style={styles.row}>
-      <Text style={[styles.rowLabel, strong && styles.rowStrong]}>{label}</Text>
-      <Text style={[styles.rowValue, strong && styles.rowStrong, color && { color }]}>
+      <Text style={[styles.rowLabel, { color: display.textSecondary }, strong && [styles.rowStrong, { color: display.textPrimary }]]}>{label}</Text>
+      <Text style={[styles.rowValue, { color: display.textPrimary }, strong && [styles.rowStrong, { color: display.textPrimary }], color && { color }]}>
         {negative ? `− ${formatPeso(value)}` : formatPeso(value)}
       </Text>
     </View>
@@ -72,34 +74,35 @@ function Row({ label, value, strong, negative, color }) {
 }
 
 function ChargeCard({ charge, expanded, onToggle }) {
+  const { display, isDark } = useTheme();
   const b = charge.breakdown || {};
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: display.cardBg, borderColor: display.border }]}>
       <TouchableOpacity onPress={onToggle} activeOpacity={0.8}>
         <View style={styles.cardTop}>
           <StatusBadge status={charge.paymentStatus} />
-          <Text style={styles.cardDate}>{charge.date || '—'}</Text>
+          <Text style={[styles.cardDate, { color: display.placeholder }]}>{charge.date || '—'}</Text>
         </View>
 
         <View style={styles.cardMain}>
           <Stethoscope size={18} color="#0ea5e9" style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{charge.procedureName}</Text>
-            {!!charge.providerName && <Text style={styles.cardSub}>{charge.providerName}</Text>}
+            <Text style={[styles.cardTitle, { color: display.textPrimary }]}>{charge.procedureName}</Text>
+            {!!charge.providerName && <Text style={[styles.cardSub, { color: display.textSecondary }]}>{charge.providerName}</Text>}
             <View style={styles.facilityRow}>
-              <Building2 size={13} color="#64748b" />
-              <Text style={styles.cardSub}>{charge.facilityName}</Text>
+              <Building2 size={13} color={display.textSecondary} />
+              <Text style={[styles.cardSub, { color: display.textSecondary }]}>{charge.facilityName}</Text>
             </View>
           </View>
         </View>
 
-        <View style={styles.cardAmounts}>
+        <View style={[styles.cardAmounts, { borderTopColor: display.border }]}>
           <View>
-            <Text style={styles.amountLabel}>Amount Due</Text>
-            <Text style={styles.amountValue}>{formatPeso(b.patientPayable)}</Text>
+            <Text style={[styles.amountLabel, { color: display.textSecondary }]}>Amount Due</Text>
+            <Text style={[styles.amountValue, { color: display.textPrimary }]}>{formatPeso(b.patientPayable)}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.amountLabel}>Balance</Text>
+            <Text style={[styles.amountLabel, { color: display.textSecondary }]}>Balance</Text>
             <Text style={[styles.amountValue, { color: charge.balance > 0 ? '#dc2626' : '#15803d' }]}>
               {formatPeso(charge.balance)}
             </Text>
@@ -113,24 +116,24 @@ function ChargeCard({ charge, expanded, onToggle }) {
       </TouchableOpacity>
 
       {expanded && (
-        <View style={styles.breakdown}>
+        <View style={[styles.breakdown, { backgroundColor: isDark ? display.subCardBg : '#f8fafc' }]}>
           <Row label="Gross Charge" value={b.grossAmount} />
           {b.philhealthDeduction > 0 && <Row label="PhilHealth Coverage" value={b.philhealthDeduction} negative color="#15803d" />}
           {b.hmoDeduction > 0 && <Row label="HMO Coverage" value={b.hmoDeduction} negative color="#15803d" />}
           {b.discountAmount > 0 && <Row label="Discount (Senior/PWD/Other)" value={b.discountAmount} negative color="#15803d" />}
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: display.border }]} />
           <Row label="Patient Share" value={b.patientPayable} strong />
           <Row label="Amount Paid" value={charge.amountPaid} negative color="#0369a1" />
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: display.border }]} />
           <Row label="Remaining Balance" value={charge.balance} strong color={charge.balance > 0 ? '#dc2626' : '#15803d'} />
 
           {charge.payments?.length > 0 && (
             <View style={{ marginTop: 10 }}>
-              <Text style={styles.subHeader}>Payments applied</Text>
+              <Text style={[styles.subHeader, { color: display.textSecondary }]}>Payments applied</Text>
               {charge.payments.map((p, i) => (
                 <View key={`${p.paymentId}-${i}`} style={styles.paymentLine}>
-                  <CreditCard size={13} color="#64748b" />
-                  <Text style={styles.paymentLineText}>{p.date || '—'} · {p.method ? String(p.method).toUpperCase() : 'Payment'}</Text>
+                  <CreditCard size={13} color={display.textSecondary} />
+                  <Text style={[styles.paymentLineText, { color: display.textSecondary }]}>{p.date || '—'} · {p.method ? String(p.method).toUpperCase() : 'Payment'}</Text>
                   <Text style={styles.paymentLineAmount}>{formatPeso(p.amount)}</Text>
                 </View>
               ))}
@@ -143,6 +146,7 @@ function ChargeCard({ charge, expanded, onToggle }) {
 }
 
 export function BillingPaymentsModal({ visible, onClose }) {
+  const { display, isDark } = useTheme();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -176,21 +180,21 @@ export function BillingPaymentsModal({ visible, onClose }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          <View style={styles.header}>
+        <View style={[styles.container, { backgroundColor: display.bg }]}>
+          <View style={[styles.header, { backgroundColor: display.cardBg, borderBottomColor: display.border }]}>
             <View style={styles.headerTitleGroup}>
               <Receipt size={22} color="#0ea5e9" />
-              <Text style={styles.headerTitle}>Billing & Payments</Text>
+              <Text style={[styles.headerTitle, { color: display.textPrimary }]}>Billing & Payments</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close billing">
-              <X size={20} color="#4b5563" />
+            <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]} accessibilityLabel="Close billing">
+              <X size={20} color={display.textPrimary} />
             </TouchableOpacity>
           </View>
 
           {loading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color="#0ea5e9" />
-              <Text style={styles.mutedText}>Loading your billing records...</Text>
+              <Text style={[styles.mutedText, { color: display.textSecondary }]}>Loading your billing records...</Text>
             </View>
           ) : error ? (
             <View style={styles.centered}>
@@ -239,9 +243,9 @@ export function BillingPaymentsModal({ visible, onClose }) {
                   <TouchableOpacity
                     key={f.key}
                     onPress={() => setFilter(f.key)}
-                    style={[styles.tabBtn, filter === f.key && styles.tabBtnActive]}
+                    style={[styles.tabBtn, { backgroundColor: display.subCardBg }, filter === f.key && styles.tabBtnActive]}
                   >
-                    <Text style={[styles.tabText, filter === f.key && styles.tabTextActive]}>{f.label}</Text>
+                    <Text style={[styles.tabText, { color: display.textSecondary }, filter === f.key && styles.tabTextActive]}>{f.label}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -250,22 +254,22 @@ export function BillingPaymentsModal({ visible, onClose }) {
                 data.transactions.length === 0 ? (
                   <EmptyState text="No transactions yet." />
                 ) : (
-                  <View style={styles.historyCard}>
+                  <View style={[styles.historyCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
                     {data.transactions.map((t, i) => (
-                      <View key={`${t.type}-${t.id}-${i}`} style={[styles.historyRow, i > 0 && styles.historyBorder]}>
-                        <View style={[styles.historyIcon, { backgroundColor: t.type === 'PAYMENT' ? '#dcfce7' : '#e0f2fe' }]}>
+                      <View key={`${t.type}-${t.id}-${i}`} style={[styles.historyRow, i > 0 && [styles.historyBorder, { borderTopColor: display.border }]]}>
+                        <View style={[styles.historyIcon, { backgroundColor: t.type === 'PAYMENT' ? (isDark ? '#064e3b' : '#dcfce7') : (isDark ? '#0c4a6e' : '#e0f2fe') }]}>
                           {t.type === 'PAYMENT'
-                            ? <CreditCard size={16} color="#15803d" />
-                            : <Receipt size={16} color="#0369a1" />}
+                            ? <CreditCard size={16} color={isDark ? '#4ade80' : '#15803d'} />
+                            : <Receipt size={16} color={isDark ? '#38bdf8' : '#0369a1'} />}
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.historyTitle} numberOfLines={1}>{t.description}</Text>
-                          <Text style={styles.historySub} numberOfLines={1}>
+                          <Text style={[styles.historyTitle, { color: display.textPrimary }]} numberOfLines={1}>{t.description}</Text>
+                          <Text style={[styles.historySub, { color: display.textSecondary }]} numberOfLines={1}>
                             {t.date || '—'} · {t.facilityName}
                           </Text>
                         </View>
                         <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                          <Text style={[styles.historyAmount, { color: t.amount < 0 ? '#15803d' : '#0f172a' }]}>
+                          <Text style={[styles.historyAmount, { color: t.amount < 0 ? '#15803d' : display.textPrimary }]}>
                             {t.amount < 0 ? `− ${formatPeso(Math.abs(t.amount))}` : formatPeso(t.amount)}
                           </Text>
                           {t.type === 'CHARGE' && <StatusBadge status={t.paymentStatus} />}
@@ -289,7 +293,7 @@ export function BillingPaymentsModal({ visible, onClose }) {
                 ))
               )}
 
-              <Text style={styles.footnote}>
+              <Text style={[styles.footnote, { color: display.textSecondary }]}>
                 Amounts are based on your clinic ledger. For billing concerns, please contact the facility directly.
               </Text>
             </ScrollView>
@@ -301,10 +305,11 @@ export function BillingPaymentsModal({ visible, onClose }) {
 }
 
 function EmptyState({ text }) {
+  const { display } = useTheme();
   return (
     <View style={styles.empty}>
-      <Receipt size={44} color="#cbd5e1" />
-      <Text style={styles.mutedText}>{text}</Text>
+      <Receipt size={44} color={display.placeholder} />
+      <Text style={[styles.mutedText, { color: display.textSecondary }]}>{text}</Text>
     </View>
   );
 }

@@ -41,6 +41,7 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { DatePickerField } from './auth/auth-ui';
+import { useTheme } from '../context/ThemeContext';
 import ProfileAPI from '../services/profileApi';
 import HealthRecordsAPI, {
   RECORD_CATEGORIES,
@@ -81,6 +82,7 @@ function showNotice(title, message) {
  * the patient's own health files in one place.
  */
 export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
+  const { display, isDark } = useTheme();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -399,20 +401,20 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   const renderRecord = record => {
     const Icon = record.kind === 'image' ? ImageIcon : FileText;
     return (
-      <TouchableOpacity key={record.id} style={styles.recordCard} onPress={() => openDetail(record)} activeOpacity={0.85}>
+      <TouchableOpacity key={record.id} style={[styles.recordCard, { backgroundColor: display.cardBg, borderColor: display.border }]} onPress={() => openDetail(record)} activeOpacity={0.85}>
         <View style={[styles.recordIcon, record.kind === 'image' ? styles.recordIconImage : styles.recordIconPdf]}>
           <Icon size={22} color={record.kind === 'image' ? '#0d9488' : '#e11d48'} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.recordTitle} numberOfLines={1}>{record.title}</Text>
+          <Text style={[styles.recordTitle, { color: display.textPrimary }]} numberOfLines={1}>{record.title}</Text>
           <View style={styles.recordMetaRow}>
-            <View style={styles.categoryBadge}>
-              <Text style={styles.categoryBadgeText}>{record.categoryLabel || categoryLabel(record.category)}</Text>
+            <View style={[styles.categoryBadge, isDark && { backgroundColor: display.subCardBg }]}>
+              <Text style={[styles.categoryBadgeText, isDark && { color: display.accent }]}>{record.categoryLabel || categoryLabel(record.category)}</Text>
             </View>
-            {!record.canDelete && <Lock size={13} color="#64748b" />}
-            {record.shareWithProviders && <Users size={13} color="#0284c7" />}
+            {!record.canDelete && <Lock size={13} color={display.textSecondary} />}
+            {record.shareWithProviders && <Users size={13} color={display.accent} />}
           </View>
-          <Text style={styles.recordSub} numberOfLines={1}>
+          <Text style={[styles.recordSub, { color: display.textSecondary }]} numberOfLines={1}>
             {formatDate(record.recordDate || record.createdAt)} · {formatBytes(record.sizeBytes)}
           </Text>
         </View>
@@ -425,7 +427,7 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       return (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#0ea5e9" />
-          <Text style={styles.mutedText}>Opening your vault...</Text>
+          <Text style={[styles.mutedText, { color: display.textSecondary }]}>Opening your vault...</Text>
         </View>
       );
     }
@@ -433,8 +435,8 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       return (
         <View style={styles.centered}>
           <AlertCircle size={40} color="#f87171" />
-          <Text style={styles.emptyTitle}>Couldn't load your records</Text>
-          <Text style={styles.emptySubtitle}>{loadError}</Text>
+          <Text style={[styles.emptyTitle, { color: display.textPrimary }]}>Couldn't load your records</Text>
+          <Text style={[styles.emptySubtitle, { color: display.textSecondary }]}>{loadError}</Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={() => load()}>
             <Text style={styles.primaryBtnText}>Try again</Text>
           </TouchableOpacity>
@@ -450,11 +452,11 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
       >
         {visibleRecords.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <FolderLock size={48} color="#cbd5e1" />
-            <Text style={styles.emptyTitle}>
+            <FolderLock size={48} color={isDark ? display.subCardBg : '#cbd5e1'} />
+            <Text style={[styles.emptyTitle, { color: display.textPrimary }]}>
               {records.length === 0 ? 'Your vault is empty' : 'No matching records'}
             </Text>
-            <Text style={styles.emptySubtitle}>
+            <Text style={[styles.emptySubtitle, { color: display.textSecondary }]}>
               {records.length === 0
                 ? 'Upload lab results, prescriptions, scans and other medical files to keep them in one place.'
                 : 'Try a different category or search term.'}
@@ -474,22 +476,22 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   };
 
   const renderSourceSheet = () => (
-    <View style={styles.sheet}>
+    <View style={[styles.sheet, { backgroundColor: display.cardBg }]}>
       <View style={styles.sheetHeader}>
-        <Text style={styles.sheetTitle}>Upload a record</Text>
-        <TouchableOpacity onPress={closeSheet} style={styles.closeBtn}><X size={18} color="#4b5563" /></TouchableOpacity>
+        <Text style={[styles.sheetTitle, { color: display.textPrimary }]}>Upload a record</Text>
+        <TouchableOpacity onPress={closeSheet} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]}><X size={18} color={display.textSecondary} /></TouchableOpacity>
       </View>
-      <Text style={styles.sheetHint}>PDF, JPG, PNG, HEIC or WEBP · up to 10 MB</Text>
+      <Text style={[styles.sheetHint, { color: display.textSecondary }]}>PDF, JPG, PNG, HEIC or WEBP · up to 10 MB</Text>
       {[
         { icon: FolderOpen, label: 'Browse files', desc: 'PDFs and images saved on your phone', run: pickDocument },
         { icon: Images, label: 'Choose from photos', desc: 'Pictures of results or prescriptions', run: pickPhoto },
         { icon: Camera, label: 'Take a photo', desc: 'Scan a paper record with your camera', run: takePhoto },
       ].map(option => (
-        <TouchableOpacity key={option.label} style={styles.sourceRow} onPress={() => chooseSource(option.run)}>
-          <View style={styles.sourceIcon}><option.icon size={20} color="#0284c7" /></View>
+        <TouchableOpacity key={option.label} style={[styles.sourceRow, { borderTopColor: display.border }]} onPress={() => chooseSource(option.run)}>
+          <View style={[styles.sourceIcon, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]}><option.icon size={20} color={display.accent} /></View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.sourceLabel}>{option.label}</Text>
-            <Text style={styles.sourceDesc}>{option.desc}</Text>
+            <Text style={[styles.sourceLabel, { color: display.textPrimary }]}>{option.label}</Text>
+            <Text style={[styles.sourceDesc, { color: display.textSecondary }]}>{option.desc}</Text>
           </View>
         </TouchableOpacity>
       ))}
@@ -497,40 +499,40 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   );
 
   const renderFormSheet = () => (
-    <View style={[styles.sheet, styles.sheetTall]}>
+    <View style={[styles.sheet, styles.sheetTall, { backgroundColor: display.cardBg }]}>
       <View style={styles.sheetHeader}>
         {editing ? (
-          <TouchableOpacity onPress={() => { setSheet('detail'); setEditing(null); }} style={styles.closeBtn}>
-            <ChevronLeft size={18} color="#4b5563" />
+          <TouchableOpacity onPress={() => { setSheet('detail'); setEditing(null); }} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]}>
+            <ChevronLeft size={18} color={display.textSecondary} />
           </TouchableOpacity>
         ) : null}
-        <Text style={[styles.sheetTitle, { flex: 1 }]}>{editing ? 'Edit record' : 'Record details'}</Text>
-        <TouchableOpacity onPress={closeSheet} style={styles.closeBtn} disabled={saving}><X size={18} color="#4b5563" /></TouchableOpacity>
+        <Text style={[styles.sheetTitle, { flex: 1, color: display.textPrimary }]}>{editing ? 'Edit record' : 'Record details'}</Text>
+        <TouchableOpacity onPress={closeSheet} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]} disabled={saving}><X size={18} color={display.textSecondary} /></TouchableOpacity>
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 12 }}>
         {pickedFile && (
-          <View style={styles.fileRow}>
+          <View style={[styles.fileRow, { backgroundColor: display.subCardBg }]}>
             {String(pickedFile.mimeType || '').startsWith('image/')
               ? <Image source={{ uri: pickedFile.uri }} style={styles.fileThumb} />
               : <View style={[styles.recordIcon, styles.recordIconPdf]}><FileText size={22} color="#e11d48" /></View>}
             <View style={{ flex: 1 }}>
-              <Text style={styles.fileName} numberOfLines={1}>{pickedFile.name}</Text>
-              {!!pickedFile.size && <Text style={styles.recordSub}>{formatBytes(pickedFile.size)}</Text>}
+              <Text style={[styles.fileName, { color: display.textPrimary }]} numberOfLines={1}>{pickedFile.name}</Text>
+              {!!pickedFile.size && <Text style={[styles.recordSub, { color: display.textSecondary }]}>{formatBytes(pickedFile.size)}</Text>}
             </View>
           </View>
         )}
 
-        <Text style={styles.fieldLabel}>Name <Text style={styles.required}>*</Text></Text>
+        <Text style={[styles.fieldLabel, { color: display.textPrimary }]}>Name <Text style={styles.required}>*</Text></Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: display.subCardBg, borderColor: display.border, color: display.textPrimary }]}
           value={form.title}
           maxLength={120}
           placeholder="e.g. CBC Result – November"
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor={display.placeholder}
           onChangeText={title => setForm(f => ({ ...f, title }))}
         />
 
-        <Text style={styles.fieldLabel}>Category <Text style={styles.required}>*</Text></Text>
+        <Text style={[styles.fieldLabel, { color: display.textPrimary }]}>Category <Text style={styles.required}>*</Text></Text>
         <View style={styles.chipWrap}>
           {RECORD_CATEGORIES.map(c => {
             const active = form.category === c.id;
@@ -538,9 +540,9 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
               <TouchableOpacity
                 key={c.id}
                 onPress={() => setForm(f => ({ ...f, category: c.id }))}
-                style={[styles.chip, active && styles.chipActive]}
+                style={[styles.chip, { backgroundColor: display.subCardBg, borderColor: display.border }, active && styles.chipActive]}
               >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{c.label}</Text>
+                <Text style={[styles.chipText, { color: display.textSecondary }, active && styles.chipTextActive]}>{c.label}</Text>
               </TouchableOpacity>
             );
           })}
@@ -560,22 +562,22 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.fieldLabel}>Notes (optional)</Text>
+        <Text style={[styles.fieldLabel, { color: display.textPrimary }]}>Notes (optional)</Text>
         <TextInput
-          style={[styles.input, styles.inputMultiline]}
+          style={[styles.input, styles.inputMultiline, { backgroundColor: display.subCardBg, borderColor: display.border, color: display.textPrimary }]}
           value={form.notes}
           maxLength={500}
           multiline
           placeholder="Doctor, clinic, or anything you want to remember"
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor={display.placeholder}
           onChangeText={notes => setForm(f => ({ ...f, notes }))}
         />
 
-        <View style={styles.shareRow}>
+        <View style={[styles.shareRow, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]}>
           <Users size={18} color="#0284c7" />
           <View style={{ flex: 1 }}>
-            <Text style={styles.shareTitle}>Share with my care providers</Text>
-            <Text style={styles.sourceDesc}>
+            <Text style={[styles.shareTitle, { color: display.textPrimary }]}>Share with my care providers</Text>
+            <Text style={[styles.sourceDesc, { color: display.textSecondary }]}>
               Off by default. When on, your clinic can view and download this file with its name, category, date and notes.
             </Text>
             {form.shareWithProviders && sharingPaused && (
@@ -609,14 +611,14 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   const renderDetailSheet = () => {
     if (!selected) return null;
     return (
-      <View style={[styles.sheet, styles.sheetTall]}>
+      <View style={[styles.sheet, styles.sheetTall, { backgroundColor: display.cardBg }]}>
         <View style={styles.sheetHeader}>
-          <Text style={[styles.sheetTitle, { flex: 1 }]} numberOfLines={2}>{selected.title}</Text>
-          <TouchableOpacity onPress={closeSheet} style={styles.closeBtn}><X size={18} color="#4b5563" /></TouchableOpacity>
+          <Text style={[styles.sheetTitle, { flex: 1, color: display.textPrimary }]} numberOfLines={2}>{selected.title}</Text>
+          <TouchableOpacity onPress={closeSheet} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]}><X size={18} color={display.textSecondary} /></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ paddingBottom: 12 }}>
           {selected.kind === 'image' && (
-            <View style={styles.previewBox}>
+            <View style={[styles.previewBox, { backgroundColor: display.subCardBg }]}>
               {previewUrl
                 ? <Image source={{ uri: previewUrl }} style={styles.previewImage} resizeMode="contain" />
                 : <ActivityIndicator color="#0ea5e9" />}
@@ -629,27 +631,27 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
             ['File', `${selected.fileName} · ${formatBytes(selected.sizeBytes)}`],
             ['Added by', selected.source === 'facility' ? 'Your clinic' : 'You'],
           ].map(([label, value]) => (
-            <View key={label} style={styles.detailRow}>
-              <Text style={styles.detailLabel}>{label}</Text>
-              <Text style={styles.detailValue}>{value}</Text>
+            <View key={label} style={[styles.detailRow, { borderBottomColor: display.border }]}>
+              <Text style={[styles.detailLabel, { color: display.textSecondary }]}>{label}</Text>
+              <Text style={[styles.detailValue, { color: display.textPrimary }]}>{value}</Text>
             </View>
           ))}
           {selected.source === 'facility' ? (
-            <View style={styles.shareRow}>
+            <View style={[styles.shareRow, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]}>
               <ShieldCheck size={18} color="#0284c7" />
               <View style={{ flex: 1 }}>
-                <Text style={styles.shareTitle}>Shared by your clinic</Text>
-                <Text style={styles.sourceDesc}>
+                <Text style={[styles.shareTitle, { color: display.textPrimary }]}>Shared by your clinic</Text>
+                <Text style={[styles.sourceDesc, { color: display.textSecondary }]}>
                   Your healthcare provider uploaded and shared this record with your mobile Health Record Vault.
                 </Text>
               </View>
             </View>
           ) : (
-            <View style={[styles.shareRow, selected.shareWithProviders && sharingPaused && styles.shareRowPaused]}>
+            <View style={[styles.shareRow, selected.shareWithProviders && sharingPaused && styles.shareRowPaused, { backgroundColor: isDark ? display.subCardBg : (selected.shareWithProviders && sharingPaused ? '#fffbeb' : '#f0f9ff') }]}>
               <Users size={18} color={selected.shareWithProviders && sharingPaused ? '#b45309' : '#0284c7'} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.shareTitle}>Share with my care providers</Text>
-                <Text style={styles.sourceDesc}>{shareStatusText(selected)}</Text>
+                <Text style={[styles.shareTitle, { color: display.textPrimary }]}>Share with my care providers</Text>
+                <Text style={[styles.sourceDesc, { color: display.textSecondary }]}>{shareStatusText(selected)}</Text>
               </View>
               {sharingBusy
                 ? <ActivityIndicator size="small" color="#0284c7" />
@@ -666,41 +668,41 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
             </View>
           )}
           {!!selected.notes && (
-            <View style={styles.notesBox}>
-              <Text style={styles.detailLabel}>Notes</Text>
-              <Text style={styles.notesText}>{selected.notes}</Text>
+            <View style={[styles.notesBox, { backgroundColor: display.subCardBg }]}>
+              <Text style={[styles.detailLabel, { color: display.textSecondary }]}>Notes</Text>
+              <Text style={[styles.notesText, { color: display.textPrimary }]}>{selected.notes}</Text>
             </View>
           )}
           {!selected.canDelete && (
             <View style={styles.lockNote}>
-              <Lock size={14} color="#64748b" />
-              <Text style={styles.lockNoteText}>Issued by your clinic — this record can't be deleted from the app.</Text>
+              <Lock size={14} color={display.textSecondary} />
+              <Text style={[styles.lockNoteText, { color: display.textSecondary }]}>Issued by your clinic — this record can't be deleted from the app.</Text>
             </View>
           )}
         </ScrollView>
 
         <View style={styles.actionGrid}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => openFile('view')} disabled={!!busyAction}>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]} onPress={() => openFile('view')} disabled={!!busyAction}>
             {busyAction === 'view' ? <ActivityIndicator size="small" color="#0284c7" /> : <Eye size={18} color="#0284c7" />}
-            <Text style={styles.actionText}>Open</Text>
+            <Text style={[styles.actionText, { color: display.accent }]}>Open</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => openFile('download')} disabled={!!busyAction}>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]} onPress={() => openFile('download')} disabled={!!busyAction}>
             {busyAction === 'download' ? <ActivityIndicator size="small" color="#0284c7" /> : <Download size={18} color="#0284c7" />}
-            <Text style={styles.actionText}>Download</Text>
+            <Text style={[styles.actionText, { color: display.accent }]}>Download</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => openEdit(selected)} disabled={!!busyAction}>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]} onPress={() => openEdit(selected)} disabled={!!busyAction}>
             <Pencil size={18} color="#0284c7" />
-            <Text style={styles.actionText}>Edit</Text>
+            <Text style={[styles.actionText, { color: display.accent }]}>Edit</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionBtn, styles.actionDanger, !selected.canDelete && styles.actionDisabled]}
+            style={[styles.actionBtn, styles.actionDanger, !selected.canDelete && styles.actionDisabled, isDark && !selected.canDelete && { backgroundColor: display.border }]}
             onPress={confirmDelete}
             disabled={!!busyAction}
           >
             {busyAction === 'delete'
               ? <ActivityIndicator size="small" color="#dc2626" />
-              : (selected.canDelete ? <Trash2 size={18} color="#dc2626" /> : <Lock size={18} color="#94a3b8" />)}
-            <Text style={[styles.actionText, { color: selected.canDelete ? '#dc2626' : '#94a3b8' }]}>Delete</Text>
+              : (selected.canDelete ? <Trash2 size={18} color="#dc2626" /> : <Lock size={18} color={display.textSecondary} />)}
+            <Text style={[styles.actionText, { color: selected.canDelete ? '#dc2626' : display.textSecondary }]}>Delete</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -711,14 +713,14 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
     if (!selected) return null;
     const deleting = busyAction === 'delete';
     return (
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { backgroundColor: display.cardBg }]}>
         <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Delete this record?</Text>
-          <TouchableOpacity onPress={() => { setDeleteError(''); setSheet('detail'); }} style={styles.closeBtn} disabled={deleting}>
-            <X size={18} color="#4b5563" />
+          <Text style={[styles.sheetTitle, { color: display.textPrimary }]}>Delete this record?</Text>
+          <TouchableOpacity onPress={() => { setDeleteError(''); setSheet('detail'); }} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]} disabled={deleting}>
+            <X size={18} color={display.textSecondary} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.confirmBody}>
+        <Text style={[styles.confirmBody, { color: display.textSecondary }]}>
           "{selected.title}" will be permanently removed from your vault. This cannot be undone.
         </Text>
         {!!deleteError && (
@@ -729,11 +731,11 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
         )}
         <View style={styles.confirmActions}>
           <TouchableOpacity
-            style={[styles.confirmBtn, styles.confirmCancelBtn]}
+            style={[styles.confirmBtn, styles.confirmCancelBtn, { backgroundColor: display.subCardBg }]}
             onPress={() => { setDeleteError(''); setSheet('detail'); }}
             disabled={deleting}
           >
-            <Text style={styles.confirmCancelText}>Cancel</Text>
+            <Text style={[styles.confirmCancelText, { color: display.textPrimary }]}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.confirmBtn, styles.confirmDeleteBtn, deleting && { opacity: 0.7 }]}
@@ -751,19 +753,19 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={sheet ? closeSheet : onClose}>
       <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { backgroundColor: display.bg }]}>
           <View style={styles.header}>
             <View style={styles.headerTitleGroup}>
               <FolderLock size={22} color="#0ea5e9" />
-              <Text style={styles.headerTitle}>Health Record Vault</Text>
+              <Text style={[styles.headerTitle, { color: display.textPrimary }]}>Health Record Vault</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}><X size={20} color="#4b5563" /></TouchableOpacity>
+            <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]}><X size={20} color={display.textSecondary} /></TouchableOpacity>
           </View>
 
-          <View style={styles.summaryRow}>
+          <View style={[styles.summaryRow, { backgroundColor: isDark ? display.cardBg : '#f0f9ff', borderColor: isDark ? display.border : '#e0f2fe' }]}>
             <View>
-              <Text style={styles.summaryCount}>{records.length} {records.length === 1 ? 'file' : 'files'}</Text>
-              <Text style={styles.mutedSmall}>
+              <Text style={[styles.summaryCount, { color: display.textPrimary }]}>{records.length} {records.length === 1 ? 'file' : 'files'}</Text>
+              <Text style={[styles.mutedSmall, { color: display.textSecondary }]}>
                 {formatBytes(totalBytes)} stored · {sharedCount === 0
                   ? 'private to you'
                   : sharingPaused ? 'clinic sharing off' : `${sharedCount} shared with your clinic`}
@@ -800,20 +802,20 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
           )}
 
           <View style={styles.searchRow}>
-            <View style={styles.searchBox}>
-              <Search size={16} color="#94a3b8" />
+            <View style={[styles.searchBox, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+              <Search size={16} color={display.textSecondary} />
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, { color: display.textPrimary }]}
                 value={query}
                 onChangeText={setQuery}
                 placeholder="Search records"
-                placeholderTextColor="#94a3b8"
+                placeholderTextColor={display.placeholder}
                 returnKeyType="search"
               />
-              {!!query && <TouchableOpacity onPress={() => setQuery('')}><X size={16} color="#94a3b8" /></TouchableOpacity>}
+              {!!query && <TouchableOpacity onPress={() => setQuery('')}><X size={16} color={display.textSecondary} /></TouchableOpacity>}
             </View>
             <TouchableOpacity
-              style={styles.sortBtn}
+              style={[styles.sortBtn, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}
               onPress={() => setSort(s => SORTS[(SORTS.findIndex(x => x.id === s) + 1) % SORTS.length].id)}
             >
               <ArrowDownUp size={14} color="#0284c7" />
@@ -827,8 +829,8 @@ export function HealthRecordVaultModal({ visible, onClose, onChanged }) {
               const count = counts[c.id] || 0;
               if (c.id !== 'all' && count === 0 && !active) return null;
               return (
-                <TouchableOpacity key={c.id} onPress={() => setCategory(c.id)} style={[styles.chip, active && styles.chipActive]}>
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{c.label} ({count})</Text>
+                <TouchableOpacity key={c.id} onPress={() => setCategory(c.id)} style={[styles.chip, { backgroundColor: display.subCardBg, borderColor: display.border }, active && styles.chipActive]}>
+                  <Text style={[styles.chipText, { color: display.textSecondary }, active && styles.chipTextActive]}>{c.label} ({count})</Text>
                 </TouchableOpacity>
               );
             })}

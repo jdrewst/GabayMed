@@ -24,6 +24,7 @@ import ProfileAPI, {
   getAppTranslations,
   getDisplayConfig,
 } from '../services/profileApi';
+import { useTheme } from '../context/ThemeContext';
 
 const SUFFIXES = ['Jr.', 'Sr.', 'II', 'III', 'IV', 'V'];
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
@@ -37,6 +38,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * or from the Care Passport card inside Settings.
  */
 export function ProfilePage({ onBack }) {
+  const { display, isDark, t, fs } = useTheme();
   const [profileData, setProfileData] = useState(() => ProfileAPI.getCachedProfile());
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -445,23 +447,26 @@ export function ProfilePage({ onBack }) {
   };
 
   const activeAvatarPreset = resolveAvatarPreset(profileData?.avatar, profileData?.gender);
+  const infoItemTheme = [...infoItemTheme, isDark && { backgroundColor: display.subCardBg, borderColor: display.border }];
+  const infoValueTheme = [infoValueTheme, { color: display.textPrimary }];
+  const infoLabelTheme = [infoLabelTheme, { color: display.textSecondary }];
 
   return (
-    <View style={styles.profileScreen}>
+    <View style={[styles.profileScreen, { backgroundColor: display.bg }]}>
       {/* Top Bar: Back button on left, My Profile title on top right */}
-      <View style={styles.topNav}>
-        <TouchableOpacity onPress={onBack} style={styles.navPillBtn}>
-          <ArrowLeft size={18} color="#1e293b" />
-          <Text style={styles.navPillText}>Back</Text>
+      <View style={[styles.topNav, { backgroundColor: display.cardBg, borderBottomColor: display.border }]}>
+        <TouchableOpacity onPress={onBack} style={[styles.navPillBtn, { backgroundColor: display.subCardBg }]}>
+          <ArrowLeft size={18} color={display.textPrimary} />
+          <Text style={[styles.navPillText, { color: display.textPrimary }]}>Back</Text>
         </TouchableOpacity>
 
-        <Text style={styles.topRightProfileTitle}>My Profile</Text>
+        <Text style={[styles.topRightProfileTitle, { color: display.accent }]}>My Profile</Text>
       </View>
 
       {!profileData ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0ea5e9" />
-          <Text style={styles.loadingText}>Loading your profile...</Text>
+          <Text style={[styles.loadingText, { color: display.textSecondary }]}>Loading your profile...</Text>
         </View>
       ) : (
         <ScrollView
@@ -479,7 +484,7 @@ export function ProfilePage({ onBack }) {
           }
         >
           {/* Hero Header: Avatar on top + Full Name below */}
-          <View style={styles.heroCard}>
+          <View style={[styles.heroCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
             <View style={styles.avatarBlobStage}>
               <PatientAvatar
                 avatar={profileData.avatar}
@@ -488,27 +493,27 @@ export function ProfilePage({ onBack }) {
                 showBlob
               />
               <TouchableOpacity
-                style={styles.paletteFab}
+                style={[styles.paletteFab, { backgroundColor: display.cardBg, borderColor: display.border }]}
                 onPress={() => setShowAvatarModal(true)}
                 accessibilityLabel="Change profile photo or character"
               >
-                <Camera size={17} color="#0284c7" />
+                <Camera size={17} color={display.accent} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.heroBigName}>{profileData.name}</Text>
+            <Text style={[styles.heroBigName, { color: display.textPrimary }]}>{profileData.name}</Text>
           </View>
 
           {/* BOX 1: Personal & Demographics — Pure text cells (no field icons) */}
-          <View style={styles.bentoCard}>
+          <View style={[styles.bentoCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
             <View style={styles.bentoHeader}>
               <View style={styles.bentoTitleRow}>
-                <View style={[styles.bentoIconBadge, { backgroundColor: '#E0F2FE' }]}>
+                <View style={[styles.bentoIconBadge, { backgroundColor: isDark ? '#1e3a8a' : '#E0F2FE' }]}>
                   <User size={18} color="#0284C7" />
                 </View>
                 <View>
-                  <Text style={styles.bentoKicker}>about you</Text>
-                  <Text style={styles.bentoTitle}>Personal & Demographics</Text>
+                  <Text style={[styles.bentoKicker, { color: display.textSecondary }]}>about you</Text>
+                  <Text style={[styles.bentoTitle, { color: display.textPrimary }]}>Personal & Demographics</Text>
                 </View>
               </View>
               {!editingPersonal && (
@@ -523,9 +528,9 @@ export function ProfilePage({ onBack }) {
             <View style={styles.infoGrid}>
               {/* Row 1: First Name & Middle Name */}
               <View style={styles.twoColRow}>
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>
+                    <Text style={infoLabelTheme}>
                       First Name{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                     </Text>
                     {editingPersonal ? (
@@ -538,14 +543,14 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.firstName || 'Not set'}</Text>
+                      <Text style={infoValueTheme}>{profileData.firstName || 'Not set'}</Text>
                     )}
                   </View>
                 </View>
 
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>Middle Name</Text>
+                    <Text style={infoLabelTheme}>Middle Name</Text>
                     {editingPersonal ? (
                       <TextInput
                         style={styles.cellInput}
@@ -556,7 +561,7 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.middleName || '—'}</Text>
+                      <Text style={infoValueTheme}>{profileData.middleName || '—'}</Text>
                     )}
                   </View>
                 </View>
@@ -564,9 +569,9 @@ export function ProfilePage({ onBack }) {
 
               {/* Row 2: Last Name & Suffix / Extension */}
               <View style={styles.twoColRow}>
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>
+                    <Text style={infoLabelTheme}>
                       Last Name{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                     </Text>
                     {editingPersonal ? (
@@ -579,14 +584,14 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.lastName || 'Not set'}</Text>
+                      <Text style={infoValueTheme}>{profileData.lastName || 'Not set'}</Text>
                     )}
                   </View>
                 </View>
 
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>Suffix / Extension</Text>
+                    <Text style={infoLabelTheme}>Suffix / Extension</Text>
                     {editingPersonal ? (
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 4 }}>
                         {['', ...SUFFIXES].map(sfx => {
@@ -605,7 +610,7 @@ export function ProfilePage({ onBack }) {
                         })}
                       </ScrollView>
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.nameSuffix || 'None'}</Text>
+                      <Text style={infoValueTheme}>{profileData.nameSuffix || 'None'}</Text>
                     )}
                   </View>
                 </View>
@@ -613,7 +618,7 @@ export function ProfilePage({ onBack }) {
 
               {/* Row 3: Birthdate & Gender (No icon on field) */}
               <View style={styles.twoColRow}>
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
                     {editingPersonal ? (
                       <DatePickerField
@@ -625,8 +630,8 @@ export function ProfilePage({ onBack }) {
                       />
                     ) : (
                       <>
-                        <Text style={styles.infoLabel}>Birthdate & Age</Text>
-                        <Text style={styles.infoValue}>
+                        <Text style={infoLabelTheme}>Birthdate & Age</Text>
+                        <Text style={infoValueTheme}>
                           {profileData.birthdate}
                           {profileData.age !== 'N/A' ? ` (${profileData.age} yrs)` : ''}
                         </Text>
@@ -635,9 +640,9 @@ export function ProfilePage({ onBack }) {
                   </View>
                 </View>
 
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>
+                    <Text style={infoLabelTheme}>
                       Gender{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                     </Text>
                     {editingPersonal ? (
@@ -658,16 +663,16 @@ export function ProfilePage({ onBack }) {
                         })}
                       </View>
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.gender}</Text>
+                      <Text style={infoValueTheme}>{profileData.gender}</Text>
                     )}
                   </View>
                 </View>
               </View>
 
               {/* Row 4: Mobile Number (No icon on field) */}
-              <View style={[styles.infoItem, editingPersonal && styles.infoItemEditable]}>
+              <View style={[...infoItemTheme, editingPersonal && styles.infoItemEditable]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.infoLabel}>
+                  <Text style={infoLabelTheme}>
                     Mobile Number{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                   </Text>
                   {editingPersonal ? (
@@ -685,15 +690,15 @@ export function ProfilePage({ onBack }) {
                       />
                     </View>
                   ) : (
-                    <Text style={styles.infoValue}>{profileData.phone}</Text>
+                    <Text style={infoValueTheme}>{profileData.phone}</Text>
                   )}
                 </View>
               </View>
 
               {/* Row 5: Registered Email (Editable with OTP Verification Popup when changed, no icon) */}
-              <View style={[styles.infoItem, editingPersonal && styles.infoItemEditable]}>
+              <View style={[...infoItemTheme, editingPersonal && styles.infoItemEditable]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.infoLabel}>
+                  <Text style={infoLabelTheme}>
                     Registered Email{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                   </Text>
                   {editingPersonal ? (
@@ -714,16 +719,16 @@ export function ProfilePage({ onBack }) {
                       </Text>
                     </>
                   ) : (
-                    <Text style={styles.infoValue}>{profileData.email}</Text>
+                    <Text style={infoValueTheme}>{profileData.email}</Text>
                   )}
                 </View>
               </View>
 
               {/* Row 6: Street Address & Barangay */}
               <View style={styles.twoColRow}>
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>Street Address</Text>
+                    <Text style={infoLabelTheme}>Street Address</Text>
                     {editingPersonal ? (
                       <TextInput
                         style={styles.cellInput}
@@ -734,14 +739,14 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.streetAddress || '—'}</Text>
+                      <Text style={infoValueTheme}>{profileData.streetAddress || '—'}</Text>
                     )}
                   </View>
                 </View>
 
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>Barangay</Text>
+                    <Text style={infoLabelTheme}>Barangay</Text>
                     {editingPersonal ? (
                       <TextInput
                         style={styles.cellInput}
@@ -752,7 +757,7 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.barangay || '—'}</Text>
+                      <Text style={infoValueTheme}>{profileData.barangay || '—'}</Text>
                     )}
                   </View>
                 </View>
@@ -760,9 +765,9 @@ export function ProfilePage({ onBack }) {
 
               {/* Row 7: City / Municipality & Province (Separated from ZIP Code) */}
               <View style={styles.twoColRow}>
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>
+                    <Text style={infoLabelTheme}>
                       City / Municipality{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                     </Text>
                     {editingPersonal ? (
@@ -775,14 +780,14 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.cityMunicipality || '—'}</Text>
+                      <Text style={infoValueTheme}>{profileData.cityMunicipality || '—'}</Text>
                     )}
                   </View>
                 </View>
 
-                <View style={[styles.infoItem, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
+                <View style={[...infoItemTheme, { flex: 1 }, editingPersonal && styles.infoItemEditable]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.infoLabel}>
+                    <Text style={infoLabelTheme}>
                       Province{editingPersonal && <Text style={styles.reqStar}> *</Text>}
                     </Text>
                     {editingPersonal ? (
@@ -795,16 +800,16 @@ export function ProfilePage({ onBack }) {
                         multiline
                       />
                     ) : (
-                      <Text style={styles.infoValue}>{profileData.province || '—'}</Text>
+                      <Text style={infoValueTheme}>{profileData.province || '—'}</Text>
                     )}
                   </View>
                 </View>
               </View>
 
               {/* Row 8: ZIP Code (Separate box) */}
-              <View style={[styles.infoItem, editingPersonal && styles.infoItemEditable]}>
+              <View style={[...infoItemTheme, editingPersonal && styles.infoItemEditable]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.infoLabel}>ZIP Code</Text>
+                  <Text style={infoLabelTheme}>ZIP Code</Text>
                   {editingPersonal ? (
                     <TextInput
                       style={styles.cellInput}
@@ -816,7 +821,7 @@ export function ProfilePage({ onBack }) {
                       placeholderTextColor="#94A3B8"
                     />
                   ) : (
-                    <Text style={styles.infoValue}>{profileData.zipCode || '—'}</Text>
+                    <Text style={infoValueTheme}>{profileData.zipCode || '—'}</Text>
                   )}
                 </View>
               </View>
@@ -844,15 +849,15 @@ export function ProfilePage({ onBack }) {
           </View>
 
           {/* BOX 2: Medical Records — Clean View Mode & Per-Item Fields on Update */}
-          <View style={styles.bentoCard}>
+          <View style={[styles.bentoCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
             <View style={styles.bentoHeader}>
               <View style={styles.bentoTitleRow}>
-                <View style={[styles.bentoIconBadge, { backgroundColor: '#FEE2E2' }]}>
+                <View style={[styles.bentoIconBadge, { backgroundColor: isDark ? '#7f1d1d' : '#FEE2E2' }]}>
                   <Heart size={18} color="#EF4444" />
                 </View>
                 <View>
-                  <Text style={styles.bentoKicker}>health snapshot</Text>
-                  <Text style={styles.bentoTitle}>Medical Records</Text>
+                  <Text style={[styles.bentoKicker, { color: display.textSecondary }]}>health snapshot</Text>
+                  <Text style={[styles.bentoTitle, { color: display.textPrimary }]}>Medical Records</Text>
                 </View>
               </View>
               {!editingMedical && (
@@ -865,12 +870,12 @@ export function ProfilePage({ onBack }) {
             {editingMedical && <ErrorBanner message={boxError} />}
 
             {/* Blood Type Cell */}
-            <View style={[styles.infoItem, { marginBottom: 12 }, editingMedical && styles.infoItemEditable]}>
+            <View style={[...infoItemTheme, { marginBottom: 12 }, editingMedical && styles.infoItemEditable]}>
               <View style={[styles.infoIconCircle, { backgroundColor: '#FEE2E2' }]}>
                 <Droplets size={16} color="#EF4444" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.infoLabel}>Blood Type</Text>
+                <Text style={infoLabelTheme}>Blood Type</Text>
                 {editingMedical ? (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                     {BLOOD_TYPES.map(bt => {
@@ -889,17 +894,17 @@ export function ProfilePage({ onBack }) {
                     })}
                   </View>
                 ) : (
-                  <Text style={styles.infoValue}>{profileData.bloodType}</Text>
+                  <Text style={infoValueTheme}>{profileData.bloodType}</Text>
                 )}
               </View>
             </View>
 
             {/* Known Allergies Sub-Card */}
-            <View style={[styles.subCard, editingMedical && styles.infoItemEditable]}>
+            <View style={[styles.subCard, isDark && { backgroundColor: display.subCardBg, borderColor: display.border }, editingMedical && styles.infoItemEditable]}>
               <View style={styles.subCardHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <AlertTriangle size={15} color="#F59E0B" />
-                  <Text style={styles.subCardTitle}>Known Allergies</Text>
+                  <Text style={[styles.subCardTitle, { color: display.textPrimary }]}>Known Allergies</Text>
                 </View>
                 {editingMedical && (
                   <TouchableOpacity
@@ -917,11 +922,11 @@ export function ProfilePage({ onBack }) {
                   {(draft?.allergiesList || ['']).map((item, index) => (
                     <View key={`allergy-${index}`} style={styles.perItemInputRow}>
                       <TextInput
-                        style={styles.perItemInput}
+                        style={[styles.perItemInput, { color: display.textPrimary }]}
                         value={item}
                         onChangeText={text => updateListField('allergiesList', index, text)}
                         placeholder={`Allergy #${index + 1} (e.g. Penicillin, Peanuts)`}
-                        placeholderTextColor="#94A3B8"
+                        placeholderTextColor={display.placeholder}
                         multiline
                       />
                       <TouchableOpacity
@@ -943,16 +948,16 @@ export function ProfilePage({ onBack }) {
                   ))}
                 </View>
               ) : (
-                <Text style={styles.emptyTagText}>No known allergies recorded.</Text>
+                <Text style={[styles.emptyTagText, { color: display.textSecondary }]}>No known allergies recorded.</Text>
               )}
             </View>
 
             {/* Medical History & Conditions Sub-Card */}
-            <View style={[styles.subCard, { marginTop: 12 }, editingMedical && styles.infoItemEditable]}>
+            <View style={[styles.subCard, { marginTop: 12 }, isDark && { backgroundColor: display.subCardBg, borderColor: display.border }, editingMedical && styles.infoItemEditable]}>
               <View style={styles.subCardHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Stethoscope size={15} color="#0284C7" />
-                  <Text style={styles.subCardTitle}>Medical History & Conditions</Text>
+                  <Text style={[styles.subCardTitle, { color: display.textPrimary }]}>Medical History & Conditions</Text>
                 </View>
                 {editingMedical && (
                   <TouchableOpacity
@@ -1196,10 +1201,18 @@ export function SettingsPage({
       : true
   );
 
-  // Application language & display preferences
-  const [language, setLanguage] = useState(cachedPerms?.language || 'en');
-  const [themeMode, setThemeMode] = useState(cachedPerms?.themeMode || 'light');
-  const [textSize, setTextSize] = useState(cachedPerms?.textSize || 'medium');
+  const {
+    display,
+    themeMode,
+    setThemeMode: updateThemeMode,
+    language,
+    setLanguage: updateLanguage,
+    textSize,
+    setTextSize: updateTextSize,
+    t,
+    fs,
+  } = useTheme();
+
   const [highContrast, setHighContrast] = useState(
     cachedPerms ? !!cachedPerms.highContrast : false
   );
@@ -1251,9 +1264,6 @@ export function SettingsPage({
       if (typeof perms.notifyInsurance === 'boolean') setNotifyInsurance(perms.notifyInsurance);
       if (typeof perms.notifyMessages === 'boolean') setNotifyMessages(perms.notifyMessages);
       if (typeof perms.notifyPromos === 'boolean') setNotifyPromos(perms.notifyPromos);
-      if (perms.language) setLanguage(perms.language);
-      if (perms.themeMode) setThemeMode(perms.themeMode);
-      if (perms.textSize) setTextSize(perms.textSize);
       if (typeof perms.highContrast === 'boolean') setHighContrast(perms.highContrast);
     };
 
@@ -1345,18 +1355,23 @@ export function SettingsPage({
   };
 
   const handleSelectLanguage = async nextLang => {
-    setLanguage(nextLang);
-    await ProfileAPI.setPermissions({ language: nextLang });
+    if (updateLanguage) {
+      await updateLanguage(nextLang);
+    } else {
+      await ProfileAPI.setPermissions({ language: nextLang });
+    }
   };
 
   const handleSelectThemeMode = async nextTheme => {
-    setThemeMode(nextTheme);
-    await ProfileAPI.setPermissions({ themeMode: nextTheme });
+    await updateThemeMode(nextTheme);
   };
 
   const handleSelectTextSize = async nextSize => {
-    setTextSize(nextSize);
-    await ProfileAPI.setPermissions({ textSize: nextSize });
+    if (updateTextSize) {
+      await updateTextSize(nextSize);
+    } else {
+      await ProfileAPI.setPermissions({ textSize: nextSize });
+    }
   };
 
   const handleToggleHighContrast = async nextVal => {
@@ -1482,10 +1497,6 @@ export function SettingsPage({
       setDeleteOtpVerifying(false);
     }
   };
-
-  const t = getAppTranslations(language);
-  const display = getDisplayConfig({ themeMode, textSize, highContrast });
-  const fs = size => Math.round(size * display.fontScale * 10) / 10;
 
   const menuItems = [
     ...(onOpenRecordVault

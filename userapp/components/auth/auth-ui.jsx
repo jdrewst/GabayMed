@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import { Eye, EyeOff, AlertCircle, ChevronLeft, ChevronRight, Check, Calendar } from 'lucide-react-native';
+import { useTheme } from '../../context/ThemeContext';
 
 // Shared look for the patient login, registration and onboarding screens.
 // Colours match the GabayMed website login (client/src/pages/login.jsx).
@@ -59,9 +60,10 @@ export function WaveHeader({ height = 220 }) {
 }
 
 export function FieldLabel({ label, required = false, style }) {
+  const { display } = useTheme();
   if (!label) return null;
   return (
-    <Text style={[styles.label, style]}>
+    <Text style={[styles.label, { color: display.textSecondary }, style]}>
       {label}
       {required && <Text style={styles.asterisk}> *</Text>}
     </Text>
@@ -88,30 +90,37 @@ export function PrimaryButton({ title, onPress, loading = false, disabled = fals
 }
 
 export function OutlineButton({ title, onPress, disabled = false, style }) {
+  const { display, isDark } = useTheme();
   return (
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.7}
       accessibilityRole="button"
-      style={[styles.outline, disabled && { opacity: 0.6 }, style]}
+      style={[
+        styles.outline,
+        { backgroundColor: isDark ? display.subCardBg : '#fff', borderColor: display.border },
+        disabled && { opacity: 0.6 },
+        style,
+      ]}
     >
-      <Text style={styles.outlineText}>{title}</Text>
+      <Text style={[styles.outlineText, { color: display.accent }]}>{title}</Text>
     </TouchableOpacity>
   );
 }
 
 export function TextField({ label, required = false, error, secure = false, hint, style, inputRef, prefix, ...props }) {
+  const { display } = useTheme();
   const [hidden, setHidden] = useState(secure);
   return (
     <View style={[styles.field, style]}>
       <FieldLabel label={label} required={required} />
-      <View style={[styles.inputBox, !!error && styles.inputError]}>
+      <View style={[styles.inputBox, { backgroundColor: display.cardBg, borderColor: display.border }, !!error && styles.inputError]}>
         {prefix}
         <TextInput
           ref={inputRef}
-          style={styles.input}
-          placeholderTextColor="#94A3B8"
+          style={[styles.input, { color: display.textPrimary }]}
+          placeholderTextColor={display.placeholder}
           secureTextEntry={hidden}
           accessibilityLabel={label}
           {...props}
@@ -122,7 +131,7 @@ export function TextField({ label, required = false, error, secure = false, hint
             hitSlop={10}
             accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
           >
-            {hidden ? <Eye size={18} color="#94A3B8" /> : <EyeOff size={18} color="#94A3B8" />}
+            {hidden ? <Eye size={18} color={display.placeholder} /> : <EyeOff size={18} color={display.placeholder} />}
           </TouchableOpacity>
         )}
       </View>
@@ -144,6 +153,7 @@ export function DatePickerField({
   placeholder = 'Select date of birth',
   defaultToToday = false,
 }) {
+  const { display, isDark } = useTheme();
   const today = new Date();
   const currentYear = today.getFullYear();
 
@@ -212,31 +222,31 @@ export function DatePickerField({
       <TouchableOpacity
         activeOpacity={0.75}
         onPress={openPicker}
-        style={[styles.inputBox, !!error && styles.inputError]}
+        style={[styles.inputBox, { backgroundColor: display.cardBg, borderColor: display.border }, !!error && styles.inputError]}
         accessibilityRole="button"
         accessibilityLabel={label}
       >
-        <Text style={[styles.input, !formattedDisplay && { color: '#94A3B8' }]}>
+        <Text style={[styles.input, { color: formattedDisplay ? display.textPrimary : display.placeholder }]}>
           {formattedDisplay || placeholder}
         </Text>
-        <Calendar size={18} color={COLORS.accent} />
+        <Calendar size={18} color={display.accent} />
       </TouchableOpacity>
       {!!error && <Text style={styles.fieldError}>{error}</Text>}
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent>
         <View style={styles.overlay}>
-          <View style={styles.popup}>
+          <View style={[styles.popup, { backgroundColor: display.cardBg }]}>
             <View style={styles.calHeader}>
-              <TouchableOpacity onPress={() => stepMonth(-1)} hitSlop={10} style={styles.calNavBtn}>
-                <ChevronLeft size={20} color={COLORS.heading} />
+              <TouchableOpacity onPress={() => stepMonth(-1)} hitSlop={10} style={[styles.calNavBtn, { backgroundColor: display.subCardBg }]}>
+                <ChevronLeft size={20} color={display.textPrimary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setPickingYear(!pickingYear)} style={styles.calTitleBtn}>
-                <Text style={styles.calTitleText}>
+              <TouchableOpacity onPress={() => setPickingYear(!pickingYear)} style={[styles.calTitleBtn, { backgroundColor: display.subCardBg }]}>
+                <Text style={[styles.calTitleText, { color: display.accent }]}>
                   {MONTHS[viewMonth]} {viewYear} ▾
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => stepMonth(1)} hitSlop={10} style={styles.calNavBtn}>
-                <ChevronRight size={20} color={COLORS.heading} />
+              <TouchableOpacity onPress={() => stepMonth(1)} hitSlop={10} style={[styles.calNavBtn, { backgroundColor: display.subCardBg }]}>
+                <ChevronRight size={20} color={display.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -248,9 +258,9 @@ export function DatePickerField({
                     <TouchableOpacity
                       key={yr}
                       onPress={() => { setViewYear(yr); setPickingYear(false); }}
-                      style={[styles.yearChip, active && styles.yearChipActive]}
+                      style={[styles.yearChip, { backgroundColor: active ? display.accent : display.subCardBg, borderColor: display.border }]}
                     >
-                      <Text style={[styles.yearChipText, active && styles.yearChipTextActive]}>{yr}</Text>
+                      <Text style={[styles.yearChipText, { color: active ? '#fff' : display.textPrimary }]}>{yr}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -259,7 +269,7 @@ export function DatePickerField({
               <>
                 <View style={styles.weekRow}>
                   {WEEKDAYS.map(w => (
-                    <Text key={w} style={styles.weekLabel}>{w}</Text>
+                    <Text key={w} style={[styles.weekLabel, { color: display.textSecondary }]}>{w}</Text>
                   ))}
                 </View>
                 <View style={styles.daysGrid}>
@@ -273,9 +283,9 @@ export function DatePickerField({
                         key={iso}
                         disabled={isFuture}
                         onPress={() => selectDay(day)}
-                        style={[styles.dayCell, selected && styles.dayCellSelected, isFuture && { opacity: 0.3 }]}
+                        style={[styles.dayCell, selected && { backgroundColor: display.accent }, isFuture && { opacity: 0.3 }]}
                       >
-                        <Text style={[styles.dayText, selected && styles.dayTextSelected]}>{day}</Text>
+                        <Text style={[styles.dayText, { color: selected ? '#fff' : display.textPrimary }]}>{day}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -343,13 +353,14 @@ export function Popup({
   visible, icon, iconColors, title, message, children, actionLabel = 'Continue', onAction,
   secondaryLabel, onSecondary, onRequestClose, actionLoading = false,
 }) {
+  const { display } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onRequestClose || onAction} statusBarTranslucent>
       <View style={styles.overlay}>
-        <View style={styles.popup} accessibilityViewIsModal>
+        <View style={[styles.popup, { backgroundColor: display.cardBg }]} accessibilityViewIsModal>
           {icon && <View style={{ alignItems: 'center', marginBottom: 12 }}><IconBadge icon={icon} size={56} colors={iconColors} /></View>}
-          {!!title && <Text style={styles.popupTitle}>{title}</Text>}
-          {!!message && <Text style={styles.popupMessage}>{message}</Text>}
+          {!!title && <Text style={[styles.popupTitle, { color: display.accent }]}>{title}</Text>}
+          {!!message && <Text style={[styles.popupMessage, { color: display.textSecondary }]}>{message}</Text>}
           {children}
           <PrimaryButton title={actionLabel} onPress={onAction} loading={actionLoading} style={{ marginTop: 20 }} />
           {!!secondaryLabel && <OutlineButton title={secondaryLabel} onPress={onSecondary} style={{ marginTop: 10 }} />}
@@ -360,6 +371,7 @@ export function Popup({
 }
 
 export function OtpCodeInput({ value = '', onChange, error, secondsLeft = 0, resendCooldown = 0, onResend, resending = false }) {
+  const { display, isDark } = useTheme();
   const inputRef = React.useRef(null);
   const clean = String(value).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6);
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
@@ -367,7 +379,7 @@ export function OtpCodeInput({ value = '', onChange, error, secondsLeft = 0, res
 
   return (
     <View style={{ marginVertical: 8 }}>
-      <Text style={styles.otpTimer}>{mm}:{ss}</Text>
+      <Text style={[styles.otpTimer, { color: display.accent }]}>{mm}:{ss}</Text>
       <FieldLabel label="Enter Code" required />
 
       <TouchableOpacity
@@ -383,11 +395,12 @@ export function OtpCodeInput({ value = '', onChange, error, secondsLeft = 0, res
               key={idx}
               style={[
                 styles.otpBox,
-                isCurrent && styles.otpBoxActive,
+                { backgroundColor: display.cardBg, borderColor: display.border },
+                isCurrent && { borderColor: display.accent, backgroundColor: isDark ? display.subCardBg : '#F8FCFF' },
                 !!error && { borderColor: COLORS.error },
               ]}
             >
-              <Text style={styles.otpChar}>{ch}</Text>
+              <Text style={[styles.otpChar, { color: display.textPrimary }]}>{ch}</Text>
             </View>
           );
         })}
@@ -407,9 +420,9 @@ export function OtpCodeInput({ value = '', onChange, error, secondsLeft = 0, res
       {!!error && <Text style={[styles.fieldError, { textAlign: 'center', marginTop: 8 }]}>{error}</Text>}
 
       <View style={styles.otpResendRow}>
-        <Text style={authText.small}>Didn't Receive the OTP? </Text>
+        <Text style={[authText.small, { color: display.textSecondary }]}>Didn't Receive the OTP? </Text>
         {resendCooldown > 0 ? (
-          <Text style={[authText.small, { color: '#94A3B8' }]}>Resend in {resendCooldown}s</Text>
+          <Text style={[authText.small, { color: display.textSecondary }]}>Resend in {resendCooldown}s</Text>
         ) : (
           <TouchableOpacity onPress={onResend} disabled={resending} hitSlop={8}>
             <Text style={[authText.small, authText.link]}>{resending ? 'Sending...' : 'Resend'}</Text>
@@ -420,15 +433,16 @@ export function OtpCodeInput({ value = '', onChange, error, secondsLeft = 0, res
   );
 }
 
-/** Keyboard-aware scrolling page with the standard white background. */
+/** Keyboard-aware scrolling page with theme-aware background. */
 export function AuthScreen({ children, wave = false, contentStyle, footer }) {
+  const { display } = useTheme();
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={[styles.screen, { backgroundColor: display.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {wave && <WaveHeader />}
       <ScrollView contentContainerStyle={[styles.scroll, contentStyle]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {children}
       </ScrollView>
-      {footer && <View style={styles.footer}>{footer}</View>}
+      {footer && <View style={[styles.footer, { backgroundColor: display.bg }]}>{footer}</View>}
     </KeyboardAvoidingView>
   );
 }

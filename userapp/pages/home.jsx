@@ -7,6 +7,7 @@ import { MapViewSection } from '../components/map-view-section';
 import { BrowseServices } from '../components/browse-services';
 import HomeAPI from '../services/homeApi';
 import HealthRecordsAPI, { formatDate } from '../services/healthRecordsApi';
+import { useTheme } from '../context/ThemeContext';
 
 export function HomePage({
   isActive = true,
@@ -20,6 +21,7 @@ export function HomePage({
   vaultRefreshTrigger,
   refreshTrigger,
 }) {
+  const { display, isDark, t, fs } = useTheme();
   const [upcomingAppointment, setUpcomingAppointment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [vaultSummary, setVaultSummary] = useState(null);
@@ -59,7 +61,7 @@ export function HomePage({
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: display.bg }]}>
       {/* App Header */}
       <AppHeader
         onOpenMessages={onOpenMessages}
@@ -72,58 +74,71 @@ export function HomePage({
         <View style={styles.sectionHeader}>
           <View style={styles.sectionTitleContainer}>
             <View style={styles.redDot} />
-            <Text style={styles.sectionTitle} numberOfLines={1}>
-              Upcoming Appointment
+            <Text style={[styles.sectionTitle, { color: display.textPrimary, fontSize: fs(21) }]} numberOfLines={1}>
+              {t?.upcomingAppointment || 'Upcoming Appointment'}
             </Text>
           </View>
-          <TouchableOpacity onPress={() => onOpenAppointmentBooking && onOpenAppointmentBooking(null)} style={styles.scheduleButton}>
-            <Plus size={16} color="#0ea5e9" />
-            <Text style={styles.scheduleButtonText}>Schedule</Text>
+          <TouchableOpacity
+            onPress={() => onOpenAppointmentBooking && onOpenAppointmentBooking(null)}
+            style={[styles.scheduleButton, { backgroundColor: display.subCardBg }]}
+          >
+            <Plus size={16} color={display.accent} />
+            <Text style={[styles.scheduleButtonText, { color: display.accent, fontSize: fs(14) }]}>
+              {t?.schedule || 'Schedule'}
+            </Text>
           </TouchableOpacity>
         </View>
 
         {loading ? (
-          <View style={[styles.card, styles.loadingCard]}>
+          <View style={[styles.card, styles.loadingCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
             <ActivityIndicator size="large" color="#60a5fa" />
           </View>
         ) : upcomingAppointment ? (
-          <View style={styles.card}>
+          <View style={[styles.card, { backgroundColor: display.cardBg, borderColor: display.border }]}>
             <View style={styles.cardHeader}>
               <GeoAltFill color="#60a5fa" size={32} top={12} />
               <View style={styles.cardContent}>
-                <Text style={styles.cardTitle}>{upcomingAppointment.hospital}</Text>
-                <Text style={styles.cardSubtitle}>{upcomingAppointment.type}</Text>
+                <Text style={[styles.cardTitle, { color: display.textPrimary, fontSize: fs(18) }]}>{upcomingAppointment.hospital}</Text>
+                <Text style={[styles.cardSubtitle, { color: display.textSecondary, fontSize: fs(14) }]}>{upcomingAppointment.type}</Text>
               </View>
             </View>
-            <View style={styles.cardFooter}>
+            <View style={[styles.cardFooter, { backgroundColor: display.subCardBg }]}>
               <View style={styles.badge}>
                 <Calendar size={18} color="#60a5fa" />
-                <Text style={styles.badgeText}>{upcomingAppointment.date}</Text>
+                <Text style={[styles.badgeText, { color: display.textPrimary, fontSize: fs(13) }]}>{upcomingAppointment.date}</Text>
               </View>
-              <View style={styles.badgeSeparator} />
+              <View style={[styles.badgeSeparator, { backgroundColor: display.border }]} />
               <View style={styles.badge}>
                 <Clock size={18} color="#60a5fa" />
-                <Text style={styles.badgeText}>{upcomingAppointment.time}</Text>
+                <Text style={[styles.badgeText, { color: display.textPrimary, fontSize: fs(13) }]}>{upcomingAppointment.time}</Text>
               </View>
             </View>
             {onOpenMyAppointments && (
-              <TouchableOpacity onPress={onOpenMyAppointments} style={styles.manageCardButton}>
+              <TouchableOpacity onPress={onOpenMyAppointments} style={[styles.manageCardButton, { borderTopColor: display.border }]}>
                 <Calendar size={15} color="#0284c7" />
-                <Text style={styles.manageCardButtonText}>View / Cancel Appointment</Text>
+                <Text style={[styles.manageCardButtonText, { fontSize: fs(13) }]}>
+                  {t?.viewCancelAppointment || 'View / Cancel Appointment'}
+                </Text>
                 <ChevronRight size={16} color="#0284c7" style={{ marginLeft: 'auto' }} />
               </TouchableOpacity>
             )}
           </View>
         ) : (
-          <View style={[styles.card, styles.emptyCard]}>
-            <Text style={styles.emptyText}>No upcoming appointments</Text>
+          <View style={[styles.card, styles.emptyCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
+            <Text style={[styles.emptyText, { color: display.textSecondary, fontSize: fs(15) }]}>
+              {t?.noUpcomingAppointments || 'No upcoming appointments'}
+            </Text>
             <View style={styles.emptyActionsRow}>
               <TouchableOpacity onPress={() => onOpenAppointmentBooking && onOpenAppointmentBooking(null)} style={styles.emptyButton}>
-                <Text style={styles.emptyButtonText}>Schedule an appointment</Text>
+                <Text style={[styles.emptyButtonText, { fontSize: fs(14) }]}>
+                  {t?.scheduleAnAppointment || 'Schedule an appointment'}
+                </Text>
               </TouchableOpacity>
               {onOpenMyAppointments && (
-                <TouchableOpacity onPress={onOpenMyAppointments} style={styles.secondaryOutlineButton}>
-                  <Text style={styles.secondaryOutlineButtonText}>My Appointments</Text>
+                <TouchableOpacity onPress={onOpenMyAppointments} style={[styles.secondaryOutlineButton, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+                  <Text style={[styles.secondaryOutlineButtonText, { fontSize: fs(14) }]}>
+                    {t?.myAppointments || 'My Appointments'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -134,19 +149,27 @@ export function HomePage({
       {/* Health Record Vault shortcut (US-3.7) */}
       {onOpenRecordVault && (
         <View style={styles.section}>
-          <TouchableOpacity style={[styles.card, styles.vaultCard]} onPress={onOpenRecordVault} activeOpacity={0.85}>
-            <View style={styles.vaultIcon}>
+          <TouchableOpacity
+            style={[styles.card, styles.vaultCard, { backgroundColor: display.cardBg, borderColor: display.border }]}
+            onPress={onOpenRecordVault}
+            activeOpacity={0.85}
+          >
+            <View style={[styles.vaultIcon, { backgroundColor: display.subCardBg }]}>
               <FolderLock size={24} color="#0284c7" />
             </View>
             <View style={styles.cardContent}>
-              <Text style={styles.cardTitle}>Health Record Vault</Text>
-              <Text style={styles.cardSubtitle} numberOfLines={1}>
+              <Text style={[styles.cardTitle, { color: display.textPrimary, fontSize: fs(18) }]}>
+                {t?.healthRecordVault || 'Health Record Vault'}
+              </Text>
+              <Text style={[styles.cardSubtitle, { color: display.textSecondary, fontSize: fs(14) }]} numberOfLines={1}>
                 {vaultSummary?.total
-                  ? `${vaultSummary.total} ${vaultSummary.total === 1 ? 'file' : 'files'} · Latest: ${vaultSummary.latest?.title || ''}`
-                  : 'Keep lab results, prescriptions and scans in one place'}
+                  ? `${vaultSummary.total} ${vaultSummary.total === 1 ? (t?.file || 'file') : (t?.files || 'files')} · ${t?.latest || 'Latest'}: ${vaultSummary.latest?.title || ''}`
+                  : (t?.healthRecordVaultDesc || 'Keep lab results, prescriptions and scans in one place')}
               </Text>
               {!!vaultSummary?.latest && (
-                <Text style={styles.vaultMeta}>Updated {formatDate(vaultSummary.latest.createdAt)}</Text>
+                <Text style={[styles.vaultMeta, { color: display.textSecondary, fontSize: fs(12) }]}>
+                  {t?.updated || 'Updated'} {formatDate(vaultSummary.latest.createdAt)}
+                </Text>
               )}
             </View>
             <ChevronRight size={20} color="#0ea5e9" />
@@ -156,7 +179,9 @@ export function HomePage({
 
       {/* Seek Medical Care Section */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Seek Medical Care</Text>
+        <Text style={[styles.sectionTitle, { color: display.textPrimary, fontSize: fs(21) }]}>
+          {t?.seekMedicalCare || 'Seek Medical Care'}
+        </Text>
         <MapViewSection isActive={isActive} />
       </View>
 

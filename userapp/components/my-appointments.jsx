@@ -27,6 +27,7 @@ import {
   CalendarDays,
 } from 'lucide-react-native';
 import AppointmentAPI from '../services/appointmentApi';
+import { useTheme } from '../context/ThemeContext';
 
 const CANCELLATION_REASONS = [
   'Schedule conflict',
@@ -38,6 +39,7 @@ const CANCELLATION_REASONS = [
 ];
 
 export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged }) {
+  const { display, isDark } = useTheme();
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -194,20 +196,20 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { backgroundColor: display.cardBg }]}>
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { borderBottomColor: display.border }]}>
             <View style={styles.headerTitleGroup}>
               <CalendarDays size={22} color="#0ea5e9" />
-              <Text style={styles.headerTitle}>My Appointments</Text>
+              <Text style={[styles.headerTitle, { color: display.textPrimary }]}>My Appointments</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <X size={20} color="#4b5563" />
+            <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]}>
+              <X size={20} color={display.textPrimary} />
             </TouchableOpacity>
           </View>
 
           {/* Filter Tabs */}
-          <View style={styles.tabsContainer}>
+          <View style={[styles.tabsContainer, { borderBottomColor: display.border }]}>
             {[
               { key: 'upcoming', label: 'Upcoming' },
               { key: 'completed', label: 'Completed' },
@@ -219,9 +221,9 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                 <TouchableOpacity
                   key={tab.key}
                   onPress={() => setActiveTab(tab.key)}
-                  style={[styles.tabBtn, active && styles.tabBtnActive]}
+                  style={[styles.tabBtn, { backgroundColor: display.subCardBg }, active && styles.tabBtnActive]}
                 >
-                  <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                  <Text style={[styles.tabText, { color: display.textSecondary }, active && styles.tabTextActive]}>
                     {tab.label}
                   </Text>
                 </TouchableOpacity>
@@ -233,7 +235,7 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
           {loading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color="#0ea5e9" />
-              <Text style={styles.loadingText}>Loading your appointments...</Text>
+              <Text style={[styles.loadingText, { color: display.textSecondary }]}>Loading your appointments...</Text>
             </View>
           ) : (
             <ScrollView
@@ -246,9 +248,9 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
             >
               {filteredAppointments.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                  <Calendar size={48} color="#cbd5e1" />
-                  <Text style={styles.emptyTitle}>No appointments found</Text>
-                  <Text style={styles.emptySubtitle}>
+                  <Calendar size={48} color={display.placeholder} />
+                  <Text style={[styles.emptyTitle, { color: display.textPrimary }]}>No appointments found</Text>
+                  <Text style={[styles.emptySubtitle, { color: display.textSecondary }]}>
                     {activeTab === 'upcoming'
                       ? 'You have no upcoming consultations scheduled.'
                       : `You have no ${activeTab} appointments.`}
@@ -276,7 +278,7 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                     AppointmentAPI.evaluateCancellationPolicy(apt.appointmentDate, apt.status);
 
                   return (
-                    <View key={`apt-${apt.id || apt.appointmentId || index}-${index}`} style={styles.appointmentCard}>
+                    <View key={`apt-${apt.id || apt.appointmentId || index}-${index}`} style={[styles.appointmentCard, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
                       {/* Top row: Status & Reference */}
                       <View style={styles.cardTopRow}>
                         <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
@@ -285,7 +287,7 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                             {badge.label}
                           </Text>
                         </View>
-                        <Text style={styles.refText}>
+                        <Text style={[styles.refText, { color: display.placeholder }]}>
                           #{String(apt.id || apt.appointmentId).slice(0, 8).toUpperCase()}
                         </Text>
                       </View>
@@ -295,32 +297,32 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                         <View style={styles.infoRow}>
                           <Stethoscope size={18} color="#0ea5e9" style={styles.infoIcon} />
                           <View style={styles.infoTextContainer}>
-                            <Text style={styles.procedureName}>
+                            <Text style={[styles.procedureName, { color: display.textPrimary }]}>
                               {apt.procedureName || 'Medical Consultation'}
                             </Text>
-                            <Text style={styles.providerName}>
+                            <Text style={[styles.providerName, { color: display.textSecondary }]}>
                               {apt.providerName} ({apt.providerSpecialty || 'Physician'})
                             </Text>
                           </View>
                         </View>
 
                         <View style={styles.infoRow}>
-                          <Building2 size={16} color="#64748b" style={styles.infoIcon} />
-                          <Text style={styles.facilityName}>
+                          <Building2 size={16} color={display.textSecondary} style={styles.infoIcon} />
+                          <Text style={[styles.facilityName, { color: display.textSecondary }]}>
                             {apt.facilityName}
                           </Text>
                         </View>
 
                         <View style={styles.dateTimeRow}>
-                          <View style={styles.dateTimeChip}>
-                            <Calendar size={14} color="#0284c7" />
-                            <Text style={styles.dateTimeText}>
+                          <View style={[styles.dateTimeChip, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
+                            <Calendar size={14} color={display.accent} />
+                            <Text style={[styles.dateTimeText, { color: display.accent }]}>
                               {apt.formattedDate || new Date(apt.appointmentDate).toLocaleDateString()}
                             </Text>
                           </View>
-                          <View style={styles.dateTimeChip}>
-                            <Clock size={14} color="#0284c7" />
-                            <Text style={styles.dateTimeText}>
+                          <View style={[styles.dateTimeChip, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
+                            <Clock size={14} color={display.accent} />
+                            <Text style={[styles.dateTimeText, { color: display.accent }]}>
                               {apt.formattedTime || new Date(apt.appointmentDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </Text>
                           </View>
@@ -331,7 +333,7 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                       {isUpcoming && (
                         <View style={[
                           styles.policyBox,
-                          policy.cancellable ? styles.policyBoxOk : styles.policyBoxLocked
+                          policy.cancellable ? (isDark ? { backgroundColor: display.cardBg } : styles.policyBoxOk) : (isDark ? { backgroundColor: display.cardBg } : styles.policyBoxLocked)
                         ]}>
                           {policy.cancellable ? (
                             <Clock size={14} color="#0284c7" />
@@ -351,15 +353,16 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
 
                       {/* Action buttons */}
                       {isUpcoming && (
-                        <View style={styles.cardActions}>
+                        <View style={[styles.cardActions, { borderTopColor: display.border }]}>
                           <TouchableOpacity
                             onPress={() => handleOpenCancel(apt)}
                             style={[
                               styles.cancelBtn,
-                              !policy.cancellable && styles.cancelBtnDisabled
+                              { backgroundColor: display.cardBg, borderColor: isDark ? '#7f1d1d' : '#fca5a5' },
+                              !policy.cancellable && [styles.cancelBtnDisabled, { backgroundColor: display.subCardBg, borderColor: display.border }]
                             ]}
                           >
-                            <X size={15} color={policy.cancellable ? '#ef4444' : '#94a3b8'} />
+                            <X size={15} color={policy.cancellable ? '#ef4444' : display.placeholder} />
                             <Text style={[
                               styles.cancelBtnText,
                               !policy.cancellable && styles.cancelBtnTextDisabled
@@ -384,52 +387,52 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
             onRequestClose={() => setCancellingAppointment(null)}
           >
             <View style={styles.dialogOverlay}>
-              <View style={styles.dialogCard}>
-                <View style={styles.dialogHeader}>
+              <View style={[styles.dialogCard, { backgroundColor: display.cardBg }]}>
+                <View style={[styles.dialogHeader, { borderBottomColor: display.border }]}>
                   <View style={styles.dialogWarningIcon}>
                     <AlertTriangle size={24} color="#ef4444" />
                   </View>
-                  <Text style={styles.dialogTitle}>Cancel Appointment</Text>
+                  <Text style={[styles.dialogTitle, { color: display.textPrimary }]}>Cancel Appointment</Text>
                   <TouchableOpacity
                     onPress={() => setCancellingAppointment(null)}
                     style={styles.dialogCloseBtn}
                   >
-                    <X size={18} color="#6b7280" />
+                    <X size={18} color={display.textPrimary} />
                   </TouchableOpacity>
                 </View>
 
                 {cancellingAppointment && (
                   <ScrollView style={styles.dialogBody}>
-                    <Text style={styles.dialogSubtitle}>
+                    <Text style={[styles.dialogSubtitle, { color: display.textSecondary }]}>
                       Are you sure you want to cancel your consultation with{' '}
-                      <Text style={{ fontWeight: 'bold', color: '#1f2937' }}>
+                      <Text style={{ fontWeight: 'bold', color: display.textPrimary }}>
                         {cancellingAppointment.providerName}
                       </Text>{' '}
                       at{' '}
-                      <Text style={{ fontWeight: 'bold', color: '#1f2937' }}>
+                      <Text style={{ fontWeight: 'bold', color: display.textPrimary }}>
                         {cancellingAppointment.facilityName}
                       </Text>
                       ?
                     </Text>
 
-                    <View style={styles.dialogAppointmentDetails}>
-                      <Text style={styles.dialogDetailItem}>
+                    <View style={[styles.dialogAppointmentDetails, { backgroundColor: display.subCardBg }]}>
+                      <Text style={[styles.dialogDetailItem, { color: display.textPrimary }]}>
                         📅 {cancellingAppointment.formattedDate} at {cancellingAppointment.formattedTime}
                       </Text>
-                      <Text style={styles.dialogDetailItem}>
+                      <Text style={[styles.dialogDetailItem, { color: display.textPrimary }]}>
                         🩺 {cancellingAppointment.procedureName}
                       </Text>
                     </View>
 
                     {/* Facility Policy Reminder */}
-                    <View style={styles.dialogPolicyNotice}>
-                      <AlertCircle size={16} color="#0284c7" />
-                      <Text style={styles.dialogPolicyNoticeText}>
+                    <View style={[styles.dialogPolicyNotice, { backgroundColor: isDark ? display.subCardBg : '#eff6ff' }]}>
+                      <AlertCircle size={16} color={display.accent} />
+                      <Text style={[styles.dialogPolicyNoticeText, { color: isDark ? display.textPrimary : '#1e40af' }]}>
                         Facility Policy: Free cancellation is granted up to 24 hours prior. Your cancellation will free this slot for other patients.
                       </Text>
                     </View>
 
-                    <Text style={styles.reasonLabel}>Reason for Cancellation:</Text>
+                    <Text style={[styles.reasonLabel, { color: display.textPrimary }]}>Reason for Cancellation:</Text>
                     <View style={styles.reasonOptions}>
                       {CANCELLATION_REASONS.map((reason) => {
                         const isSelected = selectedReason === reason;
@@ -439,11 +442,13 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                             onPress={() => setSelectedReason(reason)}
                             style={[
                               styles.reasonChip,
+                              { backgroundColor: display.subCardBg, borderColor: display.border },
                               isSelected && styles.reasonChipSelected
                             ]}
                           >
                             <Text style={[
                               styles.reasonChipText,
+                              { color: display.textSecondary },
                               isSelected && styles.reasonChipTextSelected
                             ]}>
                               {reason}
@@ -455,9 +460,9 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
 
                     {selectedReason === 'Other reason' && (
                       <TextInput
-                        style={styles.customReasonInput}
+                        style={[styles.customReasonInput, { backgroundColor: display.subCardBg, borderColor: display.border, color: display.textPrimary }]}
                         placeholder="Please specify reason (optional)..."
-                        placeholderTextColor="#9ca3af"
+                        placeholderTextColor={display.placeholder}
                         value={customReason}
                         onChangeText={setCustomReason}
                         maxLength={200}
@@ -466,13 +471,13 @@ export function MyAppointmentsModal({ visible, onClose, onScheduleNew, onChanged
                   </ScrollView>
                 )}
 
-                <View style={styles.dialogActions}>
+                <View style={[styles.dialogActions, { borderTopColor: display.border }]}>
                   <TouchableOpacity
                     onPress={() => setCancellingAppointment(null)}
-                    style={styles.keepBtn}
+                    style={[styles.keepBtn, { backgroundColor: display.subCardBg, borderColor: display.border }]}
                     disabled={isSubmittingCancel}
                   >
-                    <Text style={styles.keepBtnText}>Keep Appointment</Text>
+                    <Text style={[styles.keepBtnText, { color: display.textPrimary }]}>Keep Appointment</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={handleConfirmCancel}

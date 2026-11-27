@@ -26,6 +26,7 @@ import {
 import AppointmentAPI, { STANDARD_MEDICAL_SERVICES } from '../services/appointmentApi';
 import MapAPI from '../services/mapApi';
 import { expandServiceKeywords, normalizeSearchText, matchesFacilityQuery } from '../lib/medical-services';
+import { useTheme } from '../context/ThemeContext';
 
 export const serviceUIConfig = {
   "General Check-up": { icon: Hospital, colors: ['#66BAFF', '#83BFF0'] },
@@ -133,6 +134,7 @@ const MONTH_NAMES = [
 ];
 
 export function AppointmentBooking({ onClose, onBooked, visible = true, initialService = null, facilityId: propFacilityId }) {
+  const { display, isDark } = useTheme();
   // If no facilityId prop is provided, the user must pick a facility first
   const needsFacilityPick = !propFacilityId;
   const [activeFacilityId, setActiveFacilityId] = useState(propFacilityId || null);
@@ -576,19 +578,19 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: display.cardBg }]}>
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { borderBottomColor: display.border }]}>
             <View style={styles.headerLeft}>
               {step !== "success" && step !== steps[0] && (
                 <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-                  <ChevronLeft size={20} color="#1f2937" />
+                  <ChevronLeft size={20} color={display.textPrimary} />
                 </TouchableOpacity>
               )}
-              <Text style={styles.headerTitle}>{getStepTitle()}</Text>
+              <Text style={[styles.headerTitle, { color: display.textPrimary }]}>{getStepTitle()}</Text>
             </View>
             <TouchableOpacity onPress={step === 'success' ? handleDone : onClose} style={styles.closeButton}>
-              <X size={20} color="#1f2937" />
+              <X size={20} color={display.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -600,6 +602,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                   key={s}
                   style={[
                     styles.progressDot,
+                    { backgroundColor: display.border },
                     i <= currentStepIndex && styles.progressDotActive,
                     i < currentStepIndex && styles.progressDotDone,
                   ]}
@@ -616,13 +619,13 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {/* ───────── Step 0: Select Facility (when no facilityId prop) ───────── */}
             {step === "facility" && !loading && (
               <View>
-                <Text style={styles.stepDescription}>
+                <Text style={[styles.stepDescription, { color: display.textSecondary }]}>
                   {initialService
                     ? `Choose a Gabay clinic offering ${initialService}`
                     : 'Choose a healthcare facility to book your appointment'}
                 </Text>
                 {availableFacilities.length === 0 ? (
-                  <Text style={styles.emptyText}>
+                  <Text style={[styles.emptyText, { color: display.textSecondary }]}>
                     {initialService
                       ? `No Gabay clinics currently offer ${initialService}.`
                       : 'No partner facilities found.'}
@@ -633,18 +636,18 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                       <TouchableOpacity
                         key={facility.key || `facility-${facility.id}-${index}`}
                         onPress={() => handleSelectFacility(facility)}
-                        style={styles.providerCard}
+                        style={[styles.providerCard, { backgroundColor: display.subCardBg, borderColor: display.border }]}
                       >
-                        <View style={[styles.providerAvatar, { backgroundColor: '#eff6ff' }]}>
+                        <View style={[styles.providerAvatar, { backgroundColor: isDark ? display.cardBg : '#eff6ff' }]}>
                           <Hospital size={20} color="#0ea5e9" />
                         </View>
                         <View style={styles.providerInfo}>
-                          <Text style={styles.providerName}>{facility.name}</Text>
-                          <Text style={styles.providerSpecialty}>
+                          <Text style={[styles.providerName, { color: display.textPrimary }]}>{facility.name}</Text>
+                          <Text style={[styles.providerSpecialty, { color: display.textSecondary }]}>
                             {facility.address || 'Medical Center'}
                           </Text>
                           {facility.distance ? (
-                            <Text style={[styles.providerSpecialty, { fontSize: 11, color: '#9ca3af' }]}>
+                            <Text style={[styles.providerSpecialty, { fontSize: 11, color: display.placeholder }]}>
                               {facility.distance}
                             </Text>
                           ) : null}
@@ -660,7 +663,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {/* ───────── Step 1: Select Service ───────── */}
             {step === "service" && !loading && (
               <View>
-                <Text style={styles.stepDescription}>Which service do you need?</Text>
+                <Text style={[styles.stepDescription, { color: display.textSecondary }]}>Which service do you need?</Text>
                 <View style={styles.optionsList}>
                   {facilityServices.map((serviceName, index) => {
                     const ui = getServiceUI(serviceName);
@@ -669,13 +672,13 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                       <TouchableOpacity
                         key={`service-${serviceName}-${index}`}
                         onPress={() => handleSelectService(serviceName)}
-                        style={styles.optionCard}
+                        style={[styles.optionCard, { backgroundColor: display.subCardBg, borderColor: display.border }]}
                       >
                         <LinearGradient colors={ui.colors} style={styles.optionIcon}>
                           <IconComponent size={24} color="#fff" strokeWidth={2} />
                         </LinearGradient>
-                        <Text style={styles.optionText}>{serviceName}</Text>
-                        <ChevronRight size={18} color="#9ca3af" style={{ marginLeft: 'auto' }} />
+                        <Text style={[styles.optionText, { color: display.textPrimary }]}>{serviceName}</Text>
+                        <ChevronRight size={18} color={display.placeholder} style={{ marginLeft: 'auto' }} />
                       </TouchableOpacity>
                     );
                   })}
@@ -686,27 +689,27 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {/* ───────── Step 2: Select Provider ───────── */}
             {step === "provider" && !loading && (
               <View>
-                <Text style={styles.stepDescription}>Choose your healthcare provider</Text>
+                <Text style={[styles.stepDescription, { color: display.textSecondary }]}>Choose your healthcare provider</Text>
                 {providers.length === 0 ? (
-                  <Text style={styles.emptyText}>No providers available for this facility.</Text>
+                  <Text style={[styles.emptyText, { color: display.textSecondary }]}>No providers available for this facility.</Text>
                 ) : (
                   <View style={styles.optionsList}>
                     {providers.map((provider, index) => (
                       <TouchableOpacity
                         key={`provider-${provider.id || provider.provider_id || index}-${index}`}
                         onPress={() => handleSelectProvider(provider)}
-                        style={styles.providerCard}
+                        style={[styles.providerCard, { backgroundColor: display.subCardBg, borderColor: display.border }]}
                       >
-                        <View style={styles.providerAvatar}>
+                        <View style={[styles.providerAvatar, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
                           <Text style={{ fontSize: 18 }}>👨‍⚕️</Text>
                         </View>
                         <View style={styles.providerInfo}>
-                          <Text style={styles.providerName}>{provider.name}</Text>
-                          <Text style={styles.providerSpecialty}>
+                          <Text style={[styles.providerName, { color: display.textPrimary }]}>{provider.name}</Text>
+                          <Text style={[styles.providerSpecialty, { color: display.textSecondary }]}>
                             {provider.specialization || provider.specialty || 'General Physician'}
                           </Text>
                         </View>
-                        <ChevronRight size={18} color="#9ca3af" />
+                        <ChevronRight size={18} color={display.placeholder} />
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -717,7 +720,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {/* ───────── Step 3: Calendar Picker ───────── */}
             {step === "calendar" && selectedProvider && (
               <View>
-                <Text style={styles.stepDescription}>
+                <Text style={[styles.stepDescription, { color: display.textSecondary }]}>
                   Pick an available date for your appointment
                 </Text>
 
@@ -726,21 +729,21 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                   <TouchableOpacity
                     onPress={goToPrevMonth}
                     disabled={!canGoPrevMonth}
-                    style={[styles.calendarNavBtn, !canGoPrevMonth && { opacity: 0.3 }]}
+                    style={[styles.calendarNavBtn, { backgroundColor: display.subCardBg }, !canGoPrevMonth && { opacity: 0.3 }]}
                   >
-                    <ChevronLeft size={20} color="#1f2937" />
+                    <ChevronLeft size={20} color={display.textPrimary} />
                   </TouchableOpacity>
 
-                  <Text style={styles.calendarMonthLabel}>
+                  <Text style={[styles.calendarMonthLabel, { color: display.textPrimary }]}>
                     {MONTH_NAMES[calendarMonth.month]} {calendarMonth.year}
                   </Text>
 
                   <TouchableOpacity
                     onPress={goToNextMonth}
                     disabled={!canGoNextMonth}
-                    style={[styles.calendarNavBtn, !canGoNextMonth && { opacity: 0.3 }]}
+                    style={[styles.calendarNavBtn, { backgroundColor: display.subCardBg }, !canGoNextMonth && { opacity: 0.3 }]}
                   >
-                    <ChevronRight size={20} color="#1f2937" />
+                    <ChevronRight size={20} color={display.textPrimary} />
                   </TouchableOpacity>
                 </View>
 
@@ -748,7 +751,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                 <View style={styles.calendarRow}>
                   {DAY_NAMES.map(dn => (
                     <View key={dn} style={styles.calendarCell}>
-                      <Text style={styles.dayNameText}>{dn}</Text>
+                      <Text style={[styles.dayNameText, { color: display.textSecondary }]}>{dn}</Text>
                     </View>
                   ))}
                 </View>
@@ -770,9 +773,10 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                         >
                           <Text style={[
                             styles.calendarDayText,
+                            { color: display.textPrimary },
                             cell.isToday && styles.calendarDayTodayText,
                             cell.isSelected && styles.calendarDaySelectedText,
-                            cell.disabled && styles.calendarDayDisabledText,
+                            cell.disabled && { color: display.placeholder },
                           ]}>
                             {cell.day}
                           </Text>
@@ -785,18 +789,18 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                 </View>
 
                 {/* Legend */}
-                <View style={styles.calendarLegend}>
+                <View style={[styles.calendarLegend, { borderTopColor: display.border }]}>
                   <View style={styles.legendItem}>
                     <View style={[styles.legendDot, { backgroundColor: '#0ea5e9' }]} />
-                    <Text style={styles.legendText}>Selected</Text>
+                    <Text style={[styles.legendText, { color: display.textSecondary }]}>Selected</Text>
                   </View>
                   <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { borderWidth: 1.5, borderColor: '#0ea5e9', backgroundColor: '#fff' }]} />
-                    <Text style={styles.legendText}>Today</Text>
+                    <View style={[styles.legendDot, { borderWidth: 1.5, borderColor: '#0ea5e9', backgroundColor: isDark ? display.cardBg : '#fff' }]} />
+                    <Text style={[styles.legendText, { color: display.textSecondary }]}>Today</Text>
                   </View>
                   <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, { backgroundColor: '#e5e7eb' }]} />
-                    <Text style={styles.legendText}>Unavailable</Text>
+                    <View style={[styles.legendDot, { backgroundColor: display.border }]} />
+                    <Text style={[styles.legendText, { color: display.textSecondary }]}>Unavailable</Text>
                   </View>
                 </View>
               </View>
@@ -805,7 +809,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {/* ───────── Step 4: Select Time Slot ───────── */}
             {step === "time" && (
               <View>
-                <Text style={styles.stepDescription}>
+                <Text style={[styles.stepDescription, { color: display.textSecondary }]}>
                   {selectedDate
                     ? `Available slots for ${formatDateFriendly(selectedDate)}`
                     : "Select your preferred time"}
@@ -825,23 +829,25 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                           disabled={!available}
                           style={[
                             styles.timeSlot,
-                            !available && styles.timeSlotDisabled,
+                            { backgroundColor: display.subCardBg, borderColor: display.border },
+                            !available && { backgroundColor: isDark ? display.cardBg : '#f9fafb', borderColor: display.border, opacity: 0.5 },
                             isSelected && styles.timeSlotSelected
                           ]}
                         >
                           <Clock
                             size={16}
-                            color={isSelected ? '#fff' : (available ? '#0ea5e9' : '#d1d5db')}
+                            color={isSelected ? '#fff' : (available ? '#0ea5e9' : display.placeholder)}
                             style={styles.timeIcon}
                           />
                           <Text style={[
                             styles.timeText,
-                            !available && styles.timeTextDisabled,
+                            { color: display.textPrimary },
+                            !available && { color: display.placeholder },
                             isSelected && styles.timeTextSelected,
                           ]}>
                             {time}
                           </Text>
-                          {!available && <Text style={styles.bookedText}>Booked</Text>}
+                          {!available && <Text style={[styles.bookedText, { color: display.placeholder }]}>Booked</Text>}
                         </TouchableOpacity>
                       );
                     })}
@@ -853,76 +859,76 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {/* ───────── Step 5: Review & Confirm ───────── */}
             {step === "confirm" && (
               <View>
-                <Text style={styles.stepDescription}>
+                <Text style={[styles.stepDescription, { color: display.textSecondary }]}>
                   Please review your appointment details
                 </Text>
 
-                <View style={styles.confirmCard}>
+                <View style={[styles.confirmCard, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
                   {/* Service */}
                   <View style={styles.confirmRow}>
-                    <View style={styles.confirmIconBox}>
+                    <View style={[styles.confirmIconBox, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
                       <Stethoscope size={18} color="#0ea5e9" />
                     </View>
                     <View style={styles.confirmDetail}>
-                      <Text style={styles.confirmLabel}>Service</Text>
-                      <Text style={styles.confirmValue}>{selectedServiceName}</Text>
+                      <Text style={[styles.confirmLabel, { color: display.textSecondary }]}>Service</Text>
+                      <Text style={[styles.confirmValue, { color: display.textPrimary }]}>{selectedServiceName}</Text>
                     </View>
                   </View>
 
-                  <View style={styles.confirmDivider} />
+                  <View style={[styles.confirmDivider, { backgroundColor: display.border }]} />
 
                   {/* Provider */}
                   <View style={styles.confirmRow}>
-                    <View style={styles.confirmIconBox}>
+                    <View style={[styles.confirmIconBox, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
                       <User size={18} color="#0ea5e9" />
                     </View>
                     <View style={styles.confirmDetail}>
-                      <Text style={styles.confirmLabel}>Provider</Text>
-                      <Text style={styles.confirmValue}>{selectedProvider?.name}</Text>
-                      <Text style={styles.confirmSubvalue}>
+                      <Text style={[styles.confirmLabel, { color: display.textSecondary }]}>Provider</Text>
+                      <Text style={[styles.confirmValue, { color: display.textPrimary }]}>{selectedProvider?.name}</Text>
+                      <Text style={[styles.confirmSubvalue, { color: display.textSecondary }]}>
                         {selectedProvider?.specialization || selectedProvider?.specialty || 'General Physician'}
                       </Text>
                     </View>
                   </View>
 
-                  <View style={styles.confirmDivider} />
+                  <View style={[styles.confirmDivider, { backgroundColor: display.border }]} />
 
                   {/* Facility */}
                   <View style={styles.confirmRow}>
-                    <View style={styles.confirmIconBox}>
+                    <View style={[styles.confirmIconBox, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
                       <MapPin size={18} color="#0ea5e9" />
                     </View>
                     <View style={styles.confirmDetail}>
-                      <Text style={styles.confirmLabel}>Facility</Text>
-                      <Text style={styles.confirmValue}>{facilityName || 'Medical Facility'}</Text>
+                      <Text style={[styles.confirmLabel, { color: display.textSecondary }]}>Facility</Text>
+                      <Text style={[styles.confirmValue, { color: display.textPrimary }]}>{facilityName || 'Medical Facility'}</Text>
                     </View>
                   </View>
 
-                  <View style={styles.confirmDivider} />
+                  <View style={[styles.confirmDivider, { backgroundColor: display.border }]} />
 
                   {/* Date */}
                   <View style={styles.confirmRow}>
-                    <View style={styles.confirmIconBox}>
+                    <View style={[styles.confirmIconBox, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
                       <Calendar size={18} color="#0ea5e9" />
                     </View>
                     <View style={styles.confirmDetail}>
-                      <Text style={styles.confirmLabel}>Date</Text>
-                      <Text style={styles.confirmValue}>
+                      <Text style={[styles.confirmLabel, { color: display.textSecondary }]}>Date</Text>
+                      <Text style={[styles.confirmValue, { color: display.textPrimary }]}>
                         {selectedDate ? formatDateFriendly(selectedDate) : ''}
                       </Text>
                     </View>
                   </View>
 
-                  <View style={styles.confirmDivider} />
+                  <View style={[styles.confirmDivider, { backgroundColor: display.border }]} />
 
                   {/* Time */}
                   <View style={styles.confirmRow}>
-                    <View style={styles.confirmIconBox}>
+                    <View style={[styles.confirmIconBox, { backgroundColor: isDark ? display.cardBg : '#f0f9ff' }]}>
                       <Clock size={18} color="#0ea5e9" />
                     </View>
                     <View style={styles.confirmDetail}>
-                      <Text style={styles.confirmLabel}>Time</Text>
-                      <Text style={styles.confirmValue}>{selectedTime}</Text>
+                      <Text style={[styles.confirmLabel, { color: display.textSecondary }]}>Time</Text>
+                      <Text style={[styles.confirmValue, { color: display.textPrimary }]}>{selectedTime}</Text>
                     </View>
                   </View>
                 </View>
@@ -939,7 +945,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                   )}
                 </TouchableOpacity>
 
-                <Text style={styles.confirmDisclaimer}>
+                <Text style={[styles.confirmDisclaimer, { color: display.textSecondary }]}>
                   By confirming, you agree to the facility's scheduling policies. 
                   You will receive a notification once the provider confirms your appointment.
                 </Text>
@@ -953,45 +959,45 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
                   <CheckCircle size={48} color="#10b981" />
                 </View>
 
-                <Text style={styles.successTitle}>Appointment Booked!</Text>
-                <Text style={styles.successSubtitle}>
+                <Text style={[styles.successTitle, { color: display.textPrimary }]}>Appointment Booked!</Text>
+                <Text style={[styles.successSubtitle, { color: display.textSecondary }]}>
                   Your appointment has been successfully scheduled. The clinic will confirm shortly.
                 </Text>
 
-                <View style={styles.successCard}>
+                <View style={[styles.successCard, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
                   <View style={styles.successRow}>
-                    <CalendarCheck size={16} color="#6b7280" />
-                    <Text style={styles.successLabel}>Reference ID</Text>
+                    <CalendarCheck size={16} color={display.textSecondary} />
+                    <Text style={[styles.successLabel, { color: display.textSecondary }]}>Reference ID</Text>
                   </View>
-                  <Text style={styles.successRefId}>
+                  <Text style={[styles.successRefId, { color: display.textPrimary }]}>
                     {(bookingResult.data?.appointment_id || bookingResult.data?.id)
                       ? `#${String(bookingResult.data.appointment_id || bookingResult.data.id).slice(0, 8).toUpperCase()}`
                       : '#PENDING'}
                   </Text>
 
-                  <View style={styles.confirmDivider} />
+                  <View style={[styles.confirmDivider, { backgroundColor: display.border }]} />
 
                   <View style={styles.successDetailRow}>
-                    <Stethoscope size={14} color="#6b7280" />
-                    <Text style={styles.successDetailText}>{selectedServiceName}</Text>
+                    <Stethoscope size={14} color={display.textSecondary} />
+                    <Text style={[styles.successDetailText, { color: display.textPrimary }]}>{selectedServiceName}</Text>
                   </View>
                   <View style={styles.successDetailRow}>
-                    <User size={14} color="#6b7280" />
-                    <Text style={styles.successDetailText}>{selectedProvider?.name}</Text>
+                    <User size={14} color={display.textSecondary} />
+                    <Text style={[styles.successDetailText, { color: display.textPrimary }]}>{selectedProvider?.name}</Text>
                   </View>
                   <View style={styles.successDetailRow}>
-                    <MapPin size={14} color="#6b7280" />
-                    <Text style={styles.successDetailText}>{facilityName || 'Medical Facility'}</Text>
+                    <MapPin size={14} color={display.textSecondary} />
+                    <Text style={[styles.successDetailText, { color: display.textPrimary }]}>{facilityName || 'Medical Facility'}</Text>
                   </View>
                   <View style={styles.successDetailRow}>
-                    <Calendar size={14} color="#6b7280" />
-                    <Text style={styles.successDetailText}>
+                    <Calendar size={14} color={display.textSecondary} />
+                    <Text style={[styles.successDetailText, { color: display.textPrimary }]}>
                       {selectedDate ? formatDateFriendly(selectedDate) : ''}
                     </Text>
                   </View>
                   <View style={styles.successDetailRow}>
-                    <Clock size={14} color="#6b7280" />
-                    <Text style={styles.successDetailText}>{selectedTime}</Text>
+                    <Clock size={14} color={display.textSecondary} />
+                    <Text style={[styles.successDetailText, { color: display.textPrimary }]}>{selectedTime}</Text>
                   </View>
 
                   <View style={styles.statusBadge}>

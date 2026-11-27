@@ -12,6 +12,8 @@ import {
   serviceUIConfig
 } from '../components/appointment';
 import BrowseAPI from '../services/browseApi';
+import { getLocalizedService } from '../services/profileApi';
+import { useTheme } from '../context/ThemeContext';
 
 const configuredServices = Object.keys(serviceUIConfig).filter(service => service !== 'default');
 
@@ -67,6 +69,7 @@ export function SeekMedicalCare({
   onOpenProfile,
   onAppointmentBooked,
 }) {
+  const { display, isDark, language, t, fs } = useTheme();
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [bookingFacility, setBookingFacility] = useState(null); // ADD THIS: Separate state for booking
   const [showAppointmentBooking, setShowAppointmentBooking] = useState(false);
@@ -165,36 +168,42 @@ export function SeekMedicalCare({
   ];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: display.bg }]}>
       <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} onOpenProfile={onOpenProfile} />
 
       <ScrollView style={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Seek Medical Care</Text>
+          <Text style={[styles.sectionTitle, { color: display.textPrimary, fontSize: fs(24) }]}>
+            {t?.seekMedicalCare || 'Seek Medical Care'}
+          </Text>
           <MapViewSection isActive={isActive} facilities={displayedFacilities} />
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, styles.facilitySearchTitle]}>Search Facilities</Text>
+          <Text style={[styles.sectionTitle, styles.facilitySearchTitle, { color: display.textPrimary, fontSize: fs(24) }]}>
+            {t?.searchHospital || 'Search Facilities'}
+          </Text>
           <View style={styles.facilitySearchPanel}>
-            <View style={styles.serviceSearchContainer}>
-              <Search size={18} color="#6b7280" />
+            <View style={[styles.serviceSearchContainer, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+              <Search size={18} color={display.placeholder} />
               <TextInput
-                style={styles.serviceSearchInput}
+                style={[styles.serviceSearchInput, { color: display.textPrimary, fontSize: fs(14) }]}
                 value={facilityNameQuery}
                 onChangeText={setFacilityNameQuery}
-                placeholder="Search hospital"
+                placeholder={t?.searchHospital || 'Search hospital'}
+                placeholderTextColor={display.placeholder}
                 returnKeyType="search"
                 onSubmitEditing={handleFacilitySearch}
               />
             </View>
-            <View style={styles.serviceSearchContainer}>
-              <MapPin size={18} color="#6b7280" />
+            <View style={[styles.serviceSearchContainer, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+              <MapPin size={18} color={display.placeholder} />
               <TextInput
-                style={styles.serviceSearchInput}
+                style={[styles.serviceSearchInput, { color: display.textPrimary, fontSize: fs(14) }]}
                 value={locationQuery}
                 onChangeText={setLocationQuery}
-                placeholder="Search city or location"
+                placeholder={t?.searchCityLocation || 'Search city or location'}
+                placeholderTextColor={display.placeholder}
                 returnKeyType="search"
                 onSubmitEditing={handleFacilitySearch}
               />
@@ -202,10 +211,14 @@ export function SeekMedicalCare({
             <View style={styles.facilitySearchActions}>
               <TouchableOpacity style={styles.searchButton} onPress={handleFacilitySearch}>
                 <Search size={16} color="#fff" />
-                <Text style={styles.searchButtonText}>Search Facilities</Text>
+                <Text style={[styles.searchButtonText, { fontSize: fs(14) }]}>
+                  {t?.searchHospital || 'Search Facilities'}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={clearFacilitySearch} style={styles.clearSearchButton}>
-                <Text style={styles.clearSearchText}>Clear</Text>
+              <TouchableOpacity onPress={clearFacilitySearch} style={[styles.clearSearchButton, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+                <Text style={[styles.clearSearchText, { color: display.textSecondary, fontSize: fs(14) }]}>
+                  {t?.clearAll || 'Clear'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -213,24 +226,29 @@ export function SeekMedicalCare({
 
         <View style={styles.section}>
           <View style={styles.serviceBrowseHeader}>
-            <Text style={styles.sectionTitle}>Browse Services</Text>
+            <Text style={[styles.sectionTitle, { color: display.textPrimary, fontSize: fs(24) }]}>
+              {t?.browseByServices || 'Browse Services'}
+            </Text>
             <TouchableOpacity onPress={() => setShowAllServices(true)}>
-              <Text style={styles.seeAllButton}>See All</Text>
+              <Text style={[styles.seeAllButton, { color: display.accent, fontSize: fs(14) }]}>
+                {t?.seeAll || 'See All'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.serviceSearchContainer}>
-            <Search size={18} color="#6b7280" />
+          <View style={[styles.serviceSearchContainer, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+            <Search size={18} color={display.placeholder} />
             <TextInput
-              style={styles.serviceSearchInput}
+              style={[styles.serviceSearchInput, { color: display.textPrimary, fontSize: fs(14) }]}
               value={serviceSearchQuery}
               onChangeText={handleServiceSearchChange}
-              placeholder="Search services (e.g., Cardiology)"
+              placeholder={t?.searchServices || 'Search services (e.g., Cardiology)'}
+              placeholderTextColor={display.placeholder}
               returnKeyType="search"
             />
             {serviceSearchQuery.length > 0 && (
               <TouchableOpacity onPress={clearServiceSearch} accessibilityLabel="Clear service search">
-                <X size={18} color="#6b7280" />
+                <X size={18} color={display.placeholder} />
               </TouchableOpacity>
             )}
           </View>
@@ -242,7 +260,7 @@ export function SeekMedicalCare({
               return (
                 <TouchableOpacity
                   key={service}
-                  style={[styles.serviceCard, selectedService === service && styles.serviceCardSelected]}
+                  style={[styles.serviceCard, { backgroundColor: display.cardBg, borderColor: display.border }, selectedService === service && styles.serviceCardSelected]}
                   onPress={() => handleServiceSelect(service)}
                 >
                   <LinearGradient colors={serviceUI.colors} style={styles.serviceIconContainer}>
@@ -251,15 +269,15 @@ export function SeekMedicalCare({
                   <Text
                     numberOfLines={1}
                     ellipsizeMode="tail"
-                    style={[styles.serviceLabel, selectedService === service && styles.serviceLabelSelected]}
+                    style={[styles.serviceLabel, { color: display.textPrimary, fontSize: fs(12) }, selectedService === service && styles.serviceLabelSelected]}
                   >
-                    {service}
+                    {getLocalizedService(service, language)}
                   </Text>
                 </TouchableOpacity>
               );
             })}
             {filteredServices.length === 0 && (
-              <Text style={styles.noServicesText}>
+              <Text style={[styles.noServicesText, { color: display.textSecondary }]}>
                 {serviceSearchQuery.trim()
                   ? 'No services match your search.'
                   : 'No services are available for the matching facilities.'}
@@ -272,29 +290,30 @@ export function SeekMedicalCare({
             animationType="slide"
             onRequestClose={() => setShowAllServices(false)}
           >
-            <View style={styles.fullScreenModalContainer}>
-              <View style={styles.fullScreenModalHeader}>
-                <Text style={styles.fullScreenModalTitle}>All Services</Text>
+            <View style={[styles.fullScreenModalContainer, { backgroundColor: display.bg }]}>
+              <View style={[styles.fullScreenModalHeader, { borderBottomColor: display.border }]}>
+                <Text style={[styles.fullScreenModalTitle, { color: display.textPrimary }]}>All Services</Text>
                 <TouchableOpacity
                   onPress={() => setShowAllServices(false)}
-                  style={styles.closeButton}
+                  style={[styles.closeButton, { backgroundColor: display.subCardBg }]}
                 >
-                  <X size={24} color="#1f2937" />
+                  <X size={24} color={display.textPrimary} />
                 </TouchableOpacity>
               </View>
 
-              <View style={[styles.serviceSearchContainer, styles.modalServiceSearch]}>
-                <Search size={18} color="#6b7280" />
+              <View style={[styles.serviceSearchContainer, styles.modalServiceSearch, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+                <Search size={18} color={display.placeholder} />
                 <TextInput
-                  style={styles.serviceSearchInput}
+                  style={[styles.serviceSearchInput, { color: display.textPrimary }]}
                   value={serviceSearchQuery}
                   onChangeText={handleServiceSearchChange}
                   placeholder="Search services"
+                  placeholderTextColor={display.placeholder}
                   returnKeyType="search"
                 />
                 {serviceSearchQuery.length > 0 && (
                   <TouchableOpacity onPress={clearServiceSearch} accessibilityLabel="Clear service search">
-                    <X size={18} color="#6b7280" />
+                    <X size={18} color={display.placeholder} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -307,7 +326,7 @@ export function SeekMedicalCare({
                     return (
                       <TouchableOpacity
                         key={service}
-                        style={[styles.serviceCardGrid, selectedService === service && styles.serviceCardSelected]}
+                        style={[styles.serviceCardGrid, { backgroundColor: display.cardBg, borderColor: display.border }, selectedService === service && styles.serviceCardSelected]}
                         onPress={() => handleServiceSelect(service)}
                       >
                         <LinearGradient colors={serviceUI.colors} style={styles.serviceIconContainer}>
@@ -316,7 +335,7 @@ export function SeekMedicalCare({
                         <Text
                           numberOfLines={1}
                           ellipsizeMode="tail"
-                          style={[styles.serviceLabel, selectedService === service && styles.serviceLabelSelected]}
+                          style={[styles.serviceLabel, { color: display.textPrimary }, selectedService === service && styles.serviceLabelSelected]}
                         >
                           {service}
                         </Text>
@@ -324,7 +343,7 @@ export function SeekMedicalCare({
                     );
                   })}
                   {filteredServices.length === 0 && (
-                    <Text style={styles.noServicesText}>No services match your search.</Text>
+                    <Text style={[styles.noServicesText, { color: display.textSecondary }]}>No services match your search.</Text>
                   )}
                 </View>
               </ScrollView>
@@ -340,29 +359,31 @@ export function SeekMedicalCare({
 
         <View style={[styles.section, styles.lastSection]}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, styles.facilityResultsTitle]}>
-              {selectedService ? `Facilities for ${selectedService}` : 'Facility Results'}
+            <Text style={[styles.sectionTitle, styles.facilityResultsTitle, { color: display.textPrimary, fontSize: fs(24) }]}>
+              {selectedService ? `${t?.facilitiesTitle || 'Facilities'} - ${getLocalizedService(selectedService, language)}` : (t?.facilitiesTitle || 'Facility Results')}
             </Text>
             <TouchableOpacity
               style={styles.sectionHeaderAction}
               onPress={() => setShowAllHospitals(!showAllHospitals)}
             >
-              <Text style={styles.seeAllButton}>{showAllHospitals ? 'Show Less' : 'See All'}</Text>
+              <Text style={[styles.seeAllButton, { color: display.accent, fontSize: fs(14) }]}>
+                {showAllHospitals ? (t?.showLess || 'Show Less') : (t?.seeAll || 'See All')}
+              </Text>
             </TouchableOpacity>
           </View>
 
           {loading ? (
             <ActivityIndicator size="large" color="#0ea5e9" style={{ marginTop: 20 }} />
           ) : displayedFacilities.length === 0 ? (
-            <Text style={styles.noServicesText}>
-              {selectedService ? `No facilities offer ${selectedService}.` : 'No facilities found.'}
+            <Text style={[styles.noServicesText, { color: display.textSecondary, fontSize: fs(14) }]}>
+              {selectedService ? `${t?.noHospitalsFound || 'No facilities offer this service.'}` : (t?.noHospitalsFound || 'No facilities found.')}
             </Text>
           ) : !showAllHospitals ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.hospitalList}>
               {displayedFacilities.map((hospital, idx) => (
                 <TouchableOpacity
                   key={`hosp-scroll-${hospital.id}-${idx}`}
-                  style={styles.hospitalCard}
+                  style={[styles.hospitalCard, { backgroundColor: display.cardBg, borderColor: display.border }]}
                   onPress={() => handleFacilityClick(hospital)}
                 >
                 <View style={styles.hospitalImageContainer}>
@@ -383,12 +404,12 @@ export function SeekMedicalCare({
                   </View>
                 </View>
                 <View style={styles.hospitalInfo}>
-                  <Text style={styles.hospitalName} numberOfLines={1}>{hospital.name}</Text>
-                  <Text style={styles.hospitalAddress} numberOfLines={1}>{hospital.address}</Text>
+                  <Text style={[styles.hospitalName, { color: display.textPrimary }]} numberOfLines={1}>{hospital.name}</Text>
+                  <Text style={[styles.hospitalAddress, { color: display.textSecondary }]} numberOfLines={1}>{hospital.address}</Text>
                   <View style={styles.hospitalFooter}>
                     <View style={styles.hospitalDistance}>
                       <MapPin size={12} color="#9ca3af" />
-                      <Text style={styles.hospitalDistanceText}>{hospital.distance}</Text>
+                      <Text style={[styles.hospitalDistanceText, { color: display.textSecondary }]}>{hospital.distance}</Text>
                     </View>
                     {hospital.isGabay && (
                       <Image 
@@ -407,7 +428,7 @@ export function SeekMedicalCare({
               {displayedFacilities.map((hospital, idx) => (
                 <TouchableOpacity
                   key={`hosp-grid-${hospital.id}-${idx}`}
-                  style={styles.hospitalCardGrid}
+                  style={[styles.hospitalCardGrid, { backgroundColor: display.cardBg, borderColor: display.border }]}
                   onPress={() => handleFacilityClick(hospital)}
                 >
                   <View style={styles.hospitalImageContainer}>
@@ -428,12 +449,12 @@ export function SeekMedicalCare({
                     </View>
                   </View>
                   <View style={styles.hospitalInfo}>
-                    <Text style={styles.hospitalName} numberOfLines={1}>{hospital.name}</Text>
-                    <Text style={styles.hospitalAddress} numberOfLines={1}>{hospital.address}</Text>
+                    <Text style={[styles.hospitalName, { color: display.textPrimary }]} numberOfLines={1}>{hospital.name}</Text>
+                    <Text style={[styles.hospitalAddress, { color: display.textSecondary }]} numberOfLines={1}>{hospital.address}</Text>
                     <View style={styles.hospitalFooter}>
                       <View style={styles.hospitalDistance}>
                         <MapPin size={12} color="#9ca3af" />
-                        <Text style={styles.hospitalDistanceText}>{hospital.distance}</Text>
+                        <Text style={[styles.hospitalDistanceText, { color: display.textSecondary }]}>{hospital.distance}</Text>
                       </View>
                       {hospital.isGabay && (
                         <Image 
@@ -460,10 +481,10 @@ export function SeekMedicalCare({
         onRequestClose={() => setSelectedFacility(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: display.cardBg }]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderLeft}>
-                <View style={styles.modalGabayBadge}>
+                <View style={[styles.modalGabayBadge, { backgroundColor: display.cardBg }]}>
                   <Image
                     source={require('../assets/logoblue.png')}
                     style={styles.modalGabayBadgeImage}
@@ -471,21 +492,21 @@ export function SeekMedicalCare({
                   />
                 </View>
                 <View>
-                  <Text style={styles.modalTitle}>GABAY 2.0 Partner</Text>
-                  <Text style={styles.modalSubtitle}>
+                  <Text style={[styles.modalTitle, { color: display.textPrimary }]}>GABAY 2.0 Partner</Text>
+                  <Text style={[styles.modalSubtitle, { color: display.textSecondary }]}>
                     {allFacilities.find((h) => h.id === selectedFacility)?.name}
                   </Text>
                 </View>
               </View>
               <TouchableOpacity
                 onPress={() => setSelectedFacility(null)}
-                style={styles.modalCloseButton}
+                style={[styles.modalCloseButton, { backgroundColor: display.subCardBg }]}
               >
-                <X size={20} color="#4b5563" />
+                <X size={20} color={display.textPrimary} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.modalDescription}>
+            <Text style={[styles.modalDescription, { color: display.textSecondary }]}>
               Exclusive perks available at this GABAY partner:
             </Text>
 
@@ -493,9 +514,9 @@ export function SeekMedicalCare({
               {gabayPerks.map((perk, index) => {
                 const Icon = perk.icon;
                 return (
-                  <View key={index} style={styles.perkCard}>
-                    <Icon size={20} color="#0ea5e9" />
-                    <Text style={styles.perkLabel}>{perk.label}</Text>
+                  <View key={index} style={[styles.perkCard, { backgroundColor: display.subCardBg }]}>
+                    <Icon size={20} color={display.accent} />
+                    <Text style={[styles.perkLabel, { color: display.textPrimary }]}>{perk.label}</Text>
                   </View>
                 );
               })}
@@ -514,8 +535,8 @@ export function SeekMedicalCare({
                 <Calendar size={16} color="#fff" />
                 <Text style={styles.bookButtonText}>Book Now</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.detailsButton}>
-                <Text style={styles.detailsButtonText}>View Details</Text>
+              <TouchableOpacity style={[styles.detailsButton, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
+                <Text style={[styles.detailsButtonText, { color: display.textSecondary }]}>View Details</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -28,6 +28,7 @@ import {
   FileText,
 } from 'lucide-react-native';
 import ClaimsAPI, { CLAIM_STATUS_LABELS, formatPeso } from '../services/claimsApi';
+import { useTheme } from '../context/ThemeContext';
 
 const STATUS_FILTERS = [
   { key: 'ALL', label: 'All' },
@@ -65,10 +66,11 @@ function StatusBadge({ status }) {
 }
 
 function DetailRow({ label, value, strong, color }) {
+  const { display } = useTheme();
   return (
     <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={[styles.detailValue, strong && styles.detailStrong, color && { color }]}>
+      <Text style={[styles.detailLabel, { color: display.textSecondary }]}>{label}</Text>
+      <Text style={[styles.detailValue, { color: display.textPrimary }, strong && styles.detailStrong, color && { color }]}>
         {value || '—'}
       </Text>
     </View>
@@ -76,38 +78,39 @@ function DetailRow({ label, value, strong, color }) {
 }
 
 function ClaimCard({ claim, expanded, onToggle }) {
+  const { display, isDark } = useTheme();
   const coverageLabel = [claim.carrierName, claim.planName].filter(Boolean).join(' · ') || 'Linked Insurance Plan';
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: display.cardBg, borderColor: display.border }]}>
       <TouchableOpacity onPress={onToggle} activeOpacity={0.8}>
         <View style={styles.cardTop}>
           <StatusBadge status={claim.status} />
-          <Text style={styles.refText}>CLM-{String(claim.id).slice(0, 8).toUpperCase()}</Text>
+          <Text style={[styles.refText, { color: display.placeholder }]}>CLM-{String(claim.id).slice(0, 8).toUpperCase()}</Text>
         </View>
 
         <View style={styles.cardMain}>
           <Stethoscope size={18} color="#0ea5e9" style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>{claim.procedureName}</Text>
+            <Text style={[styles.cardTitle, { color: display.textPrimary }]}>{claim.procedureName}</Text>
             <View style={styles.iconLine}>
               <ShieldCheck size={13} color="#0284c7" />
               <Text style={styles.insuranceText} numberOfLines={1}>{coverageLabel}</Text>
             </View>
             <View style={styles.iconLine}>
-              <Building2 size={13} color="#64748b" />
-              <Text style={styles.cardSub} numberOfLines={1}>{claim.facilityName}</Text>
+              <Building2 size={13} color={display.textSecondary} />
+              <Text style={[styles.cardSub, { color: display.textSecondary }]} numberOfLines={1}>{claim.facilityName}</Text>
             </View>
           </View>
         </View>
 
-        <View style={styles.cardAmounts}>
+        <View style={[styles.cardAmounts, { borderTopColor: display.border }]}>
           <View>
-            <Text style={styles.amountLabel}>Claimed Amount</Text>
-            <Text style={styles.amountValue}>{formatPeso(claim.amount)}</Text>
+            <Text style={[styles.amountLabel, { color: display.textSecondary }]}>Claimed Amount</Text>
+            <Text style={[styles.amountValue, { color: display.textPrimary }]}>{formatPeso(claim.amount)}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.amountLabel}>Submitted</Text>
-            <Text style={styles.dateValue}>{claim.submissionDate || '—'}</Text>
+            <Text style={[styles.amountLabel, { color: display.textSecondary }]}>Submitted</Text>
+            <Text style={[styles.dateValue, { color: display.textSecondary }]}>{claim.submissionDate || '—'}</Text>
           </View>
         </View>
 
@@ -118,22 +121,22 @@ function ClaimCard({ claim, expanded, onToggle }) {
       </TouchableOpacity>
 
       {expanded && (
-        <View style={styles.detailsBox}>
+        <View style={[styles.detailsBox, { backgroundColor: isDark ? display.subCardBg : '#f8fafc' }]}>
           <DetailRow label="Status" value={CLAIM_STATUS_LABELS[claim.status] || claim.rawStatus} strong />
           <DetailRow label="Service Date" value={claim.serviceDate} />
           <DetailRow label="Submission Date" value={claim.submissionDate} />
           {!!claim.providerName && <DetailRow label="Provider" value={claim.providerName} />}
           <DetailRow label="Insurance Carrier" value={claim.carrierName || 'Not specified'} />
           <DetailRow label="Plan" value={claim.planName || 'Not specified'} />
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: display.border }]} />
           <DetailRow label="Claimed Amount" value={formatPeso(claim.amount)} strong />
           {claim.approvedAmount != null && (
             <DetailRow label="Approved Amount" value={formatPeso(claim.approvedAmount)} strong color="#15803d" />
           )}
           {!!claim.notes && (
-            <View style={styles.notesBox}>
-              <Text style={styles.notesLabel}>Notes / Remarks</Text>
-              <Text style={styles.notesText}>{claim.notes}</Text>
+            <View style={[styles.notesBox, { backgroundColor: isDark ? display.cardBg : '#fff', borderColor: display.border }]}>
+              <Text style={[styles.notesLabel, { color: display.textSecondary }]}>Notes / Remarks</Text>
+              <Text style={[styles.notesText, { color: display.textPrimary }]}>{claim.notes}</Text>
             </View>
           )}
         </View>
@@ -143,6 +146,7 @@ function ClaimCard({ claim, expanded, onToggle }) {
 }
 
 export function DigitalClaimsModal({ visible, onClose }) {
+  const { display, isDark } = useTheme();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -235,22 +239,22 @@ export function DigitalClaimsModal({ visible, onClose }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: display.bg }]}>
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { backgroundColor: display.cardBg, borderBottomColor: display.border }]}>
             <View style={styles.headerTitleGroup}>
               <ShieldCheck size={22} color="#0ea5e9" />
-              <Text style={styles.headerTitle}>Digital Claims</Text>
+              <Text style={[styles.headerTitle, { color: display.textPrimary }]}>Digital Claims</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close digital claims">
-              <X size={20} color="#4b5563" />
+            <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: display.subCardBg }]} accessibilityLabel="Close digital claims">
+              <X size={20} color={display.textPrimary} />
             </TouchableOpacity>
           </View>
 
           {loading ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color="#0ea5e9" />
-              <Text style={styles.mutedText}>Loading your digital claims...</Text>
+              <Text style={[styles.mutedText, { color: display.textSecondary }]}>Loading your digital claims...</Text>
             </View>
           ) : error ? (
             <View style={styles.centered}>
@@ -295,20 +299,20 @@ export function DigitalClaimsModal({ visible, onClose }) {
               </View>
 
               {/* Mode Switcher */}
-              <View style={styles.modeSwitch}>
+              <View style={[styles.modeSwitch, { backgroundColor: display.subCardBg }]}>
                 <TouchableOpacity
                   onPress={() => setMode('track')}
-                  style={[styles.modeBtn, mode === 'track' && styles.modeBtnActive]}
+                  style={[styles.modeBtn, mode === 'track' && [styles.modeBtnActive, { backgroundColor: display.cardBg }]]}
                 >
-                  <Text style={[styles.modeBtnText, mode === 'track' && styles.modeBtnTextActive]}>
+                  <Text style={[styles.modeBtnText, { color: display.textSecondary }, mode === 'track' && [styles.modeBtnTextActive, { color: display.accent }]]}>
                     My Claims ({summary?.totalClaims || 0})
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setMode('submit')}
-                  style={[styles.modeBtn, mode === 'submit' && styles.modeBtnActive]}
+                  style={[styles.modeBtn, mode === 'submit' && [styles.modeBtnActive, { backgroundColor: display.cardBg }]]}
                 >
-                  <Text style={[styles.modeBtnText, mode === 'submit' && styles.modeBtnTextActive]}>
+                  <Text style={[styles.modeBtnText, { color: display.textSecondary }, mode === 'submit' && [styles.modeBtnTextActive, { color: display.accent }]]}>
                     Submit Claim ({summary?.eligibleCount || 0})
                   </Text>
                 </TouchableOpacity>
@@ -322,18 +326,18 @@ export function DigitalClaimsModal({ visible, onClose }) {
                       <TouchableOpacity
                         key={f.key}
                         onPress={() => setStatusFilter(f.key)}
-                        style={[styles.tabBtn, statusFilter === f.key && styles.tabBtnActive]}
+                        style={[styles.tabBtn, { backgroundColor: display.subCardBg }, statusFilter === f.key && styles.tabBtnActive]}
                       >
-                        <Text style={[styles.tabText, statusFilter === f.key && styles.tabTextActive]}>{f.label}</Text>
+                        <Text style={[styles.tabText, { color: display.textSecondary }, statusFilter === f.key && styles.tabTextActive]}>{f.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
 
                   {visibleClaims.length === 0 ? (
                     <View style={styles.empty}>
-                      <FileText size={44} color="#cbd5e1" />
-                      <Text style={styles.emptyTitle}>No claims found</Text>
-                      <Text style={styles.mutedText}>
+                      <FileText size={44} color={display.placeholder} />
+                      <Text style={[styles.emptyTitle, { color: display.textPrimary }]}>No claims found</Text>
+                      <Text style={[styles.mutedText, { color: display.textSecondary }]}>
                         {statusFilter === 'ALL'
                           ? 'You have not submitted any digital claims yet.'
                           : `No claims with status "${CLAIM_STATUS_LABELS[statusFilter] || statusFilter}".`}
@@ -359,12 +363,12 @@ export function DigitalClaimsModal({ visible, onClose }) {
               ) : (
                 /* Submit Claim Form */
                 <View style={styles.formSection}>
-                  <Text style={styles.sectionTitle}>1. Select an Eligible Healthcare Charge</Text>
+                  <Text style={[styles.sectionTitle, { color: display.textPrimary }]}>1. Select an Eligible Healthcare Charge</Text>
                   {eligibleCharges.length === 0 ? (
                     <View style={styles.empty}>
-                      <CheckCircle2 size={44} color="#cbd5e1" />
-                      <Text style={styles.emptyTitle}>No eligible charges available</Text>
-                      <Text style={styles.mutedText}>
+                      <CheckCircle2 size={44} color={display.placeholder} />
+                      <Text style={[styles.emptyTitle, { color: display.textPrimary }]}>No eligible charges available</Text>
+                      <Text style={[styles.mutedText, { color: display.textSecondary }]}>
                         All of your recorded healthcare charges already have active claims, or you have no charges yet.
                       </Text>
                     </View>
@@ -377,28 +381,28 @@ export function DigitalClaimsModal({ visible, onClose }) {
                           <TouchableOpacity
                             key={`eligible-${charge.ledgerId}`}
                             onPress={() => handleSelectCharge(charge)}
-                            style={[styles.selectCard, isSelected && styles.selectCardActive]}
+                            style={[styles.selectCard, { backgroundColor: display.cardBg, borderColor: display.border }, isSelected && [styles.selectCardActive, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]]}
                             activeOpacity={0.8}
                           >
                             <View style={styles.selectCardHeader}>
-                              <View style={[styles.radioOuter, isSelected && styles.radioOuterActive]}>
+                              <View style={[styles.radioOuter, { borderColor: display.border }, isSelected && styles.radioOuterActive]}>
                                 {isSelected && <View style={styles.radioInner} />}
                               </View>
                               <View style={{ flex: 1 }}>
-                                <Text style={styles.cardTitle}>{charge.procedureName}</Text>
-                                <Text style={styles.cardSub}>
+                                <Text style={[styles.cardTitle, { color: display.textPrimary }]}>{charge.procedureName}</Text>
+                                <Text style={[styles.cardSub, { color: display.textSecondary }]}>
                                   {charge.date || '—'} · {charge.facilityName}
                                 </Text>
                                 {!!charge.providerName && (
-                                  <Text style={styles.cardSub}>{charge.providerName}</Text>
+                                  <Text style={[styles.cardSub, { color: display.textSecondary }]}>{charge.providerName}</Text>
                                 )}
                               </View>
-                              <Text style={styles.selectAmount}>{formatPeso(charge.amount)}</Text>
+                              <Text style={[styles.selectAmount, { color: display.textPrimary }]}>{formatPeso(charge.amount)}</Text>
                             </View>
                             {!!planText && (
-                              <View style={styles.linkedPlanChip}>
+                              <View style={[styles.linkedPlanChip, { backgroundColor: isDark ? display.subCardBg : '#e0f2fe' }]}>
                                 <ShieldCheck size={13} color="#0369a1" />
-                                <Text style={styles.linkedPlanText}>Linked: {planText}</Text>
+                                <Text style={[styles.linkedPlanText, { color: isDark ? display.textPrimary : '#0369a1' }]}>Linked: {planText}</Text>
                               </View>
                             )}
                           </TouchableOpacity>
@@ -407,22 +411,22 @@ export function DigitalClaimsModal({ visible, onClose }) {
 
                       {selectedCharge && (
                         <>
-                          <Text style={[styles.sectionTitle, { marginTop: 8 }]}>2. Insurance Coverage</Text>
+                          <Text style={[styles.sectionTitle, { color: display.textPrimary, marginTop: 8 }]}>2. Insurance Coverage</Text>
                           {selectedCharge.insuranceId != null ? (
-                            <View style={styles.insuranceBox}>
+                            <View style={[styles.insuranceBox, { backgroundColor: display.cardBg, borderColor: display.border }]}>
                               <ShieldCheck size={18} color="#0284c7" />
                               <View style={{ flex: 1 }}>
-                                <Text style={styles.insuranceBoxTitle}>
+                                <Text style={[styles.insuranceBoxTitle, { color: display.textPrimary }]}>
                                   {selectedCharge.carrierName || 'Linked Insurance Carrier'}
                                 </Text>
-                                <Text style={styles.insuranceBoxSub}>
+                                <Text style={[styles.insuranceBoxSub, { color: display.accent }]}>
                                   {selectedCharge.planName || `Plan #${selectedCharge.insuranceId}`}
                                 </Text>
                               </View>
                             </View>
                           ) : availablePlans.length > 0 ? (
                             <View style={styles.planPicker}>
-                              <Text style={styles.planPickerHint}>
+                              <Text style={[styles.planPickerHint, { color: display.textSecondary }]}>
                                 Choose the insurance plan to link with this claim:
                               </Text>
                               {availablePlans.map(plan => {
@@ -431,9 +435,9 @@ export function DigitalClaimsModal({ visible, onClose }) {
                                   <TouchableOpacity
                                     key={`plan-${plan.insuranceId}`}
                                     onPress={() => setSelectedInsuranceId(plan.insuranceId)}
-                                    style={[styles.planOption, picked && styles.planOptionActive]}
+                                    style={[styles.planOption, { backgroundColor: display.cardBg, borderColor: display.border }, picked && [styles.planOptionActive, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]]}
                                   >
-                                    <Text style={[styles.planOptionText, picked && styles.planOptionTextActive]}>
+                                    <Text style={[styles.planOptionText, { color: display.textPrimary }, picked && [styles.planOptionTextActive, { color: display.accent }]]}>
                                       {plan.carrierName ? `${plan.carrierName} — ${plan.planName}` : plan.planName}
                                     </Text>
                                   </TouchableOpacity>
@@ -449,11 +453,11 @@ export function DigitalClaimsModal({ visible, onClose }) {
                             </View>
                           )}
 
-                          <Text style={[styles.sectionTitle, { marginTop: 8 }]}>3. Additional Notes (Optional)</Text>
+                          <Text style={[styles.sectionTitle, { color: display.textPrimary, marginTop: 8 }]}>3. Additional Notes (Optional)</Text>
                           <TextInput
-                            style={styles.notesInput}
+                            style={[styles.notesInput, { backgroundColor: display.cardBg, borderColor: display.border, color: display.textPrimary }]}
                             placeholder="Add reference numbers, LOA code, or supporting details..."
-                            placeholderTextColor="#94a3b8"
+                            placeholderTextColor={display.placeholder}
                             multiline
                             numberOfLines={3}
                             maxLength={400}
@@ -488,7 +492,7 @@ export function DigitalClaimsModal({ visible, onClose }) {
                 </View>
               )}
 
-              <Text style={styles.footnote}>
+              <Text style={[styles.footnote, { color: display.textSecondary }]}>
                 Digital claims are transmitted to your clinic for insurance & PhilHealth verification. Status updates appear here automatically.
               </Text>
             </ScrollView>

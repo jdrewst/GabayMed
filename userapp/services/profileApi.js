@@ -1,3 +1,4 @@
+import { Appearance } from 'react-native';
 import * as SecureStore from '../lib/secureStorage';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
@@ -23,11 +24,152 @@ export const THEME_MODES = [
 export const TEXT_SIZES = [
   { id: 'small', label: 'Compact', scale: 0.92 },
   { id: 'medium', label: 'Standard', scale: 1.0 },
-  { id: 'large', label: 'Large', scale: 1.12 },
+  { id: 'large', label: 'Large', scale: 1.15 },
 ];
+
+export const SERVICE_TRANSLATIONS = {
+  en: {
+    'General Physician': 'General Physician',
+    'Neurologist': 'Neurologist',
+    'Cardiologist': 'Cardiologist',
+    'Dentist': 'Dentist',
+    'Ophthalmologist': 'Ophthalmologist',
+    'ENT Specialist': 'ENT Specialist',
+    'Orthopedic': 'Orthopedic',
+    'Dermatologist': 'Dermatologist',
+    'Pulmonologist': 'Pulmonologist',
+    'Pharmacist': 'Pharmacist',
+    'Hematologist': 'Hematologist',
+    'Pediatrician': 'Pediatrician',
+  },
+  fil: {
+    'General Physician': 'Doktor Panlahat',
+    'Neurologist': 'Espesyalista sa Utak',
+    'Cardiologist': 'Espesyalista sa Puso',
+    'Dentist': 'Dentista',
+    'Ophthalmologist': 'Doktor sa Mata',
+    'ENT Specialist': 'Doktor sa Tainga, Ilong, Lalamunan',
+    'Orthopedic': 'Doktor sa Buto',
+    'Dermatologist': 'Doktor sa Balat',
+    'Pulmonologist': 'Doktor sa Baga',
+    'Pharmacist': 'Parmasyutiko',
+    'Hematologist': 'Espesyalista sa Dugo',
+    'Pediatrician': 'Doktor ng mga Bata',
+  },
+};
+
+export function getLocalizedService(label, language = 'en') {
+  if (!label) return '';
+  const langMap = SERVICE_TRANSLATIONS[language] || SERVICE_TRANSLATIONS.en;
+  return langMap[label] || label;
+}
 
 const TRANSLATIONS = {
   en: {
+    // Navigation
+    navHome: 'Home',
+    navCases: 'Cases',
+    navFacilities: 'Facilities',
+    navSettings: 'Settings',
+
+    // App Header & Greetings
+    greetingMorning: 'Good morning',
+    greetingAfternoon: 'Good afternoon',
+    greetingEvening: 'Good evening',
+    guest: 'Guest',
+    messages: 'Messages',
+    notifications: 'Notifications',
+
+    // Home Page
+    upcomingAppointment: 'Upcoming Appointment',
+    schedule: 'Schedule',
+    viewCancelAppointment: 'View / Cancel Appointment',
+    noUpcomingAppointments: 'No upcoming appointments',
+    scheduleAnAppointment: 'Schedule an appointment',
+    myAppointments: 'My Appointments',
+    healthRecordVault: 'Health Record Vault',
+    healthRecordVaultDesc: 'Keep lab results, prescriptions and scans in one place',
+    files: 'files',
+    file: 'file',
+    latest: 'Latest',
+    updated: 'Updated',
+    seekMedicalCare: 'Seek Medical Care',
+    browseByServices: 'Browse by Services',
+    showLess: 'Show Less',
+    seeAll: 'See All',
+
+    // Seek Medical Care & Hospital Search
+    searchHospital: 'Search hospital',
+    searchCityLocation: 'Search city or location',
+    searchServices: 'Search services (e.g. Cardiology)',
+    allHospitals: 'All Hospitals',
+    gabayClinics: 'Gabay Clinics',
+    publicHospitals: 'Public Hospitals',
+    privateHospitals: 'Private Hospitals',
+    nearby: 'Nearby',
+    bookAppointment: 'Book Appointment',
+    directions: 'Directions',
+    noHospitalsFound: 'No facilities found matching your criteria',
+    viewDetails: 'View Details',
+    callFacility: 'Call',
+    servicesOffered: 'Services Offered',
+    emergency: 'Emergency',
+
+    // Facilities & Billing Ledger
+    myFacilitiesTitle: 'My Facilities & Records',
+    allCharges: 'All Charges',
+    pending: 'Pending',
+    paid: 'Paid',
+    totalBalance: 'Total Outstanding Balance',
+    insuranceCovered: 'Covered by Insurance / HMO',
+    patientDue: 'Patient Portion Due',
+    payNow: 'Pay Now',
+    paymentHistory: 'Payment History',
+    billingLedger: 'Billing Ledger',
+    recentActivity: 'Recent Activity',
+    makePayment: 'Make a Payment',
+    selectPaymentMethod: 'Select Payment Method',
+    amountToPay: 'Amount to Pay',
+    receipts: 'Receipts',
+
+    // Messages
+    messagesTitle: 'Messages',
+    searchConversations: 'Search hospitals and clinics',
+    noMessages: 'No messages yet',
+    startConversation: 'Start a conversation',
+    unableToLoadConversations: 'Unable to load conversations.',
+    noMatchingHospitals: 'No matching hospitals or clinics.',
+    noLinkedHospitals: 'No linked hospitals or clinics yet.',
+    tryAgain: 'Try again',
+    typeMessage: 'Type a message...',
+    send: 'Send',
+
+    // Notifications
+    notificationsTitle: 'Notifications',
+    markAll: 'Mark all',
+    markAllRead: 'Mark all as read',
+    noNotifications: 'No notifications yet',
+    clearAll: 'Clear all',
+    on: 'On',
+    off: 'Off',
+
+    // Common Action Buttons & Labels
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    save: 'Save',
+    saved: 'Saved',
+    close: 'Close',
+    back: 'Back',
+    loading: 'Loading...',
+    done: 'Done',
+    edit: 'Edit',
+    delete: 'Delete',
+    refresh: 'Refresh',
+    compact: 'Compact',
+    standard: 'Standard',
+    large: 'Large',
+
+    // Settings
     settingsTitle: 'Settings',
     tapToViewProfile: 'Tap to view & update your personal and medical records',
     appPreferencesHeader: 'Language & Display Preferences',
@@ -70,6 +212,110 @@ const TRANSLATIONS = {
     signOut: 'Sign Out',
   },
   fil: {
+    // Navigation
+    navHome: 'Tahanan',
+    navCases: 'Mga Kaso',
+    navFacilities: 'Pasilidad',
+    navSettings: 'Mga Setting',
+
+    // App Header & Greetings
+    greetingMorning: 'Magandang umaga',
+    greetingAfternoon: 'Magandang hapon',
+    greetingEvening: 'Magandang gabi',
+    guest: 'Bisita',
+    messages: 'Mga Mensahe',
+    notifications: 'Mga Abiso',
+
+    // Home Page
+    upcomingAppointment: 'Nakatakdang Konsultasyon',
+    schedule: 'Mag-iskedyul',
+    viewCancelAppointment: 'Tingnan / Kanselahin ang Appointment',
+    noUpcomingAppointments: 'Walang nakatakdang appointment',
+    scheduleAnAppointment: 'Mag-iskedyul ng appointment',
+    myAppointments: 'Aking mga Appointment',
+    healthRecordVault: 'Health Record Vault (Mga Rekord)',
+    healthRecordVaultDesc: 'Itago ang lab results, reseta at scan sa isang ligtas na lugar',
+    files: 'mga file',
+    file: 'file',
+    latest: 'Pinakabago',
+    updated: 'Na-update noong',
+    seekMedicalCare: 'Maghanap ng Kalinga',
+    browseByServices: 'Mag-browse ayon sa Serbisyo',
+    showLess: 'Mas Kaunti',
+    seeAll: 'Tingnan Lahat',
+
+    // Seek Medical Care & Hospital Search
+    searchHospital: 'Maghanap ng ospital',
+    searchCityLocation: 'Maghanap ng lungsod o lokasyon',
+    searchServices: 'Maghanap ng serbisyo (hal. Cardiology)',
+    allHospitals: 'Lahat ng Ospital',
+    gabayClinics: 'Mga Klinika ng Gabay',
+    publicHospitals: 'Pampublikong Ospital',
+    privateHospitals: 'Pribadong Ospital',
+    nearby: 'Malapit',
+    bookAppointment: 'Mag-book ng Konsultasyon',
+    directions: 'Ruta at Direksyon',
+    noHospitalsFound: 'Walang pasilidad na tumutugma sa iyong hinahanap',
+    viewDetails: 'Tingnan ang Detalye',
+    callFacility: 'Tawagan',
+    servicesOffered: 'Mga Serbisyong Iniaalok',
+    emergency: 'Emerhensiya',
+
+    // Facilities & Billing Ledger
+    myFacilitiesTitle: 'Aking Mga Pasilidad at Rekord',
+    allCharges: 'Lahat ng Singil',
+    pending: 'Nakabinbin',
+    paid: 'Bayad Na',
+    totalBalance: 'Kabuuang Natitirang Balanse',
+    insuranceCovered: 'Sagot ng Insurance / HMO',
+    patientDue: 'Babasahing Babayaran ng Pasyente',
+    payNow: 'Magbayad Ngayon',
+    paymentHistory: 'Kasaysayan ng Pagbabayad',
+    billingLedger: 'Ledger ng Singil',
+    recentActivity: 'Kamakailang Aktibidad',
+    makePayment: 'Magsagawa ng Bayad',
+    selectPaymentMethod: 'Pumili ng Paraan ng Pagbabayad',
+    amountToPay: 'Halagang Babayaran',
+    receipts: 'Mga Resibo',
+
+    // Messages
+    messagesTitle: 'Mga Mensahe',
+    searchConversations: 'Maghanap ng ospital at klinika',
+    noMessages: 'Wala pang mga mensahe',
+    startConversation: 'Magsimula ng pag-uusap',
+    unableToLoadConversations: 'Hindi mai-load ang mga pag-uusap.',
+    noMatchingHospitals: 'Walang tumutugmang ospital o klinika.',
+    noLinkedHospitals: 'Wala pang nakakabit na ospital o klinika.',
+    tryAgain: 'Subukang muli',
+    typeMessage: 'Mag-type ng mensahe...',
+    send: 'Ipadala',
+
+    // Notifications
+    notificationsTitle: 'Mga Abiso',
+    markAll: 'Markahan lahat',
+    markAllRead: 'Markahan lahat bilang nabasa',
+    noNotifications: 'Wala pang mga abiso',
+    clearAll: 'Linisin lahat',
+    on: 'Naka-on',
+    off: 'Naka-off',
+
+    // Common Action Buttons & Labels
+    cancel: 'Kanselahin',
+    confirm: 'Kumpirmahin',
+    save: 'I-save',
+    saved: 'Nai-save na',
+    close: 'Isara',
+    back: 'Bumalik',
+    loading: 'Naglo-load...',
+    done: 'Tapos na',
+    edit: 'I-edit',
+    delete: 'Burahin',
+    refresh: 'I-refresh',
+    compact: 'Maliit',
+    standard: 'Katamtaman',
+    large: 'Malaki',
+
+    // Settings
     settingsTitle: 'Mga Setting',
     tapToViewProfile: 'I-tap upang tingnan at i-update ang iyong rekord medikal',
     appPreferencesHeader: 'Wika at Display',
@@ -118,9 +364,10 @@ export function getAppTranslations(language = 'en') {
 }
 
 export function getDisplayConfig(perms = {}) {
-  const isDark = perms?.themeMode === 'dark';
+  const systemDark = Appearance.getColorScheme() === 'dark';
+  const isDark = perms?.themeMode === 'dark' || (perms?.themeMode === 'system' && systemDark);
   const highContrast = !!perms?.highContrast;
-  const textSizeObj = TEXT_SIZES.find(t => t.id === perms?.textSize) || TEXT_SIZES[1];
+  const textSizeObj = (Array.isArray(TEXT_SIZES) ? TEXT_SIZES.find(t => t.id === perms?.textSize) : null) || { scale: 1.0 };
   const fontScale = textSizeObj.scale;
 
   if (isDark) {
@@ -130,12 +377,16 @@ export function getDisplayConfig(perms = {}) {
       fontScale,
       bg: highContrast ? '#020617' : '#0f172a',
       cardBg: highContrast ? '#0f172a' : '#1e293b',
-      subCardBg: '#334155',
+      subCardBg: highContrast ? '#1e293b' : '#334155',
       textPrimary: '#f8fafc',
       textSecondary: highContrast ? '#e2e8f0' : '#94a3b8',
       border: highContrast ? '#475569' : '#334155',
       divider: '#334155',
+      inputBg: highContrast ? '#0f172a' : '#1e293b',
+      inputText: '#f8fafc',
+      placeholder: '#94a3b8',
       accent: '#38bdf8',
+      statusBarStyle: 'light',
     };
   }
 
@@ -150,7 +401,11 @@ export function getDisplayConfig(perms = {}) {
     textSecondary: highContrast ? '#1e293b' : '#6b7280',
     border: highContrast ? '#94a3b8' : '#f3f4f6',
     divider: highContrast ? '#cbd5e1' : '#f3f4f6',
+    inputBg: '#f9fafb',
+    inputText: '#1f2937',
+    placeholder: '#9ca3af',
     accent: '#0ea5e9',
+    statusBarStyle: 'dark',
   };
 }
 
@@ -221,15 +476,15 @@ function normalizeRowToUi(raw) {
     allergies: allergiesRaw || 'None',
     allergiesList: allergiesRaw
       ? allergiesRaw
-          .split(/[\n,;]+/)
-          .map(s => s.trim())
-          .filter(s => s && s.toLowerCase() !== 'none')
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(s => s && s.toLowerCase() !== 'none')
       : [],
     medicalHistory: historyRaw
       ? historyRaw
-          .split(/[\n,;]+/)
-          .map(s => s.trim())
-          .filter(s => s && s.toLowerCase() !== 'none')
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(s => s && s.toLowerCase() !== 'none')
       : [],
     avatar: raw.avatar_url || '',
     insuranceConsent:
@@ -255,7 +510,7 @@ let realtimeUserId = null;
 
 function stopRealtimeProfileSync() {
   if (realtimeChannel) {
-    try { supabase.removeChannel(realtimeChannel); } catch {}
+    try { supabase.removeChannel(realtimeChannel); } catch { }
     realtimeChannel = null;
     realtimeUserId = null;
   }
@@ -294,20 +549,20 @@ function ensureRealtimeProfileSync() {
         }
       )
       .subscribe();
-  } catch {}
+  } catch { }
 }
 
 function notifyProfileChanged(profile) {
   cachedProfile = profile;
   profileListeners.forEach(fn => {
-    try { fn(profile); } catch {}
+    try { fn(profile); } catch { }
   });
 }
 
 function notifyPermissionsChanged(perms) {
   cachedPermissions = perms;
   permissionListeners.forEach(fn => {
-    try { fn(perms); } catch {}
+    try { fn(perms); } catch { }
   });
 }
 
@@ -392,13 +647,13 @@ const ProfileAPI = {
     try {
       const raw = await SecureStore.getItemAsync(getPermissionsKey());
       if (raw) stored = JSON.parse(raw) || {};
-    } catch {}
+    } catch { }
 
     let osLocationGranted = false;
     try {
       const perm = await Location.getForegroundPermissionsAsync();
       osLocationGranted = perm?.status === 'granted';
-    } catch {}
+    } catch { }
 
     const resolved = {
       insuranceConsent:
@@ -467,7 +722,7 @@ const ProfileAPI = {
     try {
       const raw = await SecureStore.getItemAsync(getPermissionsKey());
       if (raw) stored = JSON.parse(raw) || {};
-    } catch {}
+    } catch { }
 
     const next = {
       ...currentPerms,
@@ -477,7 +732,7 @@ const ProfileAPI = {
 
     try {
       await SecureStore.setItemAsync(getPermissionsKey(), JSON.stringify(next));
-    } catch {}
+    } catch { }
 
     notifyPermissionsChanged(next);
 
@@ -515,7 +770,7 @@ const ProfileAPI = {
             return next;
           }
         }
-      } catch {}
+      } catch { }
 
       try {
         const userId = Session.getUserId();
@@ -528,7 +783,7 @@ const ProfileAPI = {
             .single();
           if (data) notifyProfileChanged(normalizeRowToUi({ ...data, ...dbPatch }));
         }
-      } catch {}
+      } catch { }
     }
 
     return next;
@@ -552,7 +807,7 @@ const ProfileAPI = {
             notifyProfileChanged(formatted);
             return formatted;
           }
-        } catch {}
+        } catch { }
       }
 
       // Direct Supabase fallback
@@ -589,7 +844,7 @@ const ProfileAPI = {
           notifyProfileChanged(formatted);
           return formatted;
         }
-      } catch {}
+      } catch { }
     }
 
     const userId = Session.getUserId();
@@ -673,7 +928,7 @@ const ProfileAPI = {
               medical_history: prevProfile.medical_history ?? null,
             })
             .eq('id', userId);
-        } catch {}
+        } catch { }
       }
       throw new Error(
         'Could not synchronize your medical records with linked clinics. No changes were saved. Please try again.'
@@ -702,7 +957,7 @@ const ProfileAPI = {
           notifyProfileChanged(formatted);
           return formatted;
         }
-      } catch {}
+      } catch { }
     }
 
     const userId = Session.getUserId();
@@ -853,7 +1108,7 @@ const ProfileAPI = {
       if (prevProfile) {
         try {
           await supabase.from('profiles').update(prevProfile).eq('id', userId);
-        } catch {}
+        } catch { }
       }
       throw new Error(
         'Could not synchronize your profile with linked clinics. No changes were saved. Please try again.'
@@ -922,7 +1177,7 @@ const ProfileAPI = {
         if (prevProfile) {
           try {
             await supabase.from('profiles').update(prevProfile).eq('id', userId);
-          } catch {}
+          } catch { }
         }
         throw new Error(
           'Could not synchronize your medical record with linked clinics. No changes were saved. Please try again.'
@@ -962,7 +1217,7 @@ const ProfileAPI = {
     if (!userId) throw new Error('User not logged in');
     try {
       await supabase.from('patients').update({ profile_id: null }).eq('profile_id', userId);
-    } catch {}
+    } catch { }
     await supabase.from('profiles').delete().eq('id', userId);
     notifyProfileChanged(null);
     await Session.signOut();

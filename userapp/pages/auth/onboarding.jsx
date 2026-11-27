@@ -14,6 +14,7 @@ import { CONSENTS } from '../../components/auth/legal';
 import AuthAPI from '../../services/authApi';
 import ProfileAPI from '../../services/profileApi';
 import Session from '../../services/session';
+import { useTheme } from '../../context/ThemeContext';
 
 // Three intro slides (AI wording removed per US-3.0 notes).
 const INTRO_SLIDES = [
@@ -41,6 +42,7 @@ const INTRO_SLIDES = [
 ];
 
 export function OnboardingPage({ onComplete }) {
+  const { display, isDark } = useTheme();
   const { width } = useWindowDimensions();
   const listRef = useRef(null);
   const [slideIndex, setSlideIndex] = useState(0);
@@ -89,14 +91,14 @@ export function OnboardingPage({ onComplete }) {
   // Declined consent screen ("This feature requires your consent.")
   if (declinedStage) {
     return (
-      <View style={styles.screen}>
-        <BackButton onPress={() => setDeclinedStage(null)} />
+      <View style={[styles.screen, { backgroundColor: display.bg }]}>
+        <BackButton onPress={() => setDeclinedStage(null)} color={display.textPrimary} />
         <View style={styles.centerContent}>
           <IconBadge icon={HeartCrack} size={76} colors={['#67C6FA', '#3BA5EC']} />
-          <Text style={[authText.title, { marginTop: 24, fontSize: 22 }]}>
+          <Text style={[authText.title, { color: display.textPrimary, marginTop: 24, fontSize: 22 }]}>
             This feature requires{'\n'}your consent.
           </Text>
-          <Text style={[authText.subtitle, { marginTop: 12, paddingHorizontal: 16 }]}>
+          <Text style={[authText.subtitle, { color: display.textSecondary, marginTop: 12, paddingHorizontal: 16 }]}>
             To fully access all of <Text style={{ color: COLORS.accent, fontWeight: '600' }}>GabayMed</Text>'s features, you must allow its features to be enabled on your account and device.
           </Text>
         </View>
@@ -123,7 +125,7 @@ export function OnboardingPage({ onComplete }) {
   if (stage === 'carousel') {
     const isLast = slideIndex === INTRO_SLIDES.length - 1;
     return (
-      <View style={styles.screen}>
+      <View style={[styles.screen, { backgroundColor: display.bg }]}>
         <FlatList
           ref={listRef}
           data={INTRO_SLIDES}
@@ -145,10 +147,10 @@ export function OnboardingPage({ onComplete }) {
                   <Text style={styles.heroTitle}>{item.title}</Text>
                 </LinearGradient>
                 <View style={styles.slideBody}>
-                  <View style={styles.illustrationCircle}>
+                  <View style={[styles.illustrationCircle, { backgroundColor: isDark ? display.subCardBg : '#F0F9FF', borderColor: display.border }]}>
                     <IconBadge icon={SlideIcon} size={92} colors={['#55C5F8', '#3BA5EC']} />
                   </View>
-                  <Text style={styles.slideSubtitle}>{item.subtitle}</Text>
+                  <Text style={[styles.slideSubtitle, { color: display.textSecondary }]}>{item.subtitle}</Text>
                 </View>
               </View>
             );
@@ -184,14 +186,14 @@ export function OnboardingPage({ onComplete }) {
   // Stage 2: "Let's set up your Care Profile!"
   if (stage === 'welcome') {
     return (
-      <View style={styles.screen}>
-        <BackButton onPress={() => setStage('carousel')} />
+      <View style={[styles.screen, { backgroundColor: display.bg }]}>
+        <BackButton onPress={() => setStage('carousel')} color={display.textPrimary} />
         <View style={styles.centerContent}>
           <AuthLogo size={42} style={{ marginBottom: 24 }} />
-          <Text style={authText.title}>
+          <Text style={[authText.title, { color: display.textPrimary }]}>
             Let's set up your{'\n'}<Text style={{ color: COLORS.accent }}>Care</Text> Profile!
           </Text>
-          <Text style={[authText.subtitle, { marginTop: 10, paddingHorizontal: 18 }]}>
+          <Text style={[authText.subtitle, { color: display.textSecondary, marginTop: 10, paddingHorizontal: 18 }]}>
             Review a few quick permissions so we can tailor your healthcare experience.
           </Text>
           <PrimaryButton title="Proceed" onPress={() => setStage('insurance')} style={{ width: '100%', marginTop: 28 }} />
@@ -206,15 +208,15 @@ export function OnboardingPage({ onComplete }) {
     const item = CONSENTS[isInsurance ? 0 : 1];
     const ConsentIcon = isInsurance ? ShieldCheck : Building2;
     return (
-      <View style={styles.screen}>
-        <BackButton onPress={() => setStage(isInsurance ? 'welcome' : 'insurance')} />
+      <View style={[styles.screen, { backgroundColor: display.bg }]}>
+        <BackButton onPress={() => setStage(isInsurance ? 'welcome' : 'insurance')} color={display.textPrimary} />
         <View style={styles.consentContainer}>
           <View style={{ alignItems: 'center', marginBottom: 14 }}>
             <IconBadge icon={ConsentIcon} size={68} />
           </View>
-          <Text style={styles.consentTitle}>{item.title}</Text>
-          <ScrollView style={styles.consentBox} contentContainerStyle={{ padding: 16 }}>
-            <Text style={styles.consentText}>{item.body}</Text>
+          <Text style={[styles.consentTitle, { color: display.textPrimary }]}>{item.title}</Text>
+          <ScrollView style={[styles.consentBox, { backgroundColor: display.cardBg, borderColor: display.border }]} contentContainerStyle={{ padding: 16 }}>
+            <Text style={[styles.consentText, { color: display.textPrimary }]}>{item.body}</Text>
           </ScrollView>
         </View>
         <View style={styles.bottomActions}>
@@ -243,12 +245,12 @@ export function OnboardingPage({ onComplete }) {
   // Stage 5: Location access prompt + modal popup
   if (stage === 'location') {
     return (
-      <View style={styles.screen}>
-        <BackButton onPress={() => setStage('sharing')} />
+      <View style={[styles.screen, { backgroundColor: display.bg }]}>
+        <BackButton onPress={() => setStage('sharing')} color={display.textPrimary} />
         <View style={styles.centerContent}>
           <IconBadge icon={Building2} size={74} />
-          <Text style={[styles.consentTitle, { marginTop: 20 }]}>Looking for a hospital?</Text>
-          <Text style={[authText.subtitle, { paddingHorizontal: 16 }]}>
+          <Text style={[styles.consentTitle, { color: display.textPrimary, marginTop: 20 }]}>Looking for a hospital?</Text>
+          <Text style={[authText.subtitle, { color: display.textSecondary, paddingHorizontal: 16 }]}>
             Allow location access to enable smart hospital routing, nearby facility suggestions, and proximity-based service availability.
           </Text>
         </View>
@@ -288,12 +290,12 @@ export function OnboardingPage({ onComplete }) {
   // Stage 6: Notifications prompt
   if (stage === 'notifications') {
     return (
-      <View style={styles.screen}>
-        <BackButton onPress={() => setStage('location')} />
+      <View style={[styles.screen, { backgroundColor: display.bg }]}>
+        <BackButton onPress={() => setStage('location')} color={display.textPrimary} />
         <View style={styles.centerContent}>
           <IconBadge icon={Bell} size={74} />
-          <Text style={[styles.consentTitle, { marginTop: 20 }]}>Allow notifications</Text>
-          <Text style={[authText.subtitle, { paddingHorizontal: 16 }]}>
+          <Text style={[styles.consentTitle, { color: display.textPrimary, marginTop: 20 }]}>Allow notifications</Text>
+          <Text style={[authText.subtitle, { color: display.textSecondary, paddingHorizontal: 16 }]}>
             Allow notifications to receive real-time updates on billing changes, insurance coverage, and important service alerts.
           </Text>
           <View style={{ width: '100%', marginTop: 16 }}>
@@ -326,12 +328,12 @@ export function OnboardingPage({ onComplete }) {
 
   // Stage 7: "You're All Set!"
   return (
-    <LinearGradient colors={['#E0F4FF', '#FFFFFF', '#E0F4FF']} style={styles.screen}>
+    <LinearGradient colors={isDark ? [display.bg, display.cardBg, display.bg] : ['#E0F4FF', '#FFFFFF', '#E0F4FF']} style={[styles.screen, { backgroundColor: display.bg }]}>
       <View style={styles.centerContent}>
         <AuthLogo size={46} style={{ marginBottom: 20 }} />
         <IconBadge icon={CheckCircle2} size={68} />
         <Text style={styles.allSetTitle}>You're All{'\n'}Set!</Text>
-        <Text style={[authText.subtitle, { marginBottom: 28, paddingHorizontal: 24 }]}>
+        <Text style={[authText.subtitle, { color: display.textSecondary, marginBottom: 28, paddingHorizontal: 24 }]}>
           Your care profile is ready. Explore accredited hospitals and medical services near you.
         </Text>
         <PrimaryButton title="Start Seeking Care" onPress={onComplete} style={{ width: '80%' }} />

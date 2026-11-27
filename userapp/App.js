@@ -22,9 +22,11 @@ import { ForgotPasswordPage } from './pages/auth/forgot-password';
 import { OnboardingPage } from './pages/auth/onboarding';
 import Session from './services/session';
 import ProfileAPI from './services/profileApi';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
 import 'react-native-url-polyfill/auto';
 
-export default function App() {
+function AppContent() {
+  const { display, isDark } = useTheme();
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState(() => Session.current());
   const [authScreen, setAuthScreen] = useState('login'); // 'login' | 'register'
@@ -88,9 +90,9 @@ export default function App() {
 
   if (booting) {
     return (
-      <View style={styles.centered}>
+      <View style={[styles.centered, { backgroundColor: display.bg }]}>
         <ActivityIndicator size="large" color="#3BA5EC" />
-        <StatusBar style="dark" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
       </View>
     );
   }
@@ -98,7 +100,7 @@ export default function App() {
   // 1. Unauthenticated: Login, Registration, or Forgot Password flow
   if (!session) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: display.bg }]}>
         {authScreen === 'register' ? (
           <RegisterPage
             onBack={() => setAuthScreen('login')}
@@ -122,7 +124,7 @@ export default function App() {
             onForgotPassword={() => setAuthScreen('forgot')}
           />
         )}
-        <StatusBar style="dark" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
       </View>
     );
   }
@@ -136,33 +138,50 @@ export default function App() {
   // 2. First-time user: Onboarding walkthrough + care profile setup
   if (!session.profile?.onboardingCompleted) {
     return lock(
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: display.bg }]}>
         <OnboardingPage
           onComplete={() => {
             Session.setProfile({ ...session.profile, onboardingCompleted: true });
           }}
         />
-        <StatusBar style="dark" />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
       </View>
     );
   }
 
   // 3. Authenticated & onboarded: Main patient app
-  if (showMfaSettings) return lock(<MfaSettingsPage onBack={() => setShowMfaSettings(false)} />);
+  if (showMfaSettings) {
+    return lock(
+      <View style={[styles.container, { backgroundColor: display.bg }]}>
+        <MfaSettingsPage onBack={() => setShowMfaSettings(false)} />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+      </View>
+    );
+  }
   if (showMessages) {
-    return lock(<MessagesPage onBack={() => setShowMessages(false)} />);
+    return lock(
+      <View style={[styles.container, { backgroundColor: display.bg }]}>
+        <MessagesPage onBack={() => setShowMessages(false)} />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+      </View>
+    );
   }
 
   if (showNotifications) {
-    return lock(<NotificationsPage onBack={() => setShowNotifications(false)} />);
+    return lock(
+      <View style={[styles.container, { backgroundColor: display.bg }]}>
+        <NotificationsPage onBack={() => setShowNotifications(false)} />
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+      </View>
+    );
   }
 
   return lock(
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: display.bg }]}>
       {showProfile ? (
         <ProfilePage onBack={() => setShowProfile(false)} />
       ) : (
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: display.bg }]}>
           <View style={[styles.tabLayer, activeTab !== 'home' && styles.hiddenTab]}>
             <HomePage
               isActive={activeTab === 'home'}
@@ -244,8 +263,16 @@ export default function App() {
         onChanged={() => setVaultRefreshKey(k => k + 1)}
         onClose={() => setShowRecordVault(false)}
       />
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
     </View>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }
 

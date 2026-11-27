@@ -20,6 +20,7 @@ import { AppHeader } from '../components/app-header';
 import { AppointmentBooking } from '../components/appointment';
 import { GradientButton, GradientText, GradientIcon } from '../components/ui/gradient-button';
 import FacilitiesAPI from '../services/facilitiesApi';
+import { useTheme } from '../context/ThemeContext';
 
 const BILLING_FILTERS = [
   { key: 'all', label: 'All Charges' },
@@ -40,6 +41,7 @@ function formatPeso(val) {
 }
 
 export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfile, onOpenMyAppointments, refreshTrigger }) {
+  const { display, isDark, t, fs } = useTheme();
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAllBalances, setShowAllBalances] = useState(false);
   const [showAllSchedules, setShowAllSchedules] = useState(false);
@@ -102,7 +104,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
       <TouchableOpacity
         activeOpacity={0.88}
         onPress={onOpenMyAppointments}
-        style={isSmall ? styles.scheduleCardGrid : styles.scheduleCard}
+        style={[isSmall ? styles.scheduleCardGrid : styles.scheduleCard, { backgroundColor: display.cardBg, borderColor: display.border }]}
       >
         <View style={styles.scheduleTopRow}>
           <GradientIcon style={[styles.scheduleCalendarIcon, isSmall && { width: 35, height: 35, marginTop: 12 }]}>
@@ -124,8 +126,8 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
           <GradientText style={[styles.scheduleProcedure, isSmall && { fontSize: 16 }]}>
             {schedule.procedure}
           </GradientText>
-          <Text style={styles.scheduleDoctor}>{schedule.doctor}</Text>
-          <Text style={styles.scheduleRoom}>{schedule.room}</Text>
+          <Text style={[styles.scheduleDoctor, { color: display.textSecondary }]}>{schedule.doctor}</Text>
+          <Text style={[styles.scheduleRoom, { color: display.textSecondary }]}>{schedule.room}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -294,8 +296,8 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
             )}
           </View>
           <View>
-            <Text style={styles.activityDescription}>{activity.description}</Text>
-            <Text style={styles.activityTime}>{activity.time}</Text>
+            <Text style={[styles.activityDescription, { color: display.textPrimary }]}>{activity.description}</Text>
+            <Text style={[styles.activityTime, { color: display.textSecondary }]}>{activity.time}</Text>
           </View>
         </View>
         <Text style={[
@@ -310,50 +312,56 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: display.bg }]}>
         <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} onOpenProfile={onOpenProfile} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0ea5e9" />
-          <Text style={styles.loadingText}>Loading facilities...</Text>
+          <Text style={[styles.loadingText, { color: display.textSecondary, fontSize: fs(14) }]}>
+            {t?.loading || 'Loading facilities...'}
+          </Text>
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: display.bg }]}>
       <AppHeader onOpenMessages={onOpenMessages} onOpenNotifications={onOpenNotifications} onOpenProfile={onOpenProfile} />
 
       <ScrollView style={styles.scrollContainer}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Current Provider</Text>
+          <Text style={[styles.sectionTitle, { color: display.textPrimary, fontSize: fs(24) }]}>
+            {t?.myFacilitiesTitle || 'Your Current Provider'}
+          </Text>
 
           {currentFacility && (
-            <View style={styles.facilityCard}>
+            <View style={[styles.facilityCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
               <TouchableOpacity
                 onPress={() => setSelectedFacility(null)}
-                style={styles.closeButton}
+                style={[styles.closeButton, { backgroundColor: display.subCardBg }]}
               >
-                <X size={16} color="#6b7280" />
+                <X size={16} color={display.textSecondary} />
               </TouchableOpacity>
               <View style={styles.facilityHeader}>
                 <View style={styles.facilityIcon}>
                   <Building2 size={24} color="#0ea5e9" />
                 </View>
-                <Text style={styles.facilityName}>{currentFacility.name}</Text>
+                <Text style={[styles.facilityName, { color: display.textPrimary, fontSize: fs(18) }]}>{currentFacility.name}</Text>
               </View>
               <View style={styles.facilityInfo}>
                 <View style={styles.insuranceBadge}>
-                  <Text style={styles.insuranceText}>{currentFacility.insurancePlan}</Text>
+                  <Text style={[styles.insuranceText, { fontSize: fs(12) }]}>{currentFacility.insurancePlan}</Text>
                 </View>
-                <Text style={styles.lastVisitText}>Last Visit {currentFacility.lastVisit}</Text>
+                <Text style={[styles.lastVisitText, { color: display.textSecondary, fontSize: fs(12) }]}>Last Visit {currentFacility.lastVisit}</Text>
               </View>
               <GradientButton 
                 onPress={() => setShowAppointment(true)}
                 style={styles.scheduleButton}
               >
                 <Calendar size={22} color="#66BAFF" fill="#fff" />
-                <Text style={styles.scheduleButtonText}>Schedule New Appointment</Text>
+                <Text style={[styles.scheduleButtonText, { fontSize: fs(15) }]}>
+                  {t?.schedule || 'Schedule New Appointment'}
+                </Text>
               </GradientButton>
             </View>
           )}
@@ -365,15 +373,15 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                   <TouchableOpacity
                     key={`fac-${facility.id}-${idx}`}
                     onPress={() => setSelectedFacility(facility.id)}
-                    style={styles.facilitySelectorCard}
+                    style={[styles.facilitySelectorCard, { backgroundColor: display.cardBg, borderColor: display.border }]}
                   >
                     <View style={styles.facilitySelectorContent}>
                       <View style={styles.facilityIcon}>
                         <Building2 size={24} color="#0ea5e9" />
                       </View>
                       <View style={styles.facilitySelectorInfo}>
-                        <Text style={styles.facilitySelectorName}>{facility.name}</Text>
-                        <Text style={styles.facilitySelectorLastVisit}>Last Visit: {facility.lastVisit}</Text>
+                        <Text style={[styles.facilitySelectorName, { color: display.textPrimary }]}>{facility.name}</Text>
+                        <Text style={[styles.facilitySelectorLastVisit, { color: display.textSecondary }]}>Last Visit: {facility.lastVisit}</Text>
                       </View>
                     </View>
                     <ChevronRight size={20} color="#9ca3af" />
@@ -381,7 +389,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                 ))
               ) : (
                 <View style={{ alignItems: 'center', marginTop: 20 }}>
-                  <Text style={{ textAlign: 'center', color: '#6b7280', marginBottom: 14 }}>
+                  <Text style={{ textAlign: 'center', color: display.textSecondary, marginBottom: 14 }}>
                     No facilities linked to your account yet.
                   </Text>
                   <GradientButton
@@ -401,23 +409,23 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
           <>
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Your Schedule</Text>
+                <Text style={[styles.sectionTitle, { color: display.textPrimary }]}>Your Schedule</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   {onOpenMyAppointments && (
                     <TouchableOpacity onPress={onOpenMyAppointments}>
-                      <Text style={[styles.seeAllButton, { color: '#0ea5e9' }]}>Manage</Text>
+                      <Text style={[styles.seeAllButton, { color: display.accent }]}>Manage</Text>
                     </TouchableOpacity>
                   )}
                   {schedules.length > 2 && (
                     <TouchableOpacity onPress={() => setShowAllSchedules(!showAllSchedules)}>
-                      <Text style={styles.seeAllButton}>{showAllSchedules ? 'Show Less' : 'See All'}</Text>
+                      <Text style={[styles.seeAllButton, { color: display.accent }]}>{showAllSchedules ? 'Show Less' : 'See All'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
               </View>
 
               {schedules.length === 0 ? (
-                <Text style={{ color: '#9ca3af', marginTop: 12, fontStyle: 'italic' }}>No appointments scheduled.</Text>
+                <Text style={{ color: display.textSecondary, marginTop: 12, fontStyle: 'italic' }}>No appointments scheduled.</Text>
               ) : showAllSchedules ? (
                 <View style={styles.scheduleGrid}>
                   {schedules.map((schedule, idx) => (
@@ -438,32 +446,32 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
               <View style={styles.sectionHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Receipt size={20} color="#0ea5e9" />
-                  <Text style={styles.sectionTitle}>Billing & Payments</Text>
+                  <Text style={[styles.sectionTitle, { color: display.textPrimary }]}>Billing & Payments</Text>
                 </View>
-                <Text style={styles.billingCountHint}>
+                <Text style={[styles.billingCountHint, { color: display.textSecondary }]}>
                   {balances.length} pending · {facilityCharges.filter(c => c.paymentStatus === 'PAID').length} paid
                 </Text>
               </View>
 
               {/* Balance Distribution Card (Mirrors HIS Payment Distribution) */}
-              <View style={styles.distributionCard}>
-                <Text style={styles.distributionHeaderTitle}>Balance Distribution</Text>
+              <View style={[styles.distributionCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
+                <Text style={[styles.distributionHeaderTitle, { color: display.textPrimary }]}>Balance Distribution</Text>
                 <View style={styles.distributionGrid}>
                   <View style={styles.distributionCol}>
-                    <Text style={styles.distributionLabel}>Total Balance</Text>
+                    <Text style={[styles.distributionLabel, { color: display.textSecondary }]}>Total Balance</Text>
                     <Text style={[styles.distributionValue, { color: '#1d4ed8' }]}>
                       {formatPeso(activeDistribution.totalBalance)}
                     </Text>
                   </View>
                   <View style={styles.distributionCol}>
-                    <Text style={styles.distributionLabel}>Insurance Portion</Text>
+                    <Text style={[styles.distributionLabel, { color: display.textSecondary }]}>Insurance Portion</Text>
                     <Text style={[styles.distributionValue, { color: '#059669' }]}>
                       {formatPeso(activeDistribution.insurancePortion)}
                     </Text>
                   </View>
                   <View style={styles.distributionCol}>
-                    <Text style={styles.distributionLabel}>Patient Portion</Text>
-                    <Text style={[styles.distributionValue, { color: '#0f172a' }]}>
+                    <Text style={[styles.distributionLabel, { color: display.textSecondary }]}>Patient Portion</Text>
+                    <Text style={[styles.distributionValue, { color: display.textPrimary }]}>
                       {formatPeso(activeDistribution.patientPortion)}
                     </Text>
                   </View>
@@ -497,9 +505,9 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                     <TouchableOpacity
                       key={f.key}
                       onPress={() => setBillingFilter(f.key)}
-                      style={[styles.billingFilterChip, active && styles.billingFilterChipActive]}
+                      style={[styles.billingFilterChip, { backgroundColor: display.subCardBg, borderColor: display.border }, active && styles.billingFilterChipActive]}
                     >
-                      <Text style={[styles.billingFilterText, active && styles.billingFilterTextActive]}>
+                      <Text style={[styles.billingFilterText, { color: display.textSecondary }, active && styles.billingFilterTextActive]}>
                         {f.label}
                       </Text>
                     </TouchableOpacity>
@@ -525,7 +533,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                     const badgeLabel = isPaid ? 'Paid' : isPartial ? 'Partially Paid' : 'Unpaid';
 
                     return (
-                      <View key={`bill-charge-${charge.id}`} style={styles.billingChargeCard}>
+                      <View key={`bill-charge-${charge.id}`} style={[styles.billingChargeCard, { backgroundColor: display.cardBg, borderColor: display.border }]}>
                         <TouchableOpacity
                           activeOpacity={0.85}
                           onPress={() =>
@@ -550,43 +558,45 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                                 style={[
                                   styles.billingStatusPill,
                                   {
-                                    backgroundColor: charge.billToInsurance ? '#eff6ff' : '#f1f5f9',
+                                    backgroundColor: charge.billToInsurance
+                                      ? (isDark ? '#1e3a8a' : '#eff6ff')
+                                      : (isDark ? '#334155' : '#f1f5f9'),
                                   },
                                 ]}
                               >
                                 <Text
                                   style={[
                                     styles.billingStatusPillText,
-                                    { color: charge.billToInsurance ? '#1d4ed8' : '#475569' },
+                                    { color: charge.billToInsurance ? (isDark ? '#93c5fd' : '#1d4ed8') : (isDark ? '#cbd5e1' : '#475569') },
                                   ]}
                                 >
                                   {charge.billToInsurance ? 'Bill to Insurance' : 'Self-Pay'}
                                 </Text>
                               </View>
                             </View>
-                            <Text style={styles.billingChargeDate}>{charge.date}</Text>
+                            <Text style={[styles.billingChargeDate, { color: display.textSecondary }]}>{charge.date}</Text>
                           </View>
 
                           <View style={styles.billingChargeMain}>
                             <Stethoscope size={17} color="#0ea5e9" style={{ marginTop: 2 }} />
                             <View style={{ flex: 1 }}>
-                              <Text style={styles.billingChargeTitle}>
+                              <Text style={[styles.billingChargeTitle, { color: display.textPrimary }]}>
                                 {charge.code && charge.code !== '-' ? `[${charge.code}] ` : ''}
                                 {charge.procedureName}
                               </Text>
                               {!!charge.providerName && (
-                                <Text style={styles.billingChargeSub}>{charge.providerName}</Text>
+                                <Text style={[styles.billingChargeSub, { color: display.textSecondary }]}>{charge.providerName}</Text>
                               )}
                             </View>
                           </View>
 
                           <View style={styles.billingChargeAmountsRow}>
                             <View>
-                              <Text style={styles.billingAmountCaption}>Total Charge</Text>
-                              <Text style={styles.billingAmountNumber}>{formatPeso(charge.amount)}</Text>
+                              <Text style={[styles.billingAmountCaption, { color: display.textSecondary }]}>Total Charge</Text>
+                              <Text style={[styles.billingAmountNumber, { color: display.textPrimary }]}>{formatPeso(charge.amount)}</Text>
                             </View>
                             <View style={{ alignItems: 'flex-end' }}>
-                              <Text style={styles.billingAmountCaption}>Remaining Balance</Text>
+                              <Text style={[styles.billingAmountCaption, { color: display.textSecondary }]}>Remaining Balance</Text>
                               <Text
                                 style={[
                                   styles.billingAmountNumber,
@@ -611,20 +621,20 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                         </TouchableOpacity>
 
                         {isExpanded && (
-                          <View style={styles.billingBreakdownBox}>
+                          <View style={[styles.billingBreakdownBox, { backgroundColor: display.subCardBg, borderColor: display.border }]}>
                             <View style={styles.billingBreakdownLine}>
-                              <Text style={styles.billingBreakdownLabel}>Procedure Charge</Text>
-                              <Text style={styles.billingBreakdownValue}>{formatPeso(charge.amount)}</Text>
+                              <Text style={[styles.billingBreakdownLabel, { color: display.textSecondary }]}>Procedure Charge</Text>
+                              <Text style={[styles.billingBreakdownValue, { color: display.textPrimary }]}>{formatPeso(charge.amount)}</Text>
                             </View>
                             <View style={styles.billingBreakdownLine}>
-                              <Text style={styles.billingBreakdownLabel}>Amount Paid</Text>
-                              <Text style={[styles.billingBreakdownValue, { color: '#0369a1' }]}>
+                              <Text style={[styles.billingBreakdownLabel, { color: display.textSecondary }]}>Amount Paid</Text>
+                              <Text style={[styles.billingBreakdownValue, { color: display.accent }]}>
                                 − {formatPeso(charge.amountPaid)}
                               </Text>
                             </View>
-                            <View style={styles.billingBreakdownDivider} />
+                            <View style={[styles.billingBreakdownDivider, { backgroundColor: display.divider }]} />
                             <View style={styles.billingBreakdownLine}>
-                              <Text style={[styles.billingBreakdownLabel, { fontWeight: '700', color: '#0f172a' }]}>
+                              <Text style={[styles.billingBreakdownLabel, { fontWeight: '700', color: display.textPrimary }]}>
                                 Remaining Balance
                               </Text>
                               <Text
@@ -642,14 +652,14 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
 
                             {charge.payments?.length > 0 && (
                               <View style={{ marginTop: 10 }}>
-                                <Text style={styles.billingPaymentsSubHeader}>Payments Applied</Text>
+                                <Text style={[styles.billingPaymentsSubHeader, { color: display.textSecondary }]}>Payments Applied</Text>
                                 {charge.payments.map((p, idx) => (
                                   <View key={`pmt-${p.id}-${idx}`} style={styles.billingPaymentHistoryRow}>
                                     <CreditCard size={13} color="#64748b" />
-                                    <Text style={styles.billingPaymentHistoryText}>
+                                    <Text style={[styles.billingPaymentHistoryText, { color: display.textSecondary }]}>
                                       {p.date} · {p.description}
                                     </Text>
-                                    <Text style={styles.billingPaymentHistoryAmt}>{formatPeso(p.amount)}</Text>
+                                    <Text style={[styles.billingPaymentHistoryAmt, { color: display.textPrimary }]}>{formatPeso(p.amount)}</Text>
                                   </View>
                                 ))}
                               </View>
@@ -675,10 +685,10 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
 
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Account Activity</Text>
+                <Text style={[styles.sectionTitle, { color: display.textPrimary }]}>Account Activity</Text>
                 {activities.length > 0 && (
                   <TouchableOpacity onPress={() => setShowAllBalances(true)}>
-                    <Text style={styles.seeAllButton}>See All</Text>
+                    <Text style={[styles.seeAllButton, { color: display.accent }]}>See All</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -703,21 +713,21 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
         onRequestClose={() => setShowAllBalances(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: display.cardBg }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Account Activity</Text>
+              <Text style={[styles.modalTitle, { color: display.textPrimary }]}>Account Activity</Text>
               <TouchableOpacity
                 onPress={() => setShowAllBalances(false)}
-                style={styles.modalCloseButton}
+                style={[styles.modalCloseButton, { backgroundColor: display.subCardBg }]}
               >
-                <X size={20} color="#4b5563" />
+                <X size={20} color={display.textPrimary} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.modalBody}>
-              <View style={styles.totalBalanceCard}>
-                <Text style={styles.totalBalanceLabel}>Total Pending Balance</Text>
-                <Text style={styles.totalBalanceAmount}>
+              <View style={[styles.totalBalanceCard, { backgroundColor: display.subCardBg }]}>
+                <Text style={[styles.totalBalanceLabel, { color: display.textSecondary }]}>Total Pending Balance</Text>
+                <Text style={[styles.totalBalanceAmount, { color: display.textPrimary }]}>
                   {formatPeso(activeDistribution.totalBalance)}
                 </Text>
               </View>
@@ -725,7 +735,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
               <ScrollView style={{ maxHeight: 340 }}>
                 <View style={styles.balancesList}>
                   {activities.length === 0 ? (
-                     <Text style={{ textAlign: 'center', color: '#6b7280', padding: 20 }}>No activity history.</Text>
+                     <Text style={{ textAlign: 'center', color: display.textSecondary, padding: 20 }}>No activity history.</Text>
                   ) : (
                     activities.map(renderActivityItem)
                   )}
@@ -744,14 +754,14 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
         onRequestClose={() => setShowPaymentModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxWidth: 440 }]}>
+          <View style={[styles.modalContent, { maxWidth: 440, backgroundColor: display.cardBg }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Make Payment</Text>
+              <Text style={[styles.modalTitle, { color: display.textPrimary }]}>Make Payment</Text>
               <TouchableOpacity
                 onPress={() => setShowPaymentModal(false)}
-                style={styles.modalCloseButton}
+                style={[styles.modalCloseButton, { backgroundColor: display.subCardBg }]}
               >
-                <X size={20} color="#4b5563" />
+                <X size={20} color={display.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -778,11 +788,11 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
               )}
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Amount to Pay (₱) *</Text>
+                <Text style={[styles.inputLabel, { color: display.textPrimary }]}>Amount to Pay (₱) *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: display.subCardBg, color: display.textPrimary, borderColor: display.border }]}
                   placeholder="0.00"
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={display.placeholder}
                   value={paymentAmount}
                   onChangeText={val => {
                     setPaymentFeedback(null);
@@ -793,7 +803,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Allocation Method / Procedure *</Text>
+                <Text style={[styles.inputLabel, { color: display.textPrimary }]}>Allocation Method / Procedure *</Text>
                 <View style={styles.selectContainer}>
                   <TouchableOpacity
                     onPress={() => {
@@ -804,7 +814,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                       );
                       const defaultPayAmt =
                         activeDistribution?.patientPortion > 0
-                          ? activeDistribution.patientPortion
+                           ? activeDistribution.patientPortion
                           : totalUnpaid;
                       if (!paymentAmount && defaultPayAmt > 0) {
                         setPaymentAmount(String(Number(defaultPayAmt.toFixed(2))));
@@ -812,12 +822,14 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                     }}
                     style={[
                       styles.selectOption,
+                      { backgroundColor: display.subCardBg, borderColor: display.border },
                       selectedProcedure === 'auto' && styles.selectOptionActive,
                     ]}
                   >
                     <Text
                       style={[
                         styles.selectOptionText,
+                        { color: display.textPrimary },
                         selectedProcedure === 'auto' && styles.selectOptionTextActive,
                       ]}
                     >
@@ -838,12 +850,14 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                       }}
                       style={[
                         styles.selectOption,
+                        { backgroundColor: display.subCardBg, borderColor: display.border },
                         selectedProcedure === balance.id && styles.selectOptionActive,
                       ]}
                     >
                       <Text
                         style={[
                           styles.selectOptionText,
+                          { color: display.textPrimary },
                           selectedProcedure === balance.id && styles.selectOptionTextActive,
                         ]}
                       >
@@ -855,13 +869,14 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Payment Method *</Text>
+                <Text style={[styles.inputLabel, { color: display.textPrimary }]}>Payment Method *</Text>
                 <View style={styles.paymentMethodGrid}>
                   {PAYMENT_METHODS.map(method => (
                     <TouchableOpacity
                       key={method.id}
                       style={[
                         styles.paymentMethodButton,
+                        { backgroundColor: display.subCardBg, borderColor: display.border },
                         selectedPaymentMethod === method.id && styles.paymentMethodButtonActive,
                       ]}
                       onPress={() => setSelectedPaymentMethod(method.id)}
@@ -869,6 +884,7 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                       <Text
                         style={[
                           styles.paymentMethodText,
+                          { color: display.textPrimary },
                           selectedPaymentMethod === method.id && styles.paymentMethodTextActive,
                         ]}
                       >

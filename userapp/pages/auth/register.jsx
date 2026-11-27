@@ -9,6 +9,7 @@ import {
 } from '../../components/auth/auth-ui';
 import { TERMS_OF_SERVICE, PRIVACY_POLICY } from '../../components/auth/legal';
 import AuthAPI from '../../services/authApi';
+import { useTheme } from '../../context/ThemeContext';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NAME = /^\p{L}[\p{L}\p{M} .'-]*$/u;
@@ -88,6 +89,7 @@ function validateStep(step, f) {
 }
 
 export function RegisterPage({ onBack, onRegistered }) {
+  const { display } = useTheme();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
     email: '', password: '', confirm: '',
@@ -252,15 +254,15 @@ export function RegisterPage({ onBack, onRegistered }) {
         <View style={{ width: 34 }} />
       </LinearGradient>
 
-      <KeyboardAvoidingView style={styles.sheet} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={[styles.sheet, { backgroundColor: display.bg }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.progress} accessibilityLabel={`Step ${step + 1} of ${STEPS.length}`}>
             {STEPS.map((_, i) => <View key={i} style={[styles.progressBar, i <= step && styles.progressOn]} />)}
           </View>
 
           <View style={styles.stepTitleRow}>
-            <StepIcon size={22} color={COLORS.heading} />
-            <Text style={styles.stepTitle}>{STEPS[step].title}</Text>
+            <StepIcon size={22} color={display.textPrimary} />
+            <Text style={[styles.stepTitle, { color: display.textPrimary }]}>{STEPS[step].title}</Text>
           </View>
 
           <ErrorBanner message={error} />
@@ -351,9 +353,9 @@ export function RegisterPage({ onBack, onRegistered }) {
                 {['', ...SUFFIXES].map(s => {
                   const on = form.name_suffix === s;
                   return (
-                    <TouchableOpacity key={s || 'none'} onPress={() => set('name_suffix', s)} style={[styles.chip, on && styles.chipOn]}
+                    <TouchableOpacity key={s || 'none'} onPress={() => set('name_suffix', s)} style={[styles.chip, { backgroundColor: display.cardBg, borderColor: display.border }, on && styles.chipOn]}
                       accessibilityRole="radio" accessibilityState={{ selected: on }}>
-                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{s || 'Not applicable'}</Text>
+                      <Text style={[styles.chipText, { color: display.textSecondary }, on && styles.chipTextOn]}>{s || 'Not applicable'}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -373,9 +375,9 @@ export function RegisterPage({ onBack, onRegistered }) {
                 {GENDERS.map(g => {
                   const on = form.gender === g;
                   return (
-                    <TouchableOpacity key={g} onPress={() => set('gender', g)} style={[styles.chip, on && styles.chipOn]}
+                    <TouchableOpacity key={g} onPress={() => set('gender', g)} style={[styles.chip, { backgroundColor: display.cardBg, borderColor: display.border }, on && styles.chipOn]}
                       accessibilityRole="radio" accessibilityState={{ selected: on }}>
-                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{g}</Text>
+                      <Text style={[styles.chipText, { color: display.textSecondary }, on && styles.chipTextOn]}>{g}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -461,9 +463,9 @@ export function RegisterPage({ onBack, onRegistered }) {
                 {BLOOD_TYPES.map(bt => {
                   const on = form.blood_type === bt;
                   return (
-                    <TouchableOpacity key={bt} onPress={() => set('blood_type', on ? '' : bt)} style={[styles.chip, on && styles.chipOn]}
+                    <TouchableOpacity key={bt} onPress={() => set('blood_type', on ? '' : bt)} style={[styles.chip, { backgroundColor: display.cardBg, borderColor: display.border }, on && styles.chipOn]}
                       accessibilityRole="radio" accessibilityState={{ selected: on }}>
-                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{bt}</Text>
+                      <Text style={[styles.chipText, { color: display.textSecondary }, on && styles.chipTextOn]}>{bt}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -528,7 +530,7 @@ export function RegisterPage({ onBack, onRegistered }) {
           )}
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { backgroundColor: display.bg }]}>
           <PrimaryButton
             title={
               loading
@@ -539,7 +541,7 @@ export function RegisterPage({ onBack, onRegistered }) {
             loading={loading}
           />
           <View style={styles.loginRow}>
-            <Text style={authText.small}>Have an account? </Text>
+            <Text style={[authText.small, { color: display.textSecondary }]}>Have an account? </Text>
             <TouchableOpacity onPress={onBack} hitSlop={8} accessibilityRole="link">
               <Text style={[authText.small, authText.link]}>Log in</Text>
             </TouchableOpacity>
@@ -558,8 +560,8 @@ export function RegisterPage({ onBack, onRegistered }) {
           setLegal(null);
         }}
       >
-        <ScrollView style={styles.legalBox} contentContainerStyle={{ padding: 14 }}>
-          <Text style={styles.legalText}>{legal === 'terms' ? TERMS_OF_SERVICE : PRIVACY_POLICY}</Text>
+        <ScrollView style={[styles.legalBox, { backgroundColor: display.cardBg, borderColor: display.border }]} contentContainerStyle={{ padding: 14 }}>
+          <Text style={[styles.legalText, { color: display.textPrimary }]}>{legal === 'terms' ? TERMS_OF_SERVICE : PRIVACY_POLICY}</Text>
         </ScrollView>
       </Popup>
 

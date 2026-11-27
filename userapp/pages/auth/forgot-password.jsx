@@ -5,6 +5,7 @@ import {
   AuthScreen, AuthLogo, TextField, PrimaryButton, OutlineButton, BackButton, ErrorBanner, Popup, OtpCodeInput, authText, COLORS,
 } from '../../components/auth/auth-ui';
 import AuthAPI from '../../services/authApi';
+import { useTheme } from '../../context/ThemeContext';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_RULES = [
@@ -15,6 +16,7 @@ const PASSWORD_RULES = [
 ];
 
 export function ForgotPasswordPage({ onBack, onResetDone }) {
+  const { display } = useTheme();
   // step: 'identify' -> 'otp' -> 'reset'
   const [step, setStep] = useState('identify');
   const [email, setEmail] = useState('');
@@ -122,14 +124,14 @@ export function ForgotPasswordPage({ onBack, onResetDone }) {
 
   return (
     <AuthScreen wave contentStyle={{ justifyContent: 'center', paddingVertical: 40 }}>
-      {step === 'otp' && <BackButton onPress={() => { setError(''); setStep('identify'); }} />}
-      <View style={styles.card}>
+      {step === 'otp' && <BackButton onPress={() => { setError(''); setStep('identify'); }} color={display.textPrimary} />}
+      <View style={[styles.card, { backgroundColor: display.cardBg, borderColor: display.border }]}>
         <AuthLogo size={44} style={{ marginBottom: 20 }} />
 
         {step === 'identify' && (
           <>
-            <Text style={authText.title}>Forgot Password</Text>
-            <Text style={[authText.subtitle, { marginTop: 8, marginBottom: 24 }]}>
+            <Text style={[authText.title, { color: display.textPrimary }]}>Forgot Password</Text>
+            <Text style={[authText.subtitle, { color: display.textSecondary, marginTop: 8, marginBottom: 24 }]}>
               Enter your registered email address. We will send you a verification code to reset your access.
             </Text>
 
@@ -155,7 +157,7 @@ export function ForgotPasswordPage({ onBack, onResetDone }) {
             />
 
             <View style={styles.bottomRow}>
-              <Text style={authText.small}>Remember your password? </Text>
+              <Text style={[authText.small, { color: display.textSecondary }]}>Remember your password? </Text>
               <TouchableOpacity onPress={onBack} hitSlop={8} accessibilityRole="link">
                 <Text style={[authText.small, authText.link]}>Back to Login</Text>
               </TouchableOpacity>
@@ -165,10 +167,10 @@ export function ForgotPasswordPage({ onBack, onResetDone }) {
 
         {step === 'otp' && (
           <>
-            <Text style={authText.title}>OTP Verification</Text>
-            <Text style={[authText.subtitle, { marginTop: 8, marginBottom: 16 }]}>
-              Enter the <Text style={{ fontWeight: '700', color: COLORS.heading }}>One Time Password (OTP)</Text> sent to the{' '}
-              <Text style={{ fontWeight: '700', color: COLORS.heading }}>e-mail address</Text> ({maskedEmail}) you registered with us.
+            <Text style={[authText.title, { color: display.textPrimary }]}>OTP Verification</Text>
+            <Text style={[authText.subtitle, { color: display.textSecondary, marginTop: 8, marginBottom: 16 }]}>
+              Enter the <Text style={{ fontWeight: '700', color: display.textPrimary }}>One Time Password (OTP)</Text> sent to the{' '}
+              <Text style={{ fontWeight: '700', color: display.textPrimary }}>e-mail address</Text> ({maskedEmail}) you registered with us.
             </Text>
 
             <ErrorBanner message={error} />
@@ -191,7 +193,7 @@ export function ForgotPasswordPage({ onBack, onResetDone }) {
             />
 
             <View style={styles.bottomRow}>
-              <Text style={authText.small}>Remember your password? </Text>
+              <Text style={[authText.small, { color: display.textSecondary }]}>Remember your password? </Text>
               <TouchableOpacity onPress={onBack} hitSlop={8} accessibilityRole="link">
                 <Text style={[authText.small, authText.link]}>Back to Login</Text>
               </TouchableOpacity>
@@ -201,7 +203,7 @@ export function ForgotPasswordPage({ onBack, onResetDone }) {
 
         {step === 'reset' && (
           <>
-            <Text style={[authText.title, { marginBottom: 20 }]}>Reset your password</Text>
+            <Text style={[authText.title, { color: display.textPrimary, marginBottom: 20 }]}>Reset your password</Text>
 
             <ErrorBanner message={error} />
 

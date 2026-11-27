@@ -4,8 +4,10 @@ import { ArrowLeft, Hospital, MessageSquare, Search } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient';
 import { ConversationView } from '../components/conversation-view';
 import MessagesAPI from '../services/messagesApi';
+import { useTheme } from '../context/ThemeContext';
 
 export function MessagesPage({ onBack }) {
+  const { display, isDark, t, fs } = useTheme();
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [conversations, setConversations] = useState([]);
@@ -69,7 +71,7 @@ export function MessagesPage({ onBack }) {
   if (!wide && chat) return chat;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: display.bg }]}>
       <LinearGradient
         colors={['#66BAFF', '#83BFF0']}
         style={styles.header}
@@ -77,20 +79,20 @@ export function MessagesPage({ onBack }) {
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <ArrowLeft size={20} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Messages</Text>
+        <Text style={[styles.headerTitle, { fontSize: fs(18) }]}>{t?.messagesTitle || 'Messages'}</Text>
       </LinearGradient>
 
       <View style={styles.workspace}>
-        <View style={[styles.listPane, wide && styles.listPaneWide]}>
+        <View style={[styles.listPane, wide && styles.listPaneWide, { backgroundColor: display.bg }]}>
         <View style={styles.searchContainer}>
-          <Text style={styles.listHeading}>Hospitals &amp; clinics</Text>
-          <View style={styles.searchInputWrapper}>
-            <Search size={20} color="#9ca3af" style={styles.searchIcon} />
+          <Text style={[styles.listHeading, { color: display.textPrimary, fontSize: fs(16) }]}>{t?.searchConversations || 'Hospitals & clinics'}</Text>
+          <View style={[styles.searchInputWrapper, { backgroundColor: display.subCardBg }]}>
+            <Search size={20} color={display.placeholder} style={styles.searchIcon} />
             <TextInput
-              style={styles.searchInput}
-              placeholder="Search hospitals and clinics"
-              accessibilityLabel="Search hospitals and clinics"
-              placeholderTextColor="#9ca3af"
+              style={[styles.searchInput, { color: display.textPrimary, fontSize: fs(14) }]}
+              placeholder={t?.searchConversations || 'Search hospitals and clinics'}
+              accessibilityLabel={t?.searchConversations || 'Search hospitals and clinics'}
+              placeholderTextColor={display.placeholder}
               value={searchText}
               onChangeText={setSearchText}
             />
@@ -110,10 +112,18 @@ export function MessagesPage({ onBack }) {
           >
             {filteredConversations.length === 0 ? (
               <View style={styles.centerContainer}>
-                <Text style={styles.emptyText}>{loadError ? 'Unable to load conversations.' : searchTerm ? 'No matching hospitals or clinics.' : 'No linked hospitals or clinics yet.'}</Text>
-                {loadError && <TouchableOpacity accessibilityRole="button" onPress={onRefresh} style={styles.retryButton}>
-                  <Text style={styles.retryText}>Try again</Text>
-                </TouchableOpacity>}
+                <Text style={[styles.emptyText, { color: display.textSecondary, fontSize: fs(14) }]}>
+                  {loadError
+                    ? (t?.unableToLoadConversations || 'Unable to load conversations.')
+                    : searchTerm
+                      ? (t?.noMatchingHospitals || 'No matching hospitals or clinics.')
+                      : (t?.noLinkedHospitals || 'No linked hospitals or clinics yet.')}
+                </Text>
+                {loadError && (
+                  <TouchableOpacity accessibilityRole="button" onPress={onRefresh} style={styles.retryButton}>
+                    <Text style={[styles.retryText, { fontSize: fs(14) }]}>{t?.tryAgain || 'Try again'}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               filteredConversations.map((conv) => (
@@ -122,25 +132,30 @@ export function MessagesPage({ onBack }) {
                   onPress={() => setSelectedConversation(conv.id)}
                   accessibilityRole="button"
                   accessibilityState={{ selected: selectedConversation === conv.id }}
-                  style={[styles.conversationItem, selectedConversation === conv.id && styles.selectedItem]}
+                  style={[
+                    styles.conversationItem,
+                    { backgroundColor: display.cardBg, borderColor: display.border },
+                    selectedConversation === conv.id && styles.selectedItem,
+                  ]}
                 >
-                  <View style={styles.avatar}>
+                  <View style={[styles.avatar, { backgroundColor: isDark ? '#1e3a8a' : '#e0f2fe' }]}>
                     <Hospital size={22} color="#0369a1" />
                   </View>
                   <View style={styles.conversationContent}>
                     <View style={styles.conversationHeader}>
-                      <Text numberOfLines={1} style={styles.conversationName}>{conv.name}</Text>
-                      {!!conv.timestamp && <Text style={styles.conversationTime}>{conv.timestamp}</Text>}
+                      <Text numberOfLines={1} style={[styles.conversationName, { color: display.textPrimary, fontSize: fs(15) }]}>{conv.name}</Text>
+                      {!!conv.timestamp && <Text style={[styles.conversationTime, { color: display.textSecondary, fontSize: fs(12) }]}>{conv.timestamp}</Text>}
                     </View>
-                    <Text numberOfLines={1} style={styles.branchName}>{conv.branchName}</Text>
+                    <Text numberOfLines={1} style={[styles.branchName, { fontSize: fs(13) }]}>{conv.branchName}</Text>
                     <Text
                       style={[
                         styles.conversationMessage,
-                        conv.unread && styles.conversationMessageUnread
+                        { color: display.textSecondary, fontSize: fs(13) },
+                        conv.unread && [styles.conversationMessageUnread, { color: display.textPrimary }]
                       ]}
                       numberOfLines={1}
                     >
-                      {conv.lastMessage || 'Start a conversation'}
+                      {conv.lastMessage || (t?.startConversation || 'Start a conversation')}
                     </Text>
                   </View>
                   {conv.unread && (

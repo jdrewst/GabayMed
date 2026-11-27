@@ -1,29 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Home, Settings, BriefcaseMedical, Hospital } from 'lucide-react-native';
-import ProfileAPI, { getDisplayConfig } from '../services/profileApi';
+import { useTheme } from '../context/ThemeContext';
 
 export function BottomNav({ activeTab, onTabChange }) {
-  const [perms, setPerms] = useState(() => ProfileAPI.getCachedPermissions() || {});
-
-  useEffect(() => {
-    ProfileAPI.getPermissions()
-      .then(p => {
-        if (p) setPerms(p);
-      })
-      .catch(() => {});
-    return ProfileAPI.subscribePermissions(p => {
-      if (p) setPerms(p);
-    });
-  }, []);
-
-  const display = getDisplayConfig(perms);
+  const { display, t, fs } = useTheme();
 
   const navItems = [
-    { id: 'home', icon: Home, label: 'Home', size: 22 },
-    { id: 'cases', icon: BriefcaseMedical, label: 'Cases', size: 26 },
-    { id: 'facilities', icon: Hospital, label: 'Facilities', size: 26 },
-    { id: 'settings', icon: Settings, label: 'Settings', size: 22 },
+    { id: 'home', icon: Home, label: t?.navHome || 'Home', size: 22 },
+    { id: 'cases', icon: BriefcaseMedical, label: t?.navCases || 'Cases', size: 26 },
+    { id: 'facilities', icon: Hospital, label: t?.navFacilities || 'Facilities', size: 26 },
+    { id: 'settings', icon: Settings, label: t?.navSettings || 'Settings', size: 22 },
   ];
 
   return (

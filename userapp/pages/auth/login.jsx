@@ -6,6 +6,7 @@ import {
 } from '../../components/auth/auth-ui';
 import AuthAPI from '../../services/authApi';
 import Session from '../../services/session';
+import { useTheme } from '../../context/ThemeContext';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -16,6 +17,7 @@ function formatWait(seconds) {
 }
 
 export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notice = '' }) {
+  const { display } = useTheme();
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -71,9 +73,9 @@ export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notic
 
   return (
     <AuthScreen wave contentStyle={{ justifyContent: 'center', paddingVertical: 40 }}>
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: display.cardBg, borderColor: display.border }]}>
         <AuthLogo size={44} style={{ marginBottom: 20 }} />
-        <Text style={authText.title}>
+        <Text style={[authText.title, { color: display.textPrimary }]}>
           Choose Healthcare{'\n'}that's <Text style={styles.highlight}>Right</Text> for You
         </Text>
 
@@ -130,7 +132,7 @@ export function LoginPage({ onSignUp, onForgotPassword, initialEmail = '', notic
             setNeedsMfa(false); setPassword(''); setCode(''); setErrors({}); setError('');
           }} disabled={loading} style={styles.backToSignIn} />
         ) : <View style={styles.signupRow}>
-          <Text style={authText.small}>Don't have an account? </Text>
+          <Text style={[authText.small, { color: display.textSecondary }]}>Don't have an account? </Text>
           <TouchableOpacity onPress={onSignUp} hitSlop={8} accessibilityRole="link">
             <Text style={[authText.small, authText.link]}>Sign up</Text>
           </TouchableOpacity>

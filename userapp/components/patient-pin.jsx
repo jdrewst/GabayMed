@@ -4,6 +4,7 @@ import * as SecureStore from '../lib/secureStorage';
 import { AuthScreen, ErrorBanner, OutlineButton, PrimaryButton, TextField, authText } from './auth/auth-ui';
 import Session from '../services/session';
 import AuthAPI from '../services/authApi';
+import { useTheme } from '../context/ThemeContext';
 
 const pinKey = id => `gabay_app_pin_${id}`;
 const isPin = value => /^\d{6}$/.test(value);
@@ -35,6 +36,7 @@ function PinField({ label, value, onChangeText }) {
 }
 
 export function PatientPinSettings() {
+  const { display } = useTheme();
   const id = Session.getUserId();
   const [enabled, setEnabled] = useState(null);
   const [current, setCurrent] = useState('');
@@ -83,11 +85,11 @@ export function PatientPinSettings() {
   );
 
   return (
-    <View style={styles.section}>
-      <Text style={styles.heading}>App PIN</Text>
-      <Text>Use a six-digit PIN when reopening GabayMed with a saved session on this device.</Text>
+    <View style={[styles.section, { backgroundColor: display.cardBg, borderColor: display.border, borderWidth: 1 }]}>
+      <Text style={[styles.heading, { color: display.textPrimary }]}>App PIN</Text>
+      <Text style={{ color: display.textSecondary }}>Use a six-digit PIN when reopening GabayMed with a saved session on this device.</Text>
       <ErrorBanner message={error} />
-      {status ? <Text accessibilityLiveRegion="polite">{status}</Text> : null}
+      {status ? <Text style={{ color: display.accent }} accessibilityLiveRegion="polite">{status}</Text> : null}
       {enabled !== null && <>
         {enabled && <PinField label="Current PIN" value={current} onChangeText={setCurrent} />}
         <PinField label="New PIN" value={pin} onChangeText={setPin} />
@@ -105,6 +107,7 @@ export function PatientPinSettings() {
 }
 
 export function UnlockPatientApp({ children, patientId, requiresPin }) {
+  const { display } = useTheme();
   const [locked, setLocked] = useState(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -154,7 +157,7 @@ export function UnlockPatientApp({ children, patientId, requiresPin }) {
   );
   return (
     <AuthScreen contentStyle={styles.content}>
-      <Text style={authText.title}>Unlock GabayMed</Text>
+      <Text style={[authText.title, { color: display.textPrimary }]}>Unlock GabayMed</Text>
       <ErrorBanner message={error} />
       <PinField label="App PIN" value={pin} onChangeText={setPin} />
       <PrimaryButton title="Unlock" disabled={!isPin(pin)} loading={busy} onPress={() => unlock()} />
@@ -169,6 +172,7 @@ export function UnlockPatientApp({ children, patientId, requiresPin }) {
 }
 
 function ResetAppPin({ patientId, onCancel, onReset, embedded = false }) {
+  const { display } = useTheme();
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [stage, setStage] = useState('password');
@@ -215,7 +219,7 @@ function ResetAppPin({ patientId, onCancel, onReset, embedded = false }) {
 
   const fields = (
     <>
-      <Text style={embedded ? styles.heading : authText.title}>Reset app PIN</Text>
+      <Text style={[embedded ? styles.heading : authText.title, { color: display.textPrimary }]}>Reset app PIN</Text>
       <ErrorBanner message={error} />
       {stage === 'password' && <TextField label="Account password" value={password} onChangeText={setPassword} secure autoComplete="current-password" />}
       {stage === 'mfa' && (
@@ -233,7 +237,7 @@ function ResetAppPin({ patientId, onCancel, onReset, embedded = false }) {
   );
 
   return embedded
-    ? <View style={styles.section}>{fields}</View>
+    ? <View style={[styles.section, { backgroundColor: display.cardBg, borderColor: display.border, borderWidth: 1 }]}>{fields}</View>
     : <AuthScreen contentStyle={styles.content}>{fields}</AuthScreen>;
 }
 

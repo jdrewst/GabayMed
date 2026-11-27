@@ -8,6 +8,7 @@ import {
 import MapView, { Marker, Callout, Polyline } from 'react-native-maps';
 import MapAPI, { getDistanceKm, formatDistance } from '../services/mapApi';
 import ProfileAPI from '../services/profileApi';
+import { useTheme } from '../context/ThemeContext';
 import { matchesFacilityQuery, MAP_QUICK_SERVICE_FILTERS } from '../lib/medical-services';
 import { Popup } from './auth/auth-ui';
 
@@ -145,6 +146,7 @@ function computeBoundingRegion(points) {
 }
 
 export function MapViewSection({ facilities: propFacilities, onSelectFacility, isActive = true }) {
+  const { display, isDark } = useTheme();
   const inlineMapRef = useRef(null);
   const fullMapRef = useRef(null);
   const inlineMarkerRefs = useRef({});
@@ -620,11 +622,12 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
             key={tab.id}
             style={[
               styles.filterChip,
+              { backgroundColor: isDark ? display.cardBg : 'rgba(255,255,255,0.94)', borderColor: display.border },
               active && (tab.id === 'public' ? styles.filterChipPublicActive : styles.filterChipActive),
             ]}
             onPress={() => setSourceFilter(tab.id)}
           >
-            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+            <Text style={[styles.filterChipText, { color: isDark && !active ? display.textSecondary : undefined }, active && styles.filterChipTextActive]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -635,10 +638,14 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
         return (
           <TouchableOpacity
             key={svc.id}
-            style={[styles.filterChip, active && styles.filterChipActive]}
+            style={[
+              styles.filterChip,
+              { backgroundColor: isDark ? display.cardBg : 'rgba(255,255,255,0.94)', borderColor: display.border },
+              active && styles.filterChipActive,
+            ]}
             onPress={() => setServiceFilter(active ? '' : svc.query)}
           >
-            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+            <Text style={[styles.filterChipText, { color: isDark && !active ? display.textSecondary : undefined }, active && styles.filterChipTextActive]}>
               {svc.label}
             </Text>
           </TouchableOpacity>
@@ -650,16 +657,16 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
   const renderSuggestionsDropdown = (isFullscreen = false) => {
     if (!showSuggestions) return null;
     return (
-      <View style={[styles.suggestionsDropdown, isFullscreen && styles.suggestionsDropdownFullscreen]}>
+      <View style={[styles.suggestionsDropdown, isFullscreen && styles.suggestionsDropdownFullscreen, { backgroundColor: display.cardBg, borderColor: display.border }]}>
         {searchingPublic && (
           <View style={styles.searchingRow}>
             <ActivityIndicator size="small" color="#0ea5e9" />
-            <Text style={styles.searchingText}>Searching public hospitals &amp; clinics...</Text>
+            <Text style={[styles.searchingText, { color: display.textSecondary }]}>Searching public hospitals &amp; clinics...</Text>
           </View>
         )}
         {suggestions.length === 0 ? (
           <View style={styles.emptySuggestion}>
-            <Text style={styles.emptySuggestionText}>No matching hospitals, clinics, or services found.</Text>
+            <Text style={[styles.emptySuggestionText, { color: display.textSecondary }]}>No matching hospitals, clinics, or services found.</Text>
           </View>
         ) : (
           <ScrollView
@@ -674,7 +681,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
               return (
                 <TouchableOpacity
                   key={item.id}
-                  style={styles.suggestionRow}
+                  style={[styles.suggestionRow, { borderBottomColor: display.border }]}
                   onPress={() => {
                     setSearchQuery(item.name);
                     selectFacilityPin(item);
@@ -685,7 +692,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={styles.suggestionTitle} numberOfLines={1}>
+                      <Text style={[styles.suggestionTitle, { color: display.textPrimary }]} numberOfLines={1}>
                         {item.name}
                       </Text>
                       {isPublic ? (
@@ -700,7 +707,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                         </View>
                       )}
                     </View>
-                    <Text style={styles.suggestionSub} numberOfLines={1}>
+                    <Text style={[styles.suggestionSub, { color: display.textSecondary }]} numberOfLines={1}>
                       {item.distanceLabel ? `${item.distanceLabel} • ${item.address}` : item.address}
                     </Text>
                   </View>
@@ -716,14 +723,14 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
   const renderPopupCard = (isCompact = false) => {
     if (!selectedPin) return null;
     return (
-      <View style={[styles.selectedCard, isCompact && styles.selectedCardCompact]}>
+      <View style={[styles.selectedCard, isCompact && styles.selectedCardCompact, { backgroundColor: display.cardBg, borderColor: display.border, borderWidth: isDark ? 1 : 0 }]}>
         <View style={styles.selectedHeader}>
-          <View style={styles.selectedIconWrap}>
+          <View style={[styles.selectedIconWrap, { backgroundColor: isDark ? display.subCardBg : '#f0f9ff' }]}>
             <Building2 size={20} color="#0ea5e9" />
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.selectedTitle, { flexShrink: 1 }]} numberOfLines={1}>
+              <Text style={[styles.selectedTitle, { flexShrink: 1, color: display.textPrimary }]} numberOfLines={1}>
                 {selectedPin.name}
               </Text>
               {selectedPin.isGabay === false ? (
@@ -736,14 +743,14 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                 </View>
               )}
             </View>
-            <Text style={styles.selectedAddress} numberOfLines={isCompact ? 1 : 2}>
+            <Text style={[styles.selectedAddress, { color: display.textSecondary }]} numberOfLines={isCompact ? 1 : 2}>
               {selectedPin.address}
             </Text>
             {!isCompact && Array.isArray(selectedPin.services) && selectedPin.services.length > 0 && (
               <View style={styles.pinServicesWrap}>
                 {selectedPin.services.slice(0, 4).map(svc => (
-                  <View key={svc} style={styles.pinServicePill}>
-                    <Text style={styles.pinServicePillText}>{svc}</Text>
+                  <View key={svc} style={[styles.pinServicePill, isDark && { backgroundColor: display.subCardBg }]}>
+                    <Text style={[styles.pinServicePillText, isDark && { color: display.textSecondary }]}>{svc}</Text>
                   </View>
                 ))}
               </View>
@@ -781,12 +788,12 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
         </View>
 
         {activeRoute && showSteps && !isCompact && (
-          <ScrollView style={styles.stepsList} nestedScrollEnabled>
+          <ScrollView style={[styles.stepsList, { borderTopColor: display.border }]} nestedScrollEnabled>
             {activeRoute.steps.map(step => (
               <View key={step.id} style={styles.stepRow}>
                 <CornerDownRight size={14} color="#0ea5e9" />
-                <Text style={styles.stepInstruction}>{step.instruction}</Text>
-                <Text style={styles.stepDistance}>{step.distanceLabel}</Text>
+                <Text style={[styles.stepInstruction, { color: display.textPrimary }]}>{step.instruction}</Text>
+                <Text style={[styles.stepDistance, { color: display.textSecondary }]}>{step.distanceLabel}</Text>
               </View>
             ))}
           </ScrollView>
@@ -880,7 +887,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
 
         {/* Top search bar with live suggestions + expand button */}
         <View style={styles.inlineTopBar}>
-          <View style={styles.searchInputWrap}>
+          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? display.cardBg : 'rgba(255, 255, 255, 0.95)', borderColor: display.border }]}>
             <Search size={16} color="#0ea5e9" />
             <TextInput
               value={searchQuery}
@@ -897,8 +904,8 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
               }}
               returnKeyType="search"
               placeholder="Search hospital"
-              placeholderTextColor="#94a3b8"
-              style={styles.searchInput}
+              placeholderTextColor={display.placeholder}
+              style={[styles.searchInput, { color: display.textPrimary }]}
             />
             {!!searchQuery && (
               <TouchableOpacity
@@ -908,13 +915,13 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                 }}
                 hitSlop={8}
               >
-                <X size={15} color="#94a3b8" />
+                <X size={15} color={display.textSecondary} />
               </TouchableOpacity>
             )}
           </View>
 
           <TouchableOpacity
-            style={styles.expandButton}
+            style={[styles.expandButton, { backgroundColor: isDark ? display.cardBg : '#fff' }]}
             onPress={() => {
               setShowSuggestions(false);
               setMapExpanded(true);
@@ -944,14 +951,14 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
           <View style={styles.mapOverlay}>
             <View style={styles.fabAboveCardRow}>
               <TouchableOpacity
-                style={styles.locateButtonSmall}
+                style={[styles.locateButtonSmall, { backgroundColor: isDark ? display.cardBg : '#fff' }]}
                 onPress={resetNorthOrientation}
                 accessibilityLabel="Reset map compass to north"
               >
                 <Compass size={17} color="#0ea5e9" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.locateButtonSmall}
+                style={[styles.locateButtonSmall, { backgroundColor: isDark ? display.cardBg : '#fff' }]}
                 onPress={recenterOnUser}
                 accessibilityLabel="My location"
               >
@@ -987,7 +994,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
 
           {/* Top search bar & close button */}
           <View style={styles.fullscreenTopBar}>
-            <View style={styles.fullscreenSearchBox}>
+            <View style={[styles.fullscreenSearchBox, { backgroundColor: isDark ? display.cardBg : '#fff', borderColor: display.border }]}>
               <Search size={18} color="#0ea5e9" />
               <TextInput
                 value={searchQuery}
@@ -1004,8 +1011,8 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                 }}
                 returnKeyType="search"
                 placeholder="Search hospital"
-                placeholderTextColor="#94a3b8"
-                style={styles.fullscreenSearchInput}
+                placeholderTextColor={display.placeholder}
+                style={[styles.fullscreenSearchInput, { color: display.textPrimary }]}
               />
               {!!searchQuery && (
                 <TouchableOpacity
@@ -1014,7 +1021,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                     setShowSuggestions(false);
                   }}
                 >
-                  <X size={16} color="#94a3b8" />
+                  <X size={16} color={display.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1043,14 +1050,14 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
             <View style={styles.fullscreenMapOverlay}>
               <View style={styles.fabAboveCardRow}>
                 <TouchableOpacity
-                  style={styles.myLocationFab}
+                  style={[styles.myLocationFab, { backgroundColor: isDark ? display.cardBg : '#fff' }]}
                   onPress={resetNorthOrientation}
                   accessibilityLabel="Reset map compass to north"
                 >
                   <Compass size={20} color="#0ea5e9" />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.myLocationFab}
+                  style={[styles.myLocationFab, { backgroundColor: isDark ? display.cardBg : '#fff' }]}
                   onPress={recenterOnUser}
                   accessibilityLabel="My location"
                 >

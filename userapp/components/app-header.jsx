@@ -5,6 +5,7 @@ import ProfileAPI from '../services/profileApi';
 import NotificationsAPI, { notificationCategories } from '../services/notificationsApi';
 import MessagesAPI from '../services/messagesApi';
 import { PatientAvatar } from './patient-avatar';
+import { useTheme } from '../context/ThemeContext';
 
 function buildHeaderUserData(profile) {
   if (!profile) {
@@ -28,20 +29,21 @@ function buildHeaderUserData(profile) {
   };
 }
 
-function computeGreeting() {
+function computeGreeting(t) {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 12) return t?.greetingMorning || 'Good morning';
+  if (hour < 18) return t?.greetingAfternoon || 'Good afternoon';
+  return t?.greetingEvening || 'Good evening';
 }
 
 export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }) {
+  const { display, isDark, t, fs } = useTheme();
   const [userData, setUserData] = useState(() =>
     buildHeaderUserData(ProfileAPI.getCachedProfile())
   );
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [greeting, setGreeting] = useState(computeGreeting);
+  const greeting = computeGreeting(t);
 
   useEffect(() => {
     let active = true;
@@ -61,7 +63,6 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
 
   useEffect(() => {
     fetchUserData();
-    setGreeting(computeGreeting());
     const unsub = ProfileAPI.subscribe(profile => {
       if (profile) setUserData(buildHeaderUserData(profile));
     });
@@ -105,19 +106,8 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
     };
   }, []);
 
-  const updateGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) {
-      setGreeting('Good morning');
-    } else if (hour < 18) {
-      setGreeting('Good afternoon');
-    } else {
-      setGreeting('Good evening');
-    }
-  };
-
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: display.cardBg, borderBottomColor: display.border }]}>
       <TouchableOpacity
         style={styles.leftSection}
         onPress={onOpenProfile}
@@ -128,32 +118,44 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
           <PatientAvatar avatar={userData.avatar} gender={userData.gender} size={42} />
         </View>
         <View style={styles.greetingContainer}>
-          <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
-            <Text style={styles.helloText}>{greeting}, </Text>
-            <Text style={styles.nameText}>{userData.firstName}</Text>
+          <Text style={[styles.greeting, { fontSize: fs(18) }]} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={[styles.helloText, { color: display.textSecondary, fontSize: fs(18) }]}>{greeting}, </Text>
+            <Text style={[styles.nameText, { color: display.textPrimary, fontSize: fs(18) }]}>{userData.firstName || t?.guest || 'Guest'}</Text>
           </Text>
         </View>
       </TouchableOpacity>
       <View style={styles.rightSection}>
-        <TouchableOpacity onPress={onOpenMessages} style={styles.iconButton} accessibilityRole="button"
-          accessibilityLabel={`Messages, ${unreadMessages} unread`}>
-          <MessageCircle size={24} color="#4b5563" fill={"#3A4D51"} />
+        <TouchableOpacity
+          onPress={onOpenMessages}
+          style={[styles.iconButton, { backgroundColor: display.subCardBg }]}
+          accessibilityRole="button"
+          accessibilityLabel={`${t?.messages || 'Messages'}, ${unreadMessages} unread`}
+        >
+          <MessageCircle
+            size={24}
+            color={isDark ? '#cbd5e1' : '#4b5563'}
+            fill={isDark ? '#475569' : '#3A4D51'}
+          />
           {unreadMessages > 0 && (
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unreadMessages > 9 ? '9+' : unreadMessages}</Text>
+              <Text style={[styles.badgeText, { fontSize: fs(11) }]}>{unreadMessages > 9 ? '9+' : unreadMessages}</Text>
             </View>
           )}
         </TouchableOpacity>
         <TouchableOpacity
           onPress={onOpenNotifications}
-          style={styles.iconButton}
+          style={[styles.iconButton, { backgroundColor: display.subCardBg }]}
           accessibilityRole="button"
-          accessibilityLabel={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}
+          accessibilityLabel={unreadNotifications ? `${t?.notifications || 'Notifications'}, ${unreadNotifications} unread` : (t?.notifications || 'Notifications')}
         >
-          <Bell size={24} color="#4b5563" fill={"#3A4D51"} />
+          <Bell
+            size={24}
+            color={isDark ? '#cbd5e1' : '#4b5563'}
+            fill={isDark ? '#475569' : '#3A4D51'}
+          />
           {unreadNotifications > 0 && (
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unreadNotifications > 9 ? '9+' : unreadNotifications}</Text>
+              <Text style={[styles.badgeText, { fontSize: fs(11) }]}>{unreadNotifications > 9 ? '9+' : unreadNotifications}</Text>
             </View>
           )}
         </TouchableOpacity>
