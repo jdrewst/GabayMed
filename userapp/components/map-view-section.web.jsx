@@ -7,6 +7,7 @@ import {
 } from 'lucide-react-native';
 import MapAPI, { getDistanceKm, formatDistance } from '../services/mapApi';
 import ProfileAPI from '../services/profileApi';
+import { matchesFacilityQuery, MAP_QUICK_SERVICE_FILTERS } from '../lib/medical-services';
 import { Popup } from './auth/auth-ui';
 
 const DEFAULT_REGION = {
@@ -58,8 +59,8 @@ const sharedMapStore = {
     this.region = {
       latitude: r.latitude,
       longitude: r.longitude,
-      latitudeDelta: Math.min(0.20, Math.max(0.01, r.latitudeDelta || 0.12)),
-      longitudeDelta: Math.min(0.20, Math.max(0.01, r.longitudeDelta || 0.12)),
+      latitudeDelta: Math.min(6.0, Math.max(0.01, r.latitudeDelta || 0.12)),
+      longitudeDelta: Math.min(6.0, Math.max(0.01, r.longitudeDelta || 0.12)),
     };
   },
 
@@ -141,6 +142,7 @@ function buildInteractiveMapHtml({ locations, selectedId, userCoords, locationGr
         address: loc.address || loc.location || '',
         lat: Number(loc.latitude),
         lng: Number(loc.longitude),
+        isPublic: loc.isGabay === false,
       })),
     selectedId: selectedId != null ? String(selectedId) : null,
     userCoords: locationGranted && userCoords ? { lat: Number(userCoords.latitude), lng: Number(userCoords.longitude) } : null,
@@ -215,10 +217,15 @@ function buildInteractiveMapHtml({ locations, selectedId, userCoords, locationGr
 
   data.locations.forEach(loc => {
     const isSel = data.selectedId && String(loc.id) === String(data.selectedId);
-    const marker = L.marker([loc.lat, loc.lng], { icon: pinIcon(isSel ? '#1d4ed8' : '#0ea5e9', isSel) }).addTo(map);
+    const pinColor = loc.isPublic ? (isSel ? '#047857' : '#10b981') : (isSel ? '#1d4ed8' : '#0ea5e9');
+    const badgeBg = loc.isPublic ? '#d1fae5' : '#e0f2fe';
+    const badgeText = loc.isPublic ? 'Public Hospital' : 'Gabay Partner';
+    const badgeColor = loc.isPublic ? '#047857' : '#0284c7';
+    const marker = L.marker([loc.lat, loc.lng], { icon: pinIcon(pinColor, isSel) }).addTo(map);
     marker.bindPopup(
-      '<div class="callout-row"><div class="callout-badge">🏥</div>' +
+      '<div class="callout-row"><div class="callout-badge" style="background:' + badgeBg + ';color:' + badgeColor + '">🏥</div>' +
       '<div class="callout-title">' + escapeHtml(loc.name) + '</div></div>' +
+      '<div style="display:inline-block;margin-bottom:4px;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;background:' + badgeBg + ';color:' + badgeColor + '">' + badgeText + '</div>' +
       '<div class="callout-sub">' + escapeHtml(loc.address) + '</div>'
     );
     marker.on('click', () => {
@@ -279,6 +286,60 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [locationPromptAction, setLocationPromptAction] = useState(null);
   const [locatingBusy, setLocatingBusy] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState('all'); // 'all' | 'gabay' | 'public'
+  const [serviceFilter, setServiceFilter] = useState('');
+  const [livePublicResults, setLivePublicResults] = useState([]);
+  const [searchingPublic, setSearchingPublic] = useState(false);
+
+  const combinedLocations = (() => {
+    const base = [];
+    const seenIds = new Set();
+    const pushUnique = item => {
+      if (!item || seenIds.has(String(item.id))) return;
+      seenIds.add(String(item.id));
+      base.push(item);
+    };
+    if (Array.isArray(propFacilities) && propFacilities.length > 0) {
+      propFacilities.forEach(pushUnique);
+    }
+    (locations || []).forEach(pushUnique);
+    (sharedMapStore.locations || []).forEach(pushUnique);
+    (livePublicResults || []).forEach(pushUnique);
+    return base;
+  })();
+
+  const visibleLocations = combinedLocations.filter(loc => {
+    if (sourceFilter === 'gabay' && loc.isGabay === false) return false;
+    if (sourceFilter === 'public' && loc.isGabay !== false) return false;
+    if (serviceFilter && !matchesFacilityQuery(loc, serviceFilter)) return false;
+    if (searchQuery.trim() && !matchesFacilityQuery(loc, searchQuery)) return false;
+    return true;
+  });
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 3) {
+      setLivePublicResults([]);
+      setSearchingPublic(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSearchingPublic(true);
+      try {
+        const results = await MapAPI.searchPublicHospitals(q, userCoords);
+        if (!cancelled) setLivePublicResults(results || []);
+      } catch {
+        if (!cancelled) setLivePublicResults([]);
+      } finally {
+        if (!cancelled) setSearchingPublic(false);
+      }
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, userCoords]);
 
   useEffect(() => {
     if (Array.isArray(propFacilities) && propFacilities.length > 0) {
@@ -525,19 +586,12 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     setRegion(initial);
   };
 
-  const suggestions = searchQuery.trim()
-    ? activeLocations.filter(loc => {
-        const q = searchQuery.trim().toLowerCase();
-        return (
-          (loc.name || loc.title || '').toLowerCase().includes(q) ||
-          (loc.address || loc.location || '').toLowerCase().includes(q) ||
-          (loc.services || []).some(s => (s || '').toLowerCase().includes(q))
-        );
-      })
-    : activeLocations.slice(0, 8);
+  const suggestions = searchQuery.trim() || serviceFilter || sourceFilter !== 'all'
+    ? visibleLocations.slice(0, 15)
+    : combinedLocations.slice(0, 10);
 
   const mapHtml = buildInteractiveMapHtml({
-    locations: activeLocations,
+    locations: visibleLocations,
     selectedId: selectedPin?.id,
     userCoords,
     locationGranted,
@@ -546,45 +600,106 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     focusUser,
   });
 
-  const renderSuggestionsDropdown = () => {
+  const renderFilterChips = (isFullscreen = false) => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={[styles.filterChipsBar, isFullscreen && styles.filterChipsBarFullscreen]}
+      contentContainerStyle={styles.filterChipsContent}
+      keyboardShouldPersistTaps="handled"
+    >
+      {[
+        { id: 'all', label: 'All Hospitals' },
+        { id: 'gabay', label: 'Gabay Clinics' },
+        { id: 'public', label: 'Public Hospitals' },
+      ].map(tab => {
+        const active = sourceFilter === tab.id;
+        return (
+          <TouchableOpacity
+            key={tab.id}
+            style={[
+              styles.filterChip,
+              active && (tab.id === 'public' ? styles.filterChipPublicActive : styles.filterChipActive),
+            ]}
+            onPress={() => setSourceFilter(tab.id)}
+          >
+            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+      {MAP_QUICK_SERVICE_FILTERS.map(svc => {
+        const active = serviceFilter === svc.query;
+        return (
+          <TouchableOpacity
+            key={svc.id}
+            style={[styles.filterChip, active && styles.filterChipActive]}
+            onPress={() => setServiceFilter(active ? '' : svc.query)}
+          >
+            <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+              {svc.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+
+  const renderSuggestionsDropdown = (isFullscreen = false) => {
     if (!showSuggestions) return null;
     return (
-      <View style={styles.suggestionsDropdown}>
+      <View style={[styles.suggestionsDropdown, isFullscreen && styles.suggestionsDropdownFullscreen]}>
+        {searchingPublic && (
+          <View style={styles.searchingRow}>
+            <ActivityIndicator size="small" color="#0ea5e9" />
+            <Text style={styles.searchingText}>Searching public hospitals &amp; clinics...</Text>
+          </View>
+        )}
         {suggestions.length === 0 ? (
           <View style={styles.emptySuggestion}>
-            <Text style={styles.emptySuggestionText}>No matching hospitals or branches found.</Text>
+            <Text style={styles.emptySuggestionText}>No matching hospitals, clinics, or services found.</Text>
           </View>
         ) : (
-          <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-            {suggestions.map(item => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.suggestionRow}
-                onPress={() => {
-                  setSearchQuery(item.name);
-                  selectFacilityPin(item);
-                }}
-              >
-                <View style={styles.suggestionIcon}>
-                  <MapPin size={15} color="#0ea5e9" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.suggestionTitle} numberOfLines={1}>
-                      {item.name}
-                    </Text>
-                    {item.type === 'branch' && (
-                      <View style={styles.branchTag}>
-                        <Text style={styles.branchTagText}>Branch</Text>
-                      </View>
-                    )}
+          <ScrollView style={{ maxHeight: isFullscreen ? 320 : 210 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+            {suggestions.map(item => {
+              const isPublic = item.isGabay === false;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.suggestionRow}
+                  onPress={() => {
+                    setSearchQuery(item.name);
+                    selectFacilityPin(item);
+                  }}
+                >
+                  <View style={[styles.suggestionIcon, isPublic && { backgroundColor: '#d1fae5' }]}>
+                    <MapPin size={15} color={isPublic ? '#059669' : '#0ea5e9'} />
                   </View>
-                  <Text style={styles.suggestionSub} numberOfLines={1}>
-                    {item.distanceLabel ? `${item.distanceLabel} • ${item.address}` : item.address}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.suggestionTitle} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      {isPublic ? (
+                        <View style={styles.publicTag}>
+                          <Text style={styles.publicTagText}>Public</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.branchTag}>
+                          <Text style={styles.branchTagText}>
+                            {item.type === 'branch' ? 'Gabay Branch' : 'Gabay'}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.suggestionSub} numberOfLines={1}>
+                      {item.distanceLabel ? `${item.distanceLabel} • ${item.address}` : item.address}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         )}
       </View>
@@ -600,12 +715,32 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
             <Building2 size={20} color="#0ea5e9" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.selectedTitle} numberOfLines={1}>
-              {selectedPin.name}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.selectedTitle, { flexShrink: 1 }]} numberOfLines={1}>
+                {selectedPin.name}
+              </Text>
+              {selectedPin.isGabay === false ? (
+                <View style={styles.publicTag}>
+                  <Text style={styles.publicTagText}>Public</Text>
+                </View>
+              ) : (
+                <View style={styles.branchTag}>
+                  <Text style={styles.branchTagText}>Gabay</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.selectedAddress} numberOfLines={isCompact ? 1 : 2}>
               {selectedPin.address}
             </Text>
+            {!isCompact && Array.isArray(selectedPin.services) && selectedPin.services.length > 0 && (
+              <View style={styles.pinServicesWrap}>
+                {selectedPin.services.slice(0, 4).map(svc => (
+                  <View key={svc} style={styles.pinServicePill}>
+                    <Text style={styles.pinServicePillText}>{svc}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
             <View style={styles.metaRow}>
               {activeRoute ? (
                 <>
@@ -738,7 +873,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                 }
               }}
               returnKeyType="search"
-              placeholder="Search hospitals, clinics, or branches..."
+              placeholder="Search hospital"
               placeholderTextColor="#94a3b8"
               style={styles.searchInput}
             />
@@ -767,7 +902,8 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
           </TouchableOpacity>
         </View>
 
-        {renderSuggestionsDropdown()}
+        {!showSuggestions && !searchQuery.trim() && renderFilterChips(false)}
+        {renderSuggestionsDropdown(false)}
 
         {locationGranted === false && !showSuggestions && (
           <TouchableOpacity style={styles.enableLocationChip} onPress={recenterOnUser} activeOpacity={0.85}>
@@ -825,7 +961,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
                   }
                 }}
                 returnKeyType="search"
-                placeholder="Search hospital, clinic, branch, or service..."
+                placeholder="Search hospital"
                 placeholderTextColor="#94a3b8"
                 style={styles.fullscreenSearchInput}
               />
@@ -852,9 +988,11 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
             </TouchableOpacity>
           </View>
 
+          {!showSuggestions && !searchQuery.trim() && renderFilterChips(true)}
+
           {showSuggestions && (
             <View style={styles.fullscreenSuggestionsWrap}>
-              {renderSuggestionsDropdown()}
+              {renderSuggestionsDropdown(true)}
             </View>
           )}
 
@@ -1307,5 +1445,101 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '600',
     color: '#dc2626',
+  },
+  filterChipsBar: {
+    position: 'absolute',
+    top: 56,
+    left: 10,
+    right: 10,
+    zIndex: 12,
+    maxHeight: 34,
+  },
+  filterChipsBarFullscreen: {
+    top: 106,
+    left: 16,
+    right: 16,
+    zIndex: 25,
+  },
+  suggestionsDropdownFullscreen: {
+    position: 'relative',
+    top: 0,
+    left: 0,
+    right: 0,
+    marginTop: 0,
+    zIndex: 35,
+    elevation: 14,
+  },
+  filterChipsContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingRight: 8,
+  },
+  filterChip: {
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  filterChipActive: {
+    backgroundColor: '#0ea5e9',
+    borderColor: '#0284c7',
+  },
+  filterChipPublicActive: {
+    backgroundColor: '#10b981',
+    borderColor: '#059669',
+  },
+  filterChipText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  filterChipTextActive: {
+    color: '#ffffff',
+  },
+  publicTag: {
+    backgroundColor: '#d1fae5',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  publicTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  searchingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  searchingText: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  pinServicesWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 5,
+  },
+  pinServicePill: {
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  pinServicePillText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#0369a1',
   },
 });

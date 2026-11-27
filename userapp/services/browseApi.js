@@ -1,22 +1,9 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { ALL_MEDICAL_SERVICES, matchesFacilityQuery, expandServiceKeywords } from '../lib/medical-services';
 
-const STANDARD_SERVICES = [
-  'General Check-up',
-  'General Physician',
-  'Neurologist',
-  'Psychiatric',
-  'Cardiologist',
-  'Orthopedic',
-  'Dermatologist',
-  'Pediatrician',
-  'Ophthalmologist',
-  'ENT Specialist',
-  'Pulmonologist',
-  'Dentist',
-  'Hematologist',
-];
+const STANDARD_SERVICES = ALL_MEDICAL_SERVICES;
 
 const UNIVERSAL_SERVICE_VALUES = new Set(['everything', 'all', 'all services']);
 const EMPTY_SERVICE_VALUES = new Set(['none', 'n/a']);
@@ -152,17 +139,43 @@ async function fetchSeekCareFromSupabase(filters = {}) {
   ];
 
   const searched = records.filter(({ facility, branch }) => {
-    const facilityName = normalizedText([facility.name, branch?.name].filter(Boolean).join(' '));
-    const facilityLocation = normalizedText([branch?.address, facility.address, facility.location].filter(Boolean).join(' '));
-    return matchesSearchTerm(filters.name, facilityName) && matchesSearchTerm(filters.location, facilityLocation);
+    const branchServices = parseServicesOffered(branch?.services_offered);
+    const resolvedServices = branchServices.length > 0 ? branchServices : parseServicesOffered(facility.services_offered);
+    const candidate = {
+      name: [facility.name, branch?.name].filter(Boolean).join(' '),
+      address: [branch?.address, facility.address, facility.location].filter(Boolean).join(' '),
+      services: resolvedServices,
+    };
+    const nameOrServiceOk = !filters.name || matchesFacilityQuery(candidate, filters.name);
+    const locOk = !filters.location || matchesSearchTerm(filters.location, candidate.address);
+    return nameOrServiceOk && locOk;
   });
 
-  const services = [...new Set(searched.flatMap(r => parseServicesOffered(r.facility.services_offered)))]
-    .sort((a, b) => a.localeCompare(b));
+  const services = [
+    ...new Set(
+      searched.flatMap(r => {
+        const bs = parseServicesOffered(r.branch?.services_offered);
+        return bs.length > 0 ? bs : parseServicesOffered(r.facility.services_offered);
+      })
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 
-  const wantedCategory = canonicalServiceName(filters.category);
+  const wantedCategory = normalizedText(filters.category);
+  const expandedCat = wantedCategory ? expandServiceKeywords(wantedCategory) : [];
   const matchedFacilities = searched
-    .filter(r => !wantedCategory || parseServicesOffered(r.facility.services_offered).some(s => canonicalServiceName(s) === wantedCategory))
+    .filter(r => {
+      if (!wantedCategory) return true;
+      const bs = parseServicesOffered(r.branch?.services_offered);
+      const svcs = bs.length > 0 ? bs : parseServicesOffered(r.facility.services_offered);
+      return svcs.some(s => {
+        const ns = normalizedText(s);
+        return (
+          canonicalServiceName(s) === canonicalServiceName(wantedCategory) ||
+          ns.includes(wantedCategory) ||
+          expandedCat.some(kw => ns.includes(kw))
+        );
+      });
+    })
     .map(({ facility, branch }) => {
       const parentName = facility.name || 'Healthcare Facility';
       const branchName = branch?.name;
@@ -172,6 +185,7 @@ async function fetchSeekCareFromSupabase(filters = {}) {
           : `${parentName} - ${branchName || 'Clinic Branch'}`
         : parentName;
       const address = branch?.address || facility.location || facility.address || '';
+      const bs = parseServicesOffered(branch?.services_offered);
 
       return {
         id: branch ? `branch-${branch.branch_id}` : facility.facility_id,
@@ -184,7 +198,7 @@ async function fetchSeekCareFromSupabase(filters = {}) {
         latitude: branch?.lat ?? facility.lat ?? null,
         longitude: branch?.long ?? facility.long ?? null,
         isGabay: facility.is_gabay !== false,
-        services: parseServicesOffered(facility.services_offered),
+        services: bs.length > 0 ? bs : parseServicesOffered(facility.services_offered),
         imageUrl: branch?.logo_path || facility.logo_path || facility.image_url || null,
       };
     });
@@ -232,39 +246,43 @@ const BrowseAPI = {
 
       const USER_LAT = 14.5977;
       const USER_LONG = 121.0112;
-      const facilities = (result.facilities || []).map(facility => {
-        let distance = 'N/A';
-        let distValue = 99999;
+      // Browse by Services & Facility Results ONLY includes Gabay-supported hospitals & clinics
+      const facilities = (result.facilities || [])
+        .filter(facility => facility.isGabay !== false)
+        .map(facility => {
+          let distance = 'N/A';
+          let distValue = 99999;
 
-        if (facility.latitude != null && facility.longitude != null) {
-          const km = getDistanceFromLatLonInKm(
-            USER_LAT,
-            USER_LONG,
-            parseFloat(facility.latitude),
-            parseFloat(facility.longitude)
-          );
-          distValue = km;
-          distance = km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(1)} km`;
-        }
+          if (facility.latitude != null && facility.longitude != null) {
+            const km = getDistanceFromLatLonInKm(
+              USER_LAT,
+              USER_LONG,
+              parseFloat(facility.latitude),
+              parseFloat(facility.longitude)
+            );
+            distValue = km;
+            distance = km < 1 ? `${(km * 1000).toFixed(0)} m` : `${km.toFixed(1)} km`;
+          }
 
-        return {
-          id: facility.id,
-          facilityId: facility.facilityId || facility.id,
-          branchId: facility.branchId || null,
-          type: facility.type || 'facility',
-          name: facility.name,
-          address: facility.address,
-          rating: 4.5,
-          isOpen: true,
-          isGabay: facility.isGabay,
-          distance,
-          distValue,
-          latitude: facility.latitude,
-          longitude: facility.longitude,
-          services: facility.services || [],
-          imageUrl: facility.imageUrl,
-        };
-      });
+          return {
+            id: facility.id,
+            facilityId: facility.facilityId || facility.id,
+            branchId: facility.branchId || null,
+            type: facility.type || 'facility',
+            name: facility.name,
+            address: facility.address,
+            phone: facility.phone || '',
+            rating: 4.5,
+            isOpen: true,
+            isGabay: true,
+            distance,
+            distValue,
+            latitude: facility.latitude,
+            longitude: facility.longitude,
+            services: facility.services || [],
+            imageUrl: facility.imageUrl,
+          };
+        });
 
       facilities.sort((a, b) => a.distValue - b.distValue);
 

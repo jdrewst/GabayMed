@@ -118,7 +118,6 @@ export function SeekMedicalCare({
     if (facility.isGabay) {
       setSelectedFacility(facility.id);
     }
-    // No else needed as button is disabled
   };
 
   const normalizedServices = new Set(
@@ -184,7 +183,7 @@ export function SeekMedicalCare({
                 style={styles.serviceSearchInput}
                 value={facilityNameQuery}
                 onChangeText={setFacilityNameQuery}
-                placeholder="Search facility or branch name"
+                placeholder="Search hospital"
                 returnKeyType="search"
                 onSubmitEditing={handleFacilitySearch}
               />
@@ -363,9 +362,8 @@ export function SeekMedicalCare({
               {displayedFacilities.map((hospital, idx) => (
                 <TouchableOpacity
                   key={`hosp-scroll-${hospital.id}-${idx}`}
-                  style={[styles.hospitalCard, !hospital.isGabay && { opacity: 0.5 }]}
+                  style={styles.hospitalCard}
                   onPress={() => handleFacilityClick(hospital)}
-                  disabled={!hospital.isGabay}
                 >
                 <View style={styles.hospitalImageContainer}>
                   {hospital.imageUrl ? (
@@ -409,9 +407,8 @@ export function SeekMedicalCare({
               {displayedFacilities.map((hospital, idx) => (
                 <TouchableOpacity
                   key={`hosp-grid-${hospital.id}-${idx}`}
-                  style={[styles.hospitalCardGrid, !hospital.isGabay && { opacity: 0.5 }]}
+                  style={styles.hospitalCardGrid}
                   onPress={() => handleFacilityClick(hospital)}
-                  disabled={!hospital.isGabay}
                 >
                   <View style={styles.hospitalImageContainer}>
                     {hospital.imageUrl ? (

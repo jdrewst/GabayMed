@@ -25,31 +25,66 @@ import {
 } from 'lucide-react-native';
 import AppointmentAPI, { STANDARD_MEDICAL_SERVICES } from '../services/appointmentApi';
 import MapAPI from '../services/mapApi';
+import { expandServiceKeywords, normalizeSearchText, matchesFacilityQuery } from '../lib/medical-services';
 
 export const serviceUIConfig = {
   "General Check-up": { icon: Hospital, colors: ['#66BAFF', '#83BFF0'] },
   "General Physician": { icon: Stethoscope, colors: ['#66BAFF', '#83BFF0'] },
-  "Neurologist": { icon: Brain, colors: ['#66BAFF', '#83BFF0'] },
-  "Psychiatric": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
-  "Cardiologist": { icon: HeartPulse, colors: ['#66BAFF', '#83BFF0'] },
-  "Orthopedic": { icon: Bone, colors: ['#66BAFF', '#83BFF0'] },
-  "Dermatologist": { icon: Droplet, colors: ['#66BAFF', '#83BFF0'] },
-  "Pediatrician": { icon: Baby, colors: ['#66BAFF', '#83BFF0'] },
-  "Ophthalmologist": { icon: Eye, colors: ['#66BAFF', '#83BFF0'] },
-  "ENT Specialist": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
-  "Pulmonologist": { icon: Wind, colors: ['#66BAFF', '#83BFF0'] },
-  "Dentist": { icon: Pill, colors: ['#66BAFF', '#83BFF0'] },
-  "Hematologist": { icon: Activity, colors: ['#66BAFF', '#83BFF0'] },
+  "Emergency & Trauma Care": { icon: Activity, colors: ['#EF4444', '#F87171'] },
+  "Cardiology": { icon: HeartPulse, colors: ['#66BAFF', '#83BFF0'] },
+  "Cardiothoracic Surgery": { icon: HeartPulse, colors: ['#0284C7', '#38BDF8'] },
+  "OB-GYN (Obstetrics & Gynecology)": { icon: Baby, colors: ['#EC4899', '#F472B6'] },
+  "Maternity & Birthing": { icon: Baby, colors: ['#EC4899', '#F472B6'] },
+  "Pediatrics": { icon: Baby, colors: ['#66BAFF', '#83BFF0'] },
+  "Neonatology (NICU)": { icon: Baby, colors: ['#38BDF8', '#7DD3FC'] },
+  "Blood Bank & Transfusion": { icon: Droplet, colors: ['#DC2626', '#EF4444'] },
+  "Laboratory & Blood Tests": { icon: Activity, colors: ['#0EA5E9', '#38BDF8'] },
+  "Hematology": { icon: Droplet, colors: ['#EF4444', '#F87171'] },
+  "Neurology": { icon: Brain, colors: ['#66BAFF', '#83BFF0'] },
+  "Psychiatry & Mental Health": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
+  "Orthopedics": { icon: Bone, colors: ['#66BAFF', '#83BFF0'] },
+  "Dermatology": { icon: Droplet, colors: ['#66BAFF', '#83BFF0'] },
+  "Ophthalmology (Eye Care)": { icon: Eye, colors: ['#66BAFF', '#83BFF0'] },
+  "ENT (Ear, Nose & Throat)": { icon: User, colors: ['#66BAFF', '#83BFF0'] },
+  "Pulmonology": { icon: Wind, colors: ['#66BAFF', '#83BFF0'] },
+  "Dentistry & Oral Surgery": { icon: Pill, colors: ['#66BAFF', '#83BFF0'] },
+  "Nephrology & Dialysis": { icon: Activity, colors: ['#0284C7', '#38BDF8'] },
+  "Oncology (Cancer Care)": { icon: Activity, colors: ['#6366F1', '#818CF8'] },
+  "Radiology & Imaging (X-Ray / CT / MRI)": { icon: Hospital, colors: ['#0EA5E9', '#38BDF8'] },
   "default": { icon: Stethoscope, colors: ['#66BAFF', '#83BFF0'] }
 };
 
 const serviceAliases = {
-  cardiology: 'Cardiologist',
-  pediatrics: 'Pediatrician',
-  orthopedics: 'Orthopedic',
-  psychiatry: 'Psychiatric',
-  ophthalmology: 'Ophthalmologist',
-  dentistry: 'Dentist'
+  cardiologist: 'Cardiology',
+  cardiology: 'Cardiology',
+  cardiothoracic: 'Cardiothoracic Surgery',
+  cardiothorasic: 'Cardiothoracic Surgery',
+  heart: 'Cardiology',
+  obgyn: 'OB-GYN (Obstetrics & Gynecology)',
+  'ob-gyn': 'OB-GYN (Obstetrics & Gynecology)',
+  maternity: 'Maternity & Birthing',
+  pregnant: 'OB-GYN (Obstetrics & Gynecology)',
+  pediatrician: 'Pediatrics',
+  pediatrics: 'Pediatrics',
+  baby: 'Pediatrics',
+  blood: 'Blood Bank & Transfusion',
+  lab: 'Laboratory & Blood Tests',
+  hematologist: 'Hematology',
+  orthopedic: 'Orthopedics',
+  orthopedics: 'Orthopedics',
+  psychiatric: 'Psychiatry & Mental Health',
+  psychiatry: 'Psychiatry & Mental Health',
+  ophthalmologist: 'Ophthalmology (Eye Care)',
+  ophthalmology: 'Ophthalmology (Eye Care)',
+  eye: 'Ophthalmology (Eye Care)',
+  dentist: 'Dentistry & Oral Surgery',
+  dentistry: 'Dentistry & Oral Surgery',
+  pulmonologist: 'Pulmonology',
+  lung: 'Pulmonology',
+  neurologist: 'Neurology',
+  dermatologist: 'Dermatology',
+  skin: 'Dermatology',
+  'ent specialist': 'ENT (Ear, Nose & Throat)',
 };
 
 export function getServiceDisplayName(name) {
@@ -231,7 +266,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
     } else if (visible && !facilityId) {
       loadFacilities();
     }
-  }, [visible, facilityId]);
+  }, [visible, facilityId, initialService]);
 
   // 2. Load Providers when step becomes 'provider'
   useEffect(() => {
@@ -257,18 +292,37 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
     try {
       const locRes = await MapAPI.requestUserLocation();
       const userCoords = locRes.granted ? locRes.coords : null;
+      MapAPI.clearFacilitiesCache();
       const [mapFacilities, dbFacilities] = await Promise.all([
-        MapAPI.getFacilitiesLocations(userCoords).catch(() => []),
+        MapAPI.getFacilitiesLocations(userCoords, { includePublic: false }).catch(() => []),
         AppointmentAPI.getAllFacilities().catch(() => []),
       ]);
 
-      // Display all healthcare facilities and branches with unique React keys
+      // Display ONLY Gabay-supported healthcare facilities and branches for booking
       const seenKeys = new Set();
       const allFacilitiesList = [];
 
-      const combinedSource = [...(mapFacilities || []), ...(dbFacilities || [])];
-      for (let i = 0; i < combinedSource.length; i++) {
-        const f = combinedSource[i];
+      const gabayMapItems = (mapFacilities || []).filter(
+        f => f && f.isGabay !== false && f.isPublic !== true
+      );
+      // If branches exist for a facility, prefer the branch entries (which carry per-branch services_offered)
+      const facilityIdsWithBranches = new Set(
+        gabayMapItems.filter(f => f.branchId).map(f => String(f.facilityId || ''))
+      );
+      const filteredSource = [
+        ...gabayMapItems.filter(f => f.branchId || !facilityIdsWithBranches.has(String(f.facilityId || ''))),
+        ...(dbFacilities || []).filter(f => !facilityIdsWithBranches.has(String(f.facilityId || f.id || ''))),
+      ].filter(f => f && f.isGabay !== false && f.isPublic !== true);
+
+      for (let i = 0; i < filteredSource.length; i++) {
+        const f = filteredSource[i];
+        const services = Array.isArray(f.services) ? f.services : [];
+
+        // When a user selected a service from Home -> Browse by Services, only show clinics offering that service
+        if (initialService && !matchesFacilityQuery({ services }, initialService)) {
+          continue;
+        }
+
         const rawFacId = String(f.facilityId || f.id || '').replace(/^(facility-|branch-)/, '').trim();
         const dedupeKey = f.branchId
           ? `branch-${f.branchId}`
@@ -281,9 +335,11 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
           key: `${dedupeKey}-${i}`,
           id: f.branchId ? `branch-${f.branchId}` : rawFacId || f.id,
           facilityId: rawFacId || f.id,
+          branchId: f.branchId || null,
           name: f.name || 'Healthcare Facility',
           address: f.address || f.location || 'Metro Manila, Philippines',
           distance: f.distanceLabel || f.distance || '',
+          services,
         });
       }
 
@@ -323,7 +379,38 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
         uniqueProviders.push(p);
       }
     });
-    setProviders(uniqueProviders);
+
+    // Filter doctors so only providers whose specialty matches the hospital's offered services
+    // (and the selected service when chosen) are shown.
+    const allowedServices = selectedService
+      ? [selectedService]
+      : Array.isArray(facilityServices) && facilityServices.length > 0
+        ? facilityServices
+        : [];
+
+    let filteredProviders = uniqueProviders;
+    if (allowedServices.length > 0) {
+      const allowedKeywords = new Set(
+        allowedServices.flatMap(svc => [normalizeSearchText(svc), ...expandServiceKeywords(svc)])
+      );
+      const specialtyMatches = uniqueProviders.filter(p => {
+        const specText = normalizeSearchText(
+          [p.specialization, p.specialty, p.department, p.role].filter(Boolean).join(' ')
+        );
+        if (!specText) return false;
+        const specExpanded = expandServiceKeywords(specText);
+        return (
+          allowedKeywords.has(specText) ||
+          Array.from(allowedKeywords).some(kw => kw && (specText.includes(kw) || kw.includes(specText))) ||
+          specExpanded.some(kw => allowedKeywords.has(kw))
+        );
+      });
+      if (specialtyMatches.length > 0) {
+        filteredProviders = specialtyMatches;
+      }
+    }
+
+    setProviders(filteredProviders);
     setLoading(false);
   };
 
@@ -530,10 +617,16 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
             {step === "facility" && !loading && (
               <View>
                 <Text style={styles.stepDescription}>
-                  Choose a healthcare facility to book your appointment
+                  {initialService
+                    ? `Choose a Gabay clinic offering ${initialService}`
+                    : 'Choose a healthcare facility to book your appointment'}
                 </Text>
                 {availableFacilities.length === 0 ? (
-                  <Text style={styles.emptyText}>No partner facilities found.</Text>
+                  <Text style={styles.emptyText}>
+                    {initialService
+                      ? `No Gabay clinics currently offer ${initialService}.`
+                      : 'No partner facilities found.'}
+                  </Text>
                 ) : (
                   <View style={styles.optionsList}>
                     {availableFacilities.map((facility, index) => (
