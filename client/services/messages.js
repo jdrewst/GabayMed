@@ -1,20 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './gabayApi';
 import { Session } from './session';
 
-// Helper to get env vars
-const getEnv = (key) => {
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    return import.meta.env[key];
-  }
-  if (typeof process !== 'undefined' && process.env) {
-    return process.env[key];
-  }
-  return '';
-};
-
-const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
-const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
-const supabase = createClient(supabaseUrl, supabaseKey);
 let subscriptionId = 0;
 
 const branchAliases = new Map([['MAIN', 'main'], ['QC', 'branch-qc'], ['KAT', 'branch-katipunan']]);
@@ -52,78 +38,15 @@ async function insertMessageOnce(table, record) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
   try {
-    let result = await supabase
-      .from(table)
-      .insert(record)
-      .select()
-      .abortSignal(controller.signal)
-      .maybeSingle();
-
-    // Retry without branch_key if that column does not exist
-    if (
-      result.error &&
-      (result.error.code === 'PGRST204' || /branch_key/i.test(result.error.message || ''))
-    ) {
-      const { branch_key, ...withoutBranchKey } = record;
-      result = await supabase
-        .from(table)
-        .insert(withoutBranchKey)
-        .select()
-        .abortSignal(controller.signal)
-        .maybeSingle();
-    }
-
-    // Retry without client-generated UUID `id` if the database `id` column is integer/bigint serial
-    if (
-      result.error &&
-      record.id !== undefined &&
-      (result.error.code === '22P02' ||
-        result.error.code === '42804' ||
-        /invalid input syntax|bigint|integer|uuid/i.test(result.error.message || ''))
-    ) {
-      const { id, ...withoutId } = record;
-      result = await supabase
-        .from(table)
-        .insert(withoutId)
-        .select()
-        .abortSignal(controller.signal)
-        .maybeSingle();
-
-      if (
-        result.error &&
-        (result.error.code === 'PGRST204' || /branch_key/i.test(result.error.message || ''))
-      ) {
-        const { branch_key, ...withoutIdAndBranch } = withoutId;
-        result = await supabase
-          .from(table)
-          .insert(withoutIdAndBranch)
-          .select()
-          .abortSignal(controller.signal)
-          .maybeSingle();
-      }
-    }
-
+    const result = await supabase.from(table).insert(record).select().abortSignal(controller.signal).single();
+    // An earlier request may have committed before its response reached the sender.
     const { content, ...identity } = record;
-    const { data, error } =
-      result.error?.code === '23505'
-        ? await supabase
-            .from(table)
-            .select()
-            .match(identity.patient_id ? { patient_id: identity.patient_id } : identity)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .abortSignal(controller.signal)
-            .maybeSingle()
-        : result;
-
+    const { data, error } = result.error?.code === '23505'
+      ? await supabase.from(table).select().match(identity).abortSignal(controller.signal).single()
+      : result;
     if (error) throw error;
-    return (
-      data || {
-        id: record.id || Date.now(),
-        ...record,
-        created_at: new Date().toISOString(),
-      }
-    );
+    if (data?.content !== content) throw new Error('Message could not be verified.');
+    return data;
   } finally {
     clearTimeout(timer);
   }
@@ -412,27 +335,15 @@ export const messagesAPI = {
     }));
   },
 
-  // 3. Send a Message (Supports both (patientId, branchKey, text, id) and legacy (patientId, text, senderType))
-  async sendMessage(patientId, branchKeyOrText, maybeText, maybeId) {
-    const hasBranchArg =
-      maybeText !== undefined && maybeText !== 'staff' && maybeText !== 'patient';
-    const branchKey = hasBranchArg ? (branchKeyOrText || 'main') : 'main';
-    const text = hasBranchArg ? maybeText : branchKeyOrText;
-    const id = hasBranchArg ? maybeId : undefined;
-    const senderType = !hasBranchArg && (maybeText === 'staff' || maybeText === 'patient')
-      ? maybeText
-      : 'staff';
-
-    const record = {
-      ...(id ? { id } : {}),
+  // 3. Send a Message
+  async sendMessage(patientId, branchKey, text, id) {
+    const data = await insertMessageOnce('messages', {
+      id,
       patient_id: patientId,
-      branch_key: branchKey,
+      branch_key: branchKey || 'main',
       content: text,
-      sender_type: senderType,
-      is_read: false,
-    };
-
-    const data = await insertMessageOnce('messages', record);
+      sender_type: 'staff',
+    });
     return {
       success: true,
       message: {
@@ -502,16 +413,12 @@ export const messagesAPI = {
   },
 
   async sendBranchMessage(branchKey, otherBranchKey, text, id) {
-    const facilityId = Session.getFacilityId();
-    const record = {
-      ...(id ? { id } : {}),
-      ...(facilityId ? { facility_id: facilityId } : {}),
+    const data = await insertMessageOnce('branch_messages', {
+      id,
       sender_branch: branchKey,
       recipient_branch: otherBranchKey,
       content: text,
-      is_read: false,
-    };
-    const data = await insertMessageOnce('branch_messages', record);
+    });
     return {
       success: true,
       message: mapBranchMessage(data),
