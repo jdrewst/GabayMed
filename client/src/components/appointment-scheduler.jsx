@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CalendarView } from "@/components/calendar-view" 
-import { format } from "date-fns"
+import { format, isValid, parse } from "date-fns"
 import { appointmentAPI } from "../../services/appointment"
 import { profileAPI } from "../../services/profile"
 import { useBranch } from "@/lib/branch-context"
@@ -18,9 +18,16 @@ import { BranchSelector } from "@/components/branch-selector"
 
 const hours = Array.from({ length: 10 }, (_, i) => i + 8) // 8 AM to 5 PM
 
+function calendarDateFromUrl() {
+  const value = new URLSearchParams(window.location.search).get("date")
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date()
+  const date = parse(value, "yyyy-MM-dd", new Date())
+  return isValid(date) ? date : new Date()
+}
+
 export function AppointmentScheduler() {
   const { selectedBranch, rooms: branchRooms } = useBranch()
-  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [selectedDate, setSelectedDate] = useState(calendarDateFromUrl)
   const [selectedSlot, setSelectedSlot] = useState(null)
   
   // State for API Data
@@ -32,6 +39,15 @@ export function AppointmentScheduler() {
   const [patientSearchResults, setPatientSearchResults] = useState([])
   const [prefilledPatient, setPrefilledPatient] = useState(null)
   const autoOpenedFromUrlRef = useRef(false)
+
+  useEffect(() => {
+    const syncCalendar = () => {
+      setSelectedDate(calendarDateFromUrl())
+      setSelectedSlot(null)
+    }
+    window.addEventListener("popstate", syncCalendar)
+    return () => window.removeEventListener("popstate", syncCalendar)
+  }, [])
 
   const [formData, setFormData] = useState({
     patient: '',
@@ -161,10 +177,9 @@ export function AppointmentScheduler() {
     const operatory = (apt.operatory || '').toLowerCase();
     const branchName = selectedBranch.name.toLowerCase().replace(/ branch$/, '');
     const branchAbbr = selectedBranch.abbreviation.toLowerCase();
-    if (apt.branch_id && apt.branch_id === selectedBranch.branch_id) return true;
+    if (apt.branch_key) return apt.branch_key === String(selectedBranch.branch_id);
     if (operatory.includes(branchAbbr) || operatory.includes(branchName)) return true;
-    const aptIdNum = parseInt(String(apt.id || '0').replace(/\D/g, '') || '1', 10);
-    return selectedBranch.abbreviation === 'KAT' ? aptIdNum % 2 === 0 : aptIdNum % 2 !== 0;
+    return false;
   });
 
   const getAppointmentForSlot = (providerId, time) => {
@@ -280,6 +295,7 @@ export function AppointmentScheduler() {
     
     const newAppointment = {
         patientId: formData.patientId,
+        branchKey: selectedBranch?.branch_id,
         providerId: formData.primaryProvider,
         procedureId: formData.procedure,
         operatory: formData.operatory || 'Room 101',

@@ -1,103 +1,24 @@
 import { useState } from "react"
-import { Bell, Check, X, Clock, UserPlus, Calendar, CreditCard, AlertCircle } from "lucide-react"
+import { Bell, Check, X, Calendar, CreditCard, FileText, Receipt } from "lucide-react"
 import { Header } from "@/components/header"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-const notificationsData = [
-  {
-    id: 1,
-    type: "appointment",
-    title: "New Appointment Request",
-    message: "Red Gabriel Tagura has requested an appointment for tomorrow at 10:00 AM",
-    time: "5 minutes ago",
-    read: false,
-    icon: Calendar,
-    color: "text-blue-500",
-    bgColor: "bg-blue-50",
-  },
-  {
-    id: 2,
-    type: "payment",
-    title: "Payment Received",
-    message: "Payment of ₱2,500 received from Francis Ronan Alfaro",
-    time: "15 minutes ago",
-    read: false,
-    icon: CreditCard,
-    color: "text-green-500",
-    bgColor: "bg-green-50",
-  },
-  {
-    id: 3,
-    type: "patient",
-    title: "New Patient Registration",
-    message: "Tyrone Winter Tolentino has completed registration",
-    time: "1 hour ago",
-    read: false,
-    icon: UserPlus,
-    color: "text-purple-500",
-    bgColor: "bg-purple-50",
-  },
-  {
-    id: 4,
-    type: "reminder",
-    title: "Appointment Reminder",
-    message: "Maria Santos has an appointment in 30 minutes",
-    time: "2 hours ago",
-    read: true,
-    icon: Clock,
-    color: "text-orange-500",
-    bgColor: "bg-orange-50",
-  },
-  {
-    id: 5,
-    type: "alert",
-    title: "Insurance Verification Required",
-    message: "Philhealth coverage for John Dela Cruz needs verification",
-    time: "3 hours ago",
-    read: true,
-    icon: AlertCircle,
-    color: "text-red-500",
-    bgColor: "bg-red-50",
-  },
-  {
-    id: 6,
-    type: "appointment",
-    title: "Appointment Confirmed",
-    message: "Anna Reyes confirmed her appointment for December 1, 2025",
-    time: "5 hours ago",
-    read: true,
-    icon: Calendar,
-    color: "text-blue-500",
-    bgColor: "bg-blue-50",
-  },
-]
+import { appointmentNotificationHref, formatNotificationTime, useClinicNotifications } from "@/lib/clinic-notifications"
+
+const categoryStyles = {
+  appointment: { icon: Calendar, color: "text-blue-600", background: "bg-blue-100" },
+  billing: { icon: CreditCard, color: "text-green-600", background: "bg-green-100" },
+  claim: { icon: FileText, color: "text-violet-600", background: "bg-violet-100" },
+  fees: { icon: Receipt, color: "text-amber-700", background: "bg-amber-100" },
+}
 
 export function Notifications() {
-  const [notifications, setNotifications] = useState(notificationsData)
   const [activeTab, setActiveTab] = useState("all")
-
-  const unreadCount = notifications.filter(n => !n.read).length
-
-  const markAsRead = (id) => {
-    setNotifications(notifications.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    ))
-  }
-
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })))
-  }
-
-  const deleteNotification = (id) => {
-    setNotifications(notifications.filter(n => n.id !== id))
-  }
-
-  const filteredNotifications = activeTab === "unread" 
-    ? notifications.filter(n => !n.read)
-    : notifications
+  const { notifications, unreadCount, branchName, loading, error, actionError, markAsRead, dismiss, refresh } =
+    useClinicNotifications({ unreadOnly: activeTab === "unread" })
 
   return (
     <div className="flex h-[calc(100dvh+3rem)] min-h-[32rem] flex-col">
@@ -110,12 +31,12 @@ export function Notifications() {
           <div className="flex shrink-0 items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
-              <p className="text-muted-foreground">Stay updated with your clinic activities</p>
+              <p className="text-muted-foreground">{branchName}</p>
             </div>
             {unreadCount > 0 && (
               <Button 
                 variant="outline" 
-                onClick={markAllAsRead}
+                onClick={() => markAsRead()}
                 className="gap-2"
               >
                 <Check className="w-4 h-4" />
@@ -139,13 +60,15 @@ export function Notifications() {
             </CardContent>
           </Card>
 
+          {actionError && <p role="alert" className="text-sm text-red-700">Unable to update the notification. Try again.</p>}
+
           {/* Notifications List */}
           <Card className="flex min-h-0 flex-col">
             <CardHeader className="shrink-0">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="all">
-                    All ({notifications.length})
+                    All
                   </TabsTrigger>
                   <TabsTrigger value="unread">
                     Unread ({unreadCount})
@@ -154,42 +77,57 @@ export function Notifications() {
               </Tabs>
             </CardHeader>
             <CardContent className="min-h-0 overflow-y-auto" role="region" aria-label="Notifications list" tabIndex={0}>
-              {filteredNotifications.length === 0 ? (
+              {loading ? (
+                <p className="py-12 text-center text-muted-foreground">Loading notifications...</p>
+              ) : error ? (
+                <div role="alert" className="py-12 text-center">
+                  <p className="mb-2 text-sm text-muted-foreground">Unable to load notifications.</p>
+                  <Button variant="outline" onClick={refresh}>Try again</Button>
+                </div>
+              ) : notifications.length === 0 ? (
                 <div className="text-center py-12">
                   <Bell className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-                  <p className="text-muted-foreground">No notifications to display</p>
+                  <p className="text-muted-foreground">{activeTab === "unread" ? "No unread notifications." : "No notifications for this branch yet."}</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {filteredNotifications.map((notification) => {
-                    const Icon = notification.icon
+                  {notifications.map((notification) => {
+                    const { icon: Icon, color, background } = categoryStyles[notification.category]
+                    const href = appointmentNotificationHref(notification)
                     return (
                       <div
                         key={notification.id}
-                        className={`p-4 rounded-lg border transition-colors ${
-                          notification.read 
+                        className={`relative p-4 rounded-lg border transition-colors ${
+                          notification.is_read
                             ? "bg-white border-slate-200" 
                             : "bg-blue-50 border-blue-200"
                         }`}
                       >
+                        {href && <a
+                          href={href}
+                          aria-label={`Open appointment calendar for ${notification.appointment_date}`}
+                          className="absolute inset-0 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                          onClick={() => !notification.is_read && markAsRead(notification.id)}
+                        />}
                         <div className="flex items-start gap-4">
-                          <div className={`p-2 rounded-full ${notification.bgColor}`}>
-                            <Icon className={`w-5 h-5 ${notification.color}`} />
+                          <div className={`p-2 rounded-full ${background}`}>
+                            <Icon className={`w-5 h-5 ${color}`} />
                           </div>
                           
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2 mb-1">
                               <h4 className="font-semibold text-gray-900 text-sm">
                                 {notification.title}
-                                {!notification.read && (
+                                {!notification.is_read && (
                                   <Badge className="ml-2 bg-blue-500 hover:bg-blue-600">New</Badge>
                                 )}
                               </h4>
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 flex-shrink-0"
-                                onClick={() => deleteNotification(notification.id)}
+                                className="relative h-6 w-6 flex-shrink-0"
+                                aria-label="Dismiss notification"
+                                onClick={() => dismiss(notification.id)}
                               >
                                 <X className="w-4 h-4" />
                               </Button>
@@ -199,13 +137,13 @@ export function Notifications() {
                             </p>
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-muted-foreground">
-                                {notification.time}
+                                {formatNotificationTime(notification.created_at)}
                               </span>
-                              {!notification.read && (
+                              {!notification.is_read && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-7 text-xs"
+                                  className="relative h-7 text-xs"
                                   onClick={() => markAsRead(notification.id)}
                                 >
                                   <Check className="w-3 h-3 mr-1" />

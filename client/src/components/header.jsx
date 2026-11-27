@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Calendar, CreditCard, UserPlus, Clock, AlertCircle, Check, LogOut, Building2, MapPin, Mail } from "lucide-react"
+import { Heart, Bell, Search, User, Settings, ChevronDown, MessageSquare, Check, LogOut, Building2, MapPin, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
@@ -11,49 +11,12 @@ import { GabayAPI } from "../../services/gabayApi"
 import { profileAPI } from "../../services/profile"
 import LogoSvg from "@/assets/Logo.svg"
 
-const notificationsData = [
-  {
-    id: 1,
-    type: "appointment",
-    title: "New Appointment Request",
-    message: "Red Gabriel Tagura requested appointment",
-    time: "5 min ago",
-    read: false,
-    icon: Calendar,
-  },
-  {
-    id: 2,
-    type: "payment",
-    title: "Payment Received",
-    message: "₱2,500 from Francis Ronan Alfaro",
-    time: "15 min ago",
-    read: false,
-    icon: CreditCard,
-  },
-  {
-    id: 3,
-    type: "patient",
-    title: "New Patient Registration",
-    message: "Tyrone Winter Tolentino registered",
-    time: "1 hour ago",
-    read: false,
-    icon: UserPlus,
-  },
-  {
-    id: 4,
-    type: "reminder",
-    title: "Appointment Reminder",
-    message: "Maria Santos in 30 minutes",
-    time: "2 hours ago",
-    read: true,
-    icon: Clock,
-  },
-]
+import { appointmentNotificationHref, formatNotificationTime, useClinicNotifications } from "@/lib/clinic-notifications"
 
 export function Header() {
   const { selectedBranch } = useBranch()
   const [currentPage, setCurrentPage] = useState('dashboard')
-  const [notifications, setNotifications] = useState(notificationsData)
+  const { notifications, unreadCount, branchName, loading, error, actionError, markAsRead } = useClinicNotifications({ limit: 8 })
   const [facility, setFacility] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -91,18 +54,6 @@ export function Header() {
       window.removeEventListener('facilityUpdated', handleFacilityUpdated)
     }
   }, [])
-
-  const unreadCount = notifications.filter(n => !n.read).length
-
-  const markAsRead = (id) => {
-    setNotifications(notifications.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    ))
-  }
-
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })))
-  }
 
   useEffect(() => {
     // Get current page from URL
@@ -204,7 +155,7 @@ export function Header() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="rounded-full relative">
+                  <Button variant="ghost" size="icon" className="rounded-full relative" aria-label={`Notifications, ${unreadCount} unread`}>
                     <Bell className="w-5 h-5" />
                     {unreadCount > 0 && (
                       <div className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
@@ -215,7 +166,7 @@ export function Header() {
                   <div className="flex items-center justify-between px-4 py-3 border-b">
                     <div>
                       <h3 className="font-semibold text-sm">Notifications</h3>
-                      <p className="text-xs text-muted-foreground">{unreadCount} unread</p>
+                      <p className="text-xs text-muted-foreground">{branchName} ? {unreadCount} unread</p>
                     </div>
                     {unreadCount > 0 && (
                       <Button 
@@ -224,7 +175,7 @@ export function Header() {
                         className="h-7 text-xs"
                         onClick={(e) => {
                           e.stopPropagation()
-                          markAllAsRead()
+                          markAsRead()
                         }}
                       >
                         <Check className="w-3 h-3 mr-1" />
@@ -233,24 +184,30 @@ export function Header() {
                     )}
                   </div>
                   <div className="max-h-96 overflow-y-auto">
+                    {actionError && <p role="alert" className="p-3 text-xs text-red-700">Unable to update notifications.</p>}
+                    {notifications.length === 0 && <p className="p-3 text-xs text-muted-foreground">
+                      {loading ? "Loading notifications..." : error ? "Unable to load notifications." : "No notifications for this branch yet."}
+                    </p>}
                     {notifications.map((notification) => {
-                      const Icon = notification.icon
+                      const href = appointmentNotificationHref(notification)
+                      const ItemContent = href ? "a" : "div"
                       return (
                         <DropdownMenuItem 
+                          asChild
                           key={notification.id}
-                          className={`p-3 cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
-                          onClick={() => markAsRead(notification.id)}
+                          className={`p-3 cursor-pointer ${!notification.is_read ? 'bg-blue-50' : ''}`}
+                          onClick={() => !notification.is_read && markAsRead(notification.id)}
                         >
-                          <div className="flex items-start gap-3 w-full">
+                          <ItemContent href={href || undefined} className="flex items-start gap-3 w-full">
                             <div className="p-1.5 bg-slate-100 rounded-full flex-shrink-0">
-                              <Icon className="w-4 h-4 text-slate-600" />
+                              <Bell className="w-4 h-4 text-slate-600" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="font-medium text-xs text-gray-900">
                                   {notification.title}
                                 </p>
-                                {!notification.read && (
+                                {!notification.is_read && (
                                   <Badge className="bg-blue-500 hover:bg-blue-600 text-xs h-4 px-1">New</Badge>
                                 )}
                               </div>
@@ -258,10 +215,10 @@ export function Header() {
                                 {notification.message}
                               </p>
                               <p className="text-xs text-muted-foreground mt-1">
-                                {notification.time}
+                                {formatNotificationTime(notification.created_at)}
                               </p>
                             </div>
-                          </div>
+                          </ItemContent>
                         </DropdownMenuItem>
                       )
                     })}

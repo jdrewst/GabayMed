@@ -54,6 +54,17 @@ function extractProcedureName(apt) {
   return 'Consultation';
 }
 
+async function resolveBookingLocation(value) {
+  const location = String(value || '').trim();
+  const id = location.replace(/^(facility-|branch-)/, '');
+  if (!location.startsWith('branch-')) return { facilityId: id };
+
+  const { data, error } = await supabase.from('clinic_branches')
+    .select('branch_id, facility_id, name, is_active').eq('branch_id', id).maybeSingle();
+  if (error || !data || data.is_active === false) throw new Error('Choose an available clinic branch.');
+  return { facilityId: data.facility_id, branchKey: String(data.branch_id), name: data.name };
+}
+
 const AppointmentAPI = {
   DEFAULT_CANCELLATION_NOTICE_HOURS,
 
@@ -319,7 +330,7 @@ const AppointmentAPI = {
    */
   async getFacilityProviders(facilityId) {
     try {
-      const cleanId = String(facilityId || '').replace(/^(facility-|branch-)/, '').trim();
+      const { facilityId: cleanId, branchKey } = await resolveBookingLocation(facilityId);
       const { data, error } = await supabase
         .from('providers')
         .select('*')
@@ -328,6 +339,8 @@ const AppointmentAPI = {
       if (!error && Array.isArray(data) && data.length > 0) {
         return data;
       }
+
+      if (branchKey) return [];
 
       // Fallback: if a facility has no linked providers yet, return all available providers
       const { data: allProviders, error: allErr } = await supabase
@@ -347,7 +360,7 @@ const AppointmentAPI = {
    */
   async getFacilityServices(facilityId) {
     try {
-      const cleanId = String(facilityId || '').replace(/^(facility-|branch-)/, '').trim();
+      const { facilityId: cleanId } = await resolveBookingLocation(facilityId);
       const { data } = await supabase
         .from('facilities')
         .select('services_offered')
@@ -446,7 +459,8 @@ const AppointmentAPI = {
    */
   async getFacilityName(facilityId) {
     try {
-      const cleanId = String(facilityId || '').replace(/^(facility-|branch-)/, '').trim();
+      const { facilityId: cleanId, name } = await resolveBookingLocation(facilityId);
+      if (name) return name;
       const { data, error } = await supabase
         .from('facilities')
         .select('name')
@@ -512,9 +526,7 @@ const AppointmentAPI = {
       const userId = Session.getUserId();
       if (!userId) throw new Error('User not authenticated');
 
-      const cleanFacilityId = String(appointmentData.facilityId || '')
-        .replace(/^(facility-|branch-)/, '')
-        .trim();
+      const { facilityId: cleanFacilityId, branchKey } = await resolveBookingLocation(appointmentData.facilityId);
       if (!cleanFacilityId) throw new Error('Facility ID is required');
 
       // 3. Resolve or Create Patient ID for this user at this facility
@@ -681,6 +693,7 @@ const AppointmentAPI = {
       const notesText = `Service: ${appointmentData.serviceName || 'General Consultation'}. ${appointmentData.notes || ''}`.trim();
       const fullPayload = {
         facility_id: cleanFacilityId,
+        ...(branchKey ? { branch_key: branchKey } : {}),
         patient_id: patientId,
         provider_id: normalizedProviderId,
         ...(resolvedProcedureId != null ? { procedure_id: resolvedProcedureId } : {}),
@@ -702,6 +715,7 @@ const AppointmentAPI = {
         // Fallback if appointment_time or operatory columns don't exist
         const fallbackPayload = {
           facility_id: cleanFacilityId,
+          ...(branchKey ? { branch_key: branchKey } : {}),
           patient_id: patientId,
           provider_id: normalizedProviderId,
           ...(resolvedProcedureId != null ? { procedure_id: resolvedProcedureId } : {}),

@@ -509,7 +509,7 @@ export function SeekMedicalCare({
                 style={styles.bookButton}
                 onPress={() => {
                   const chosen = allFacilities.find((h) => h.id === selectedFacility);
-                  setBookingFacility(chosen?.facilityId || selectedFacility); // Pass the actual UUID facilityId for booking
+                  setBookingFacility(chosen?.branchId ? `branch-${chosen.branchId}` : chosen?.facilityId || selectedFacility);
                   setSelectedFacility(null); // Close details modal
                   setShowAppointmentBooking(true); // Open booking modal
                 }}

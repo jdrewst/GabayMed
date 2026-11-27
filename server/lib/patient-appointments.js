@@ -312,7 +312,18 @@ async function validateSlotAvailability(admin, { providerId, appointmentDate, du
 async function createPatientAppointment(admin, userId, appointmentData = {}) {
   if (!userId) throw new RequestError(401, 'User authentication required.');
 
-  const cleanFacilityId = String(appointmentData.facilityId || '').replace(/^(facility-|branch-)/, '').trim();
+  const locationId = String(appointmentData.facilityId || '').trim();
+  let cleanFacilityId = locationId.replace(/^(facility-|branch-)/, '');
+  let branchKey;
+  if (locationId.startsWith('branch-')) {
+    const { data: branch, error } = await admin.from('clinic_branches')
+      .select('branch_id, facility_id, is_active').eq('branch_id', cleanFacilityId).maybeSingle();
+    if (error || !branch || branch.is_active === false) {
+      throw new RequestError(400, 'Choose an available clinic branch.');
+    }
+    cleanFacilityId = branch.facility_id;
+    branchKey = String(branch.branch_id);
+  }
   if (!cleanFacilityId) throw new RequestError(400, 'Facility ID is required.');
   if (!appointmentData.providerId) throw new RequestError(400, 'Provider ID is required.');
   if (!appointmentData.date || !appointmentData.time) {
@@ -341,6 +352,12 @@ async function createPatientAppointment(admin, userId, appointmentData = {}) {
   const normalizedProviderId = !isNaN(Number(appointmentData.providerId))
     ? parseInt(appointmentData.providerId, 10)
     : appointmentData.providerId;
+
+  if (branchKey) {
+    const { data: provider, error } = await admin.from('providers').select('provider_id')
+      .eq('provider_id', normalizedProviderId).eq('facility_id', cleanFacilityId).maybeSingle();
+    if (error || !provider) throw new RequestError(400, 'Choose a provider at this hospital.');
+  }
 
   // 2. Check double-booking
   const availability = await validateSlotAvailability(admin, {
@@ -485,6 +502,7 @@ async function createPatientAppointment(admin, userId, appointmentData = {}) {
     facility_id: cleanFacilityId,
     patient_id: patientId,
     provider_id: normalizedProviderId,
+    ...(branchKey ? { branch_key: branchKey } : {}),
     ...(resolvedProcedureId != null ? { procedure_id: resolvedProcedureId } : {}),
     operatory: 'Room 101',
     appointment_date: appointmentDateISO,
@@ -506,6 +524,7 @@ async function createPatientAppointment(admin, userId, appointmentData = {}) {
       facility_id: cleanFacilityId,
       patient_id: patientId,
       provider_id: normalizedProviderId,
+      ...(branchKey ? { branch_key: branchKey } : {}),
       ...(resolvedProcedureId != null ? { procedure_id: resolvedProcedureId } : {}),
       appointment_date: appointmentDateISO,
       duration: 60,

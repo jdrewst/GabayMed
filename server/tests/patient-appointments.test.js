@@ -390,3 +390,49 @@ test('createPatientAppointment creates patient with non-null created_at and book
   assert.equal(insertedAppointment.procedure_id, 101);
   assert.equal(result.data.appointment_id, 'apt-999');
 });
+
+test('branch booking saves the parent hospital and selected branch through an insert retry', async () => {
+  const inserts = [];
+  const admin = {
+    from(table) {
+      const filters = {};
+      const query = {
+        select: () => query,
+        eq(key, value) { filters[key] = value; return query; },
+        gte: () => query,
+        lte: () => query,
+        neq: async () => ({ data: [] }),
+        async maybeSingle() {
+          if (table === 'clinic_branches') {
+            assert.equal(filters.branch_id, 'qc-id');
+            return { data: { branch_id: 'qc-id', facility_id: 'hospital-id', is_active: true } };
+          }
+          assert.equal(table, 'providers');
+          assert.equal(filters.facility_id, 'hospital-id');
+          return { data: { provider_id: 'provider-id' } };
+        },
+        async limit() {
+          assert.equal(table, 'patients');
+          assert.equal(filters.facility_id, 'hospital-id');
+          return { data: [{ patient_id: 'patient-id' }] };
+        },
+        insert([row]) { inserts.push(row); return query; },
+        async single() {
+          return inserts.length === 1 ? { error: { message: 'Retry with the fallback payload' } }
+            : { data: { appointment_id: 'appointment-id', ...inserts.at(-1) } };
+        },
+      };
+      return query;
+    },
+  };
+
+  const result = await createPatientAppointment(admin, 'user-id', {
+    facilityId: 'branch-qc-id', providerId: 'provider-id', procedureId: 'procedure-id',
+    date: '2026-12-05', time: '09:00 AM',
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(inserts.map(row => [row.facility_id, row.branch_key]), [
+    ['hospital-id', 'qc-id'], ['hospital-id', 'qc-id'],
+  ]);
+});

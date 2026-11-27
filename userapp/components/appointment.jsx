@@ -279,7 +279,7 @@ export function AppointmentBooking({ onClose, onBooked, visible = true, initialS
 
         allFacilitiesList.push({
           key: `${dedupeKey}-${i}`,
-          id: rawFacId || f.id,
+          id: f.branchId ? `branch-${f.branchId}` : rawFacId || f.id,
           facilityId: rawFacId || f.id,
           name: f.name || 'Healthcare Facility',
           address: f.address || f.location || 'Metro Manila, Philippines',

@@ -111,6 +111,7 @@ export const appointmentAPI = {
           appointment_date,
           appointment_time,
           operatory,
+          branch_key,
           status,
           duration, 
           notes,
@@ -156,6 +157,7 @@ export const appointmentAPI = {
           procedure: procId,
           status: apt.status || 'PENDING',
           operatory: apt.operatory || 'Room 101', 
+          branch_key: apt.branch_key,
           length: apt.duration || 30,
           notes: apt.notes || ''
         };
@@ -239,6 +241,7 @@ export const appointmentAPI = {
         .from('appointments')
         .insert([{
           facility_id: facilityId,
+          branch_key: newAppointment.branchKey || 'main',
           patient_id: newAppointment.patientId,
           provider_id: providerId,
           procedure_id: procedureId,

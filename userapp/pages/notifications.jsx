@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import {
 import { ArrowLeft, Calendar, CreditCard, Gift, Bell, MessageCircle, ShieldCheck } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import ProfileAPI, { getDisplayConfig } from '../services/profileApi';
-import AppointmentAPI from '../services/appointmentApi';
+import NotificationsAPI, { notificationCategories } from '../services/notificationsApi';
 
 const CATEGORY_MAP = [
   { key: 'notifyAppointments', type: 'reminder', label: 'Appointments', icon: Calendar },
@@ -25,6 +25,10 @@ export function NotificationsPage({ onBack }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loadError, setLoadError] = useState(false);
+  const [readError, setReadError] = useState(false);
+  const latestRequest = useRef(0);
   const [perms, setPerms] = useState(() => ProfileAPI.getCachedPermissions() || {
     notificationsAllowed: true,
     notifyAppointments: true,
@@ -44,108 +48,54 @@ export function NotificationsPage({ onBack }) {
         if (loaded) setPerms(loaded);
       })
       .catch(() => {});
-    fetchNotifications();
     const unsub = ProfileAPI.subscribePermissions(next => {
       if (next) setPerms(next);
     });
     return unsub;
   }, []);
 
-  const fetchNotifications = async () => {
+  const categories = useMemo(() => notificationCategories(perms), [perms]);
+  const fetchNotifications = useCallback(async () => {
+    const request = ++latestRequest.current;
     try {
-      setLoading(true);
-      let realAppointmentNotifs = [];
-      try {
-        const schedule = await AppointmentAPI.getPatientSchedule();
-        realAppointmentNotifs = (schedule || []).slice(0, 3).map((apt, idx) => ({
-          id: `apt-notif-${apt.id || idx}`,
-          type: 'reminder',
-          icon: Calendar,
-          title:
-            (apt.status || '').toUpperCase() === 'CANCELLED'
-              ? 'Appointment Cancelled'
-              : 'Appointment Scheduled',
-          message: `${apt.procedureName || 'Consultation'} with ${apt.providerName} at ${apt.facilityName} on ${apt.formattedDate} at ${apt.formattedTime}.`,
-          timestamp: apt.createdAt ? new Date(apt.createdAt).getTime() : Date.now() - (idx + 1) * 1800000,
-          unread: idx === 0,
-        }));
-      } catch {}
-
-      const baseNotifications = [
-        ...realAppointmentNotifs,
-        {
-          id: '1',
-          type: 'reminder',
-          icon: Calendar,
-          title: 'Appointment Reminder',
-          message: 'Your appointment at Philippine General Hospital is tomorrow at 10:30 AM.',
-          timestamp: Date.now() - 2 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '2',
-          type: 'payment',
-          icon: CreditCard,
-          title: 'Payment Due',
-          message: 'You have an outstanding balance of ₱2,500 for Laboratory Tests.',
-          timestamp: Date.now() - 18 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '5',
-          type: 'message',
-          icon: MessageCircle,
-          title: 'Message from Clinic Staff',
-          message: 'Please bring a valid ID and your latest lab results 15 minutes before your consultation.',
-          timestamp: Date.now() - 26 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '3',
-          type: 'promo',
-          icon: Gift,
-          title: 'Special Offer',
-          message: 'Get 20% off on your next general check-up at UERM Medical Center!',
-          timestamp: Date.now() - 48 * 60 * 60 * 1000,
-          unread: true,
-        },
-        {
-          id: '4',
-          type: 'news',
-          icon: ShieldCheck,
-          title: 'Insurance Update',
-          message: 'Your PhilHealth & HMO insurance coverage has been verified and renewed.',
-          timestamp: Date.now() - 7 * 24 * 60 * 60 * 1000,
-          unread: false,
-        },
-      ];
-
-      setNotifications(baseNotifications);
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
+      const [rows, count] = await Promise.all([
+        NotificationsAPI.list(categories),
+        NotificationsAPI.unreadCount(categories),
+      ]);
+      if (request !== latestRequest.current) return;
+      setNotifications(rows.map(row => ({
+        ...row,
+        type: row.category === 'appointment' ? 'reminder' : 'news',
+        icon: row.category === 'appointment' ? Calendar : ShieldCheck,
+        timestamp: Date.parse(row.created_at),
+        unread: !row.is_read,
+      })));
+      setUnreadCount(count);
+      setLoadError(false);
+    } catch {
+      if (request === latestRequest.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  };
+  }, [categories]);
 
-  const onRefresh = async () => {
+  useEffect(() => {
+    fetchNotifications();
+    const stop = NotificationsAPI.watch(fetchNotifications);
+    return () => {
+      latestRequest.current++;
+      stop();
+    };
+  }, [fetchNotifications]);
+
+  const onRefresh = () => {
     setRefreshing(true);
-    await fetchNotifications();
-    setRefreshing(false);
+    fetchNotifications();
   };
 
-  const isCategoryEnabled = type => {
-    if (perms?.notificationsAllowed === false) return false;
-    if (type === 'reminder') return perms?.notifyAppointments !== false;
-    if (type === 'payment') return perms?.notifyBilling !== false;
-    if (type === 'news') return perms?.notifyInsurance !== false;
-    if (type === 'message') return perms?.notifyMessages !== false;
-    if (type === 'promo') return perms?.notifyPromos !== false;
-    return true;
-  };
-
-  const visibleNotifications = notifications.filter(n => isCategoryEnabled(n.type));
-  const unreadCount = visibleNotifications.filter(n => n.unread).length;
   const notificationsAllowed = perms?.notificationsAllowed !== false;
   const display = getDisplayConfig(perms);
   const fs = size => Math.round(size * display.fontScale * 10) / 10;
@@ -158,14 +108,14 @@ export function NotificationsPage({ onBack }) {
     });
   };
 
-  const markAsRead = async notificationId => {
-    setNotifications(prev =>
-      prev.map(notif => (notif.id === notificationId ? { ...notif, unread: false } : notif))
-    );
-  };
-
-  const markAllAsRead = async () => {
-    setNotifications(prev => prev.map(notif => ({ ...notif, unread: false })));
+  const markAsRead = async id => {
+    setReadError(false);
+    try {
+      await NotificationsAPI.markRead(categories, id);
+      await fetchNotifications();
+    } catch {
+      setReadError(true);
+    }
   };
 
   const getRelativeTime = timestamp => {
@@ -213,7 +163,7 @@ export function NotificationsPage({ onBack }) {
           )}
         </View>
         {notificationsAllowed && unreadCount > 0 && (
-          <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
+          <TouchableOpacity onPress={() => markAsRead()} style={styles.markAllButton}>
             <Text style={styles.markAllText}>Mark all</Text>
           </TouchableOpacity>
         )}
@@ -262,6 +212,7 @@ export function NotificationsPage({ onBack }) {
         </View>
       )}
 
+      {readError && <Text accessibilityRole="alert" style={styles.emptySubtext}>Could not mark notifications as read. Try again.</Text>}
       {/* Notifications List */}
       {!notificationsAllowed ? (
         <View style={styles.emptyContainer}>
@@ -290,11 +241,18 @@ export function NotificationsPage({ onBack }) {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0ea5e9" />
         </View>
-      ) : visibleNotifications.length === 0 ? (
+      ) : loadError ? (
+        <View style={styles.emptyContainer}>
+          <Text accessibilityRole="alert" style={[styles.emptyText, { color: display.textPrimary }]}>Unable to load notifications</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={fetchNotifications} style={styles.turnOnBtn}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : notifications.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Bell size={48} color="#d1d5db" />
           <Text style={[styles.emptyText, { color: display.textPrimary, fontSize: fs(18) }]}>
-            No matching notifications
+            No notifications yet
           </Text>
           <Text
             style={[
@@ -302,7 +260,7 @@ export function NotificationsPage({ onBack }) {
               { textAlign: 'center', color: display.textSecondary, fontSize: fs(14) },
             ]}
           >
-            You have muted the active notification categories, or you're all caught up!
+            Appointment and digital claim updates will appear here.
           </Text>
         </View>
       ) : (
@@ -312,13 +270,13 @@ export function NotificationsPage({ onBack }) {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#0ea5e9']} />
           }
         >
-          {visibleNotifications.map((notif, idx) => {
+          {notifications.map(notif => {
             const iconStyle = getIconStyle(notif.type);
             const IconComponent = notif.icon;
 
             return (
               <TouchableOpacity
-                key={`${notif.id}-${idx}`}
+                key={notif.id}
                 style={[
                   styles.notificationItem,
                   {

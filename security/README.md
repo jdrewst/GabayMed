@@ -1,5 +1,13 @@
 # Login security follow-up
 
+## Website branch notifications
+
+Run `security/clinic-notifications.sql` in the shared Supabase SQL Editor before deploying the updated website, booking backend, and mobile app. Then book a new test appointment from mobile at a configured branch. Verify the alert and unread count at that branch in the website bell and Notifications page, and verify they stay out of Main and the other branch inboxes. Main receives events without a known branch. Hospital-wide fee changes appear in each branch inbox with separate read state. Staff at the same branch share read and dismissal state, and database access is scoped to the signed-in hospital. Existing activity is not backfilled.
+
+## Patient status notifications
+
+Run `security/patient-status-notifications.sql` in the shared Supabase project's SQL Editor. Then use a staff account in Gabay 1.0 to confirm or cancel an appointment or change a digital claim status for a linked patient. In Gabay 2.0, verify the alert and unread badge appear and that marking the alert read updates the count. Only status changes made after installation create alerts. The patient app uses the existing Appointments and Insurance preferences for these alerts.
+
 ## Clinic messaging setup
 
 Run `security/messaging.sql` in the Supabase SQL Editor for the project used by the staff website and patient app. It creates message storage and limits access to the linked patient and staff assigned to the patient's facility. After applying it, test a staff-to-patient message and a patient-to-staff reply using accounts linked to the same clinic.

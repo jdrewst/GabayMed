@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MessageCircle, Bell } from 'lucide-react-native';
 import ProfileAPI from '../services/profileApi';
+import NotificationsAPI, { notificationCategories } from '../services/notificationsApi';
 import { PatientAvatar } from './patient-avatar';
 
 function buildHeaderUserData(profile) {
@@ -37,13 +38,11 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
   const [userData, setUserData] = useState(() =>
     buildHeaderUserData(ProfileAPI.getCachedProfile())
   );
-  const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [greeting, setGreeting] = useState(computeGreeting);
 
   useEffect(() => {
     fetchUserData();
-    fetchUnreadCounts();
     setGreeting(computeGreeting());
     const unsub = ProfileAPI.subscribe(profile => {
       if (profile) setUserData(buildHeaderUserData(profile));
@@ -62,21 +61,31 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
     }
   };
 
-  const fetchUnreadCounts = async () => {
-    try {
-      // TODO: Replace with actual API call
-      // const response = await fetch('YOUR_API_ENDPOINT/unread-counts');
-      // const data = await response.json();
-      
-      // Simulated data for now
-      setTimeout(() => {
-        setUnreadMessages(0);
-        setUnreadNotifications(0);
-      }, 100);
-    } catch (error) {
-      console.error('Error fetching unread counts:', error);
-    }
-  };
+  useEffect(() => {
+    let active = true;
+    let request = 0;
+    let permissions = ProfileAPI.getCachedPermissions();
+    const refresh = async () => {
+      const current = ++request;
+      try {
+        const count = await NotificationsAPI.unreadCount(notificationCategories(permissions));
+        if (active && current === request) setUnreadNotifications(count);
+      } catch {
+        // Keep the last count and retry on the next refresh.
+      }
+    };
+    const unsubscribe = ProfileAPI.subscribePermissions(next => {
+      permissions = next;
+      refresh();
+    });
+    refresh();
+    const stop = NotificationsAPI.watch(refresh);
+    return () => {
+      active = false;
+      unsubscribe();
+      stop();
+    };
+  }, []);
 
   const updateGreeting = () => {
     const hour = new Date().getHours();
@@ -110,13 +119,14 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
       <View style={styles.rightSection}>
         <TouchableOpacity onPress={onOpenMessages} style={styles.iconButton}>
           <MessageCircle size={24} color="#4b5563" fill={"#3A4D51"} />
-          {unreadMessages > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unreadMessages > 9 ? '9+' : unreadMessages}</Text>
-            </View>
-          )}
+
         </TouchableOpacity>
-        <TouchableOpacity onPress={onOpenNotifications} style={styles.iconButton}>
+        <TouchableOpacity
+          onPress={onOpenNotifications}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityLabel={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}
+        >
           <Bell size={24} color="#4b5563" fill={"#3A4D51"} />
           {unreadNotifications > 0 && (
             <View style={styles.badge}>

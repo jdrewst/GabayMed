@@ -21,7 +21,7 @@ if (!supabaseUrl || !supabaseKey) {
   console.error("🚨 Supabase keys are missing! Check your .env file.");
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // TODO: Replace with your Vercel URL (e.g., 'https://gabay-backend.vercel.app/api')
 // Use 'http://localhost:3000/api' if testing locally with 'vercel dev'
