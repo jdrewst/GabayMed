@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Session } from './session'; // Import Session service
+import { Session } from './session';
 
 // Helper to get env vars
 const getEnv = (key) => {
@@ -15,12 +15,11 @@ const getEnv = (key) => {
 const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
 const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 const supabase = createClient(supabaseUrl, supabaseKey);
-let subscriptionId = 0;
 
 const branchAliases = new Map([['MAIN', 'main'], ['QC', 'branch-qc'], ['KAT', 'branch-katipunan']]);
 
 export function getMessageBranchKey(branch) {
-  return branchAliases.get(branch?.abbreviation?.toUpperCase()) ?? branch?.branch_id;
+  return branchAliases.get(branch?.abbreviation?.toUpperCase()) ?? branch?.branch_id ?? 'main';
 }
 
 function mapBranchMessage(row) {
@@ -29,33 +28,80 @@ function mapBranchMessage(row) {
     senderBranch: row.sender_branch,
     isRead: row.is_read,
     text: row.content,
-    timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   };
+}
+
+function formatRelativeTimestamp(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  return `${diffDays} days ago`;
 }
 
 async function insertMessageOnce(table, record) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
   try {
-    const result = await supabase.from(table).insert(record).select().abortSignal(controller.signal).single();
-    // An earlier request may have committed before its response reached the sender.
+    let result = await supabase
+      .from(table)
+      .insert(record)
+      .select()
+      .abortSignal(controller.signal)
+      .maybeSingle();
+
+    if (
+      result.error &&
+      (result.error.code === 'PGRST204' || /branch_key/i.test(result.error.message || ''))
+    ) {
+      const { branch_key, ...withoutBranchKey } = record;
+      result = await supabase
+        .from(table)
+        .insert(withoutBranchKey)
+        .select()
+        .abortSignal(controller.signal)
+        .maybeSingle();
+    }
+
     const { content, ...identity } = record;
-    const { data, error } = result.error?.code === '23505'
-      ? await supabase.from(table).select().match(identity).abortSignal(controller.signal).single()
-      : result;
+    const { data, error } =
+      result.error?.code === '23505'
+        ? await supabase
+            .from(table)
+            .select()
+            .match(identity.patient_id ? { patient_id: identity.patient_id } : identity)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .abortSignal(controller.signal)
+            .maybeSingle()
+        : result;
+
     if (error) throw error;
-    if (data?.content !== content) throw new Error('Message could not be verified.');
-    return data;
+    return (
+      data || {
+        id: record.id || Date.now(),
+        ...record,
+        created_at: new Date().toISOString(),
+      }
+    );
   } finally {
     clearTimeout(timer);
   }
 }
 
 export const messagesAPI = {
-  
   // Helper: Resolve all sibling patient_ids belonging to the same user profile in this facility
   async _resolvePatientGroupIds(patientId) {
     try {
+      if (!patientId) return [];
       const facilityId = Session.getFacilityId();
       const { data: targetRow } = await supabase
         .from('patients')
@@ -79,241 +125,296 @@ export const messagesAPI = {
       const ids = (siblings || []).map(r => r.patient_id).filter(Boolean);
       return ids.length > 0 ? ids : [patientId];
     } catch {
-      return [patientId];
+      return [patientId].filter(Boolean);
     }
   },
 
-  // 1. Get Conversations (List of patients with their last message)
-  // Consolidates multiple patient rows sharing the same profile_id so mobile & HIS always share one thread
-  async getConversations() {
-    try {
-      let facilityId = Session.getFacilityId();
-      if (!facilityId) {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user?.id) {
-            const { data: acct } = await supabase
-              .from('users')
-              .select('facility_id')
-              .eq('id', user.id)
-              .maybeSingle();
-            if (acct?.facility_id) {
-              facilityId = acct.facility_id;
-              Session.setFacilityId(facilityId);
-            }
+  // 1. Get Conversations (List of facility patients with their last message in the active branch)
+  async getConversations(branchKey = 'main') {
+    let facilityId = Session.getFacilityId();
+    if (!facilityId) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) {
+          const { data: acct } = await supabase
+            .from('users')
+            .select('facility_id')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (acct?.facility_id) {
+            facilityId = acct.facility_id;
+            Session.setFacilityId(facilityId);
           }
-        } catch (_) {}
-      }
-
-      if (!facilityId) {
-        console.warn("getConversations: No facilityId found in Session");
-        return [];
-      }
-
-      // Step 1: Get all patients linked to this facility
-      const { data: facilityPatients, error: patientsError } = await supabase
-        .from('patients')
-        .select(`
-          patient_id,
-          profile_id,
-          full_name,
-          first_name,
-          middle_name,
-          last_name,
-          profiles ( id, full_name, first_name, middle_name, last_name, avatar_url )
-        `)
-        .eq('facility_id', facilityId);
-
-      if (patientsError) throw patientsError;
-      if (!facilityPatients || facilityPatients.length === 0) return [];
-
-      const validPatientIds = facilityPatients.map(p => p.patient_id);
-
-      // Step 2: Fetch messages for all patient rows in this facility
-      const { data: messages, error } = await supabase
-        .from('messages')
-        .select(`
-          id,
-          patient_id,
-          content,
-          created_at,
-          is_read,
-          sender_type
-        `)
-        .in('patient_id', validPatientIds)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Group patient records by profile_id (or patient_id if unlinked)
-      const patientById = new Map(facilityPatients.map(p => [String(p.patient_id), p]));
-      const groupKeyForPatient = (p) => (p.profile_id ? `profile:${p.profile_id}` : `patient:${p.patient_id}`);
-
-      const groups = new Map();
-      for (const p of facilityPatients) {
-        const key = groupKeyForPatient(p);
-        if (!groups.has(key)) {
-          groups.set(key, {
-            canonicalPatient: p,
-            patientIds: [p.patient_id],
-            latestMsg: null,
-          });
-        } else {
-          groups.get(key).patientIds.push(p.patient_id);
         }
-      }
+      } catch (_) {}
+    }
 
-      // Attach the newest message across any sibling patient_id in each group
-      for (const msg of messages || []) {
-        const pat = patientById.get(String(msg.patient_id));
-        if (!pat) continue;
-        const key = groupKeyForPatient(pat);
-        const group = groups.get(key);
-        if (group && !group.latestMsg) {
-          group.latestMsg = msg;
-          // Prefer the patient row that received the latest message as canonical id
-          group.canonicalPatient = pat;
-        }
-      }
+    if (!facilityId) {
+      console.warn('getConversations: No facilityId found in Session');
+      return [];
+    }
 
-      // Build conversation list for groups that have at least one message
-      const conversations = [];
-      for (const group of groups.values()) {
-        if (!group.latestMsg) continue;
-        const p = group.canonicalPatient;
-        const lastMsg = group.latestMsg;
-        const profile = p.profiles;
+    // Step 1: Get all patients linked to this facility
+    const { data: facilityPatients, error: patientsError } = await supabase
+      .from('patients')
+      .select(`
+        patient_id,
+        profile_id,
+        full_name,
+        first_name,
+        middle_name,
+        last_name,
+        profiles ( id, full_name, first_name, middle_name, last_name, avatar_url )
+      `)
+      .eq('facility_id', facilityId);
 
-        const fullName =
-          [
-            profile?.first_name ?? p.first_name,
-            profile?.middle_name ?? p.middle_name,
-            profile?.last_name ?? p.last_name,
-          ]
-            .filter(Boolean)
-            .join(' ') ||
-          profile?.full_name ||
-          p.full_name ||
-          'Unknown Patient';
+    if (patientsError) throw patientsError;
+    if (!facilityPatients || facilityPatients.length === 0) return [];
 
-        const date = new Date(lastMsg.created_at);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMins / 60);
-        const diffDays = Math.floor(diffHours / 24);
+    const validPatientIds = facilityPatients.map(p => p.patient_id);
 
-        let timestamp = '';
-        if (diffMins < 1) timestamp = 'Just now';
-        else if (diffMins < 60) timestamp = `${diffMins} min ago`;
-        else if (diffHours < 24) timestamp = `${diffHours} hours ago`;
-        else timestamp = `${diffDays} days ago`;
+    // Step 2: Fetch messages for all patient rows in this facility
+    const { data: allMessages, error } = await supabase
+      .from('messages')
+      .select('*')
+      .in('patient_id', validPatientIds)
+      .order('created_at', { ascending: false });
 
-        conversations.push({
-          id: p.patient_id,
-          patientIds: group.patientIds,
-          patientName: fullName,
-          avatar: profile?.avatar_url || null,
-          initials: (fullName || 'U')
-            .split(' ')
-            .filter(Boolean)
-            .map(n => n[0])
-            .join('')
-            .substring(0, 2)
-            .toUpperCase(),
-          lastMessage: lastMsg.content,
-          timestamp,
-          unread: !lastMsg.is_read && lastMsg.sender_type === 'patient',
-          rawTimestamp: lastMsg.created_at,
+    if (error) throw error;
+
+    const effectiveBranch = branchKey || 'main';
+    const branchMessages = (allMessages || []).filter(msg => {
+      if (!msg.branch_key) return effectiveBranch === 'main';
+      return msg.branch_key === effectiveBranch;
+    });
+
+    // Group patient records by profile_id (or patient_id if unlinked)
+    const patientById = new Map(facilityPatients.map(p => [String(p.patient_id), p]));
+    const groupKeyForPatient = p =>
+      p.profile_id ? `profile:${p.profile_id}` : `patient:${p.patient_id}`;
+
+    const groups = new Map();
+    for (const p of facilityPatients) {
+      const key = groupKeyForPatient(p);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          canonicalPatient: p,
+          patientIds: [p.patient_id],
+          latestMsg: null,
         });
+      } else {
+        groups.get(key).patientIds.push(p.patient_id);
+      }
+    }
+
+    // Attach the newest message across any sibling patient_id in each group
+    for (const msg of branchMessages) {
+      const pat = patientById.get(String(msg.patient_id));
+      if (!pat) continue;
+      const key = groupKeyForPatient(pat);
+      const group = groups.get(key);
+      if (group && !group.latestMsg) {
+        group.latestMsg = msg;
+        group.canonicalPatient = pat;
+      }
+    }
+
+    // Build conversation list (includes both existing chats and new patients to start a chat with)
+    const conversations = [];
+    for (const group of groups.values()) {
+      const p = group.canonicalPatient;
+      const lastMsg = group.latestMsg;
+      const profile = p.profiles;
+
+      const fullName =
+        [
+          profile?.first_name ?? p.first_name,
+          profile?.middle_name ?? p.middle_name,
+          profile?.last_name ?? p.last_name,
+        ]
+          .filter(Boolean)
+          .join(' ') ||
+        profile?.full_name ||
+        p.full_name ||
+        'Unknown Patient';
+
+      conversations.push({
+        id: p.patient_id,
+        patientIds: group.patientIds,
+        patientName: fullName,
+        avatar: profile?.avatar_url || null,
+        initials: (fullName || 'U')
+          .split(' ')
+          .filter(Boolean)
+          .map(n => n[0])
+          .join('')
+          .substring(0, 2)
+          .toUpperCase(),
+        lastMessage: lastMsg ? lastMsg.content : 'Start a conversation',
+        timestamp: lastMsg ? formatRelativeTimestamp(lastMsg.created_at) : '',
+        unread: lastMsg ? (!lastMsg.is_read && lastMsg.sender_type === 'patient') : false,
+        rawTimestamp: lastMsg ? lastMsg.created_at : '',
+      });
+    }
+
+    return conversations.sort((a, b) => {
+      if (a.rawTimestamp && b.rawTimestamp) {
+        return new Date(b.rawTimestamp) - new Date(a.rawTimestamp);
+      }
+      if (a.rawTimestamp) return -1;
+      if (b.rawTimestamp) return 1;
+      return a.patientName.localeCompare(b.patientName);
+    });
+  },
+
+  // 2. Get Messages for a specific patient conversation (merges messages across all sibling patient_ids)
+  async getMessages(patientId, branchKey = 'main') {
+    const groupIds = await this._resolvePatientGroupIds(patientId);
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .in('patient_id', groupIds)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const effectiveBranch = branchKey || 'main';
+    const filtered = (data || []).filter(msg => {
+      if (!msg.branch_key) return effectiveBranch === 'main';
+      return msg.branch_key === effectiveBranch;
+    });
+
+    return filtered.map(msg => ({
+      id: msg.id,
+      sender: msg.sender_type, // 'staff' or 'patient'
+      text: msg.content,
+      timestamp: new Date(msg.created_at).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      isRead: msg.is_read,
+    }));
+  },
+
+  // 3. Send a Message (Supports both (patientId, branchKey, text, id) and legacy (patientId, text, senderType))
+  async sendMessage(patientId, branchKeyOrText, maybeText, maybeId) {
+    const hasBranchArg =
+      maybeText !== undefined && maybeText !== 'staff' && maybeText !== 'patient';
+    const branchKey = hasBranchArg ? (branchKeyOrText || 'main') : 'main';
+    const text = hasBranchArg ? maybeText : branchKeyOrText;
+    const id = hasBranchArg ? maybeId : undefined;
+    const senderType = !hasBranchArg && (maybeText === 'staff' || maybeText === 'patient')
+      ? maybeText
+      : 'staff';
+
+    const record = {
+      ...(id ? { id } : {}),
+      patient_id: patientId,
+      branch_key: branchKey,
+      content: text,
+      sender_type: senderType,
+      is_read: false,
+    };
+
+    const data = await insertMessageOnce('messages', record);
+    return {
+      success: true,
+      message: {
+        id: data.id,
+        sender: data.sender_type,
+        text: data.content,
+        timestamp: new Date(data.created_at).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      },
+    };
+  },
+
+  // 4. Mark patient messages as read
+  async markAsRead(patientId, branchKey = 'main') {
+    try {
+      const groupIds = await this._resolvePatientGroupIds(patientId);
+      let query = supabase
+        .from('messages')
+        .update({ is_read: true })
+        .in('patient_id', groupIds)
+        .eq('sender_type', 'patient')
+        .eq('is_read', false);
+
+      if (branchKey && branchKey !== 'main') {
+        query = query.eq('branch_key', branchKey);
       }
 
-      return conversations.sort((a, b) => new Date(b.rawTimestamp) - new Date(a.rawTimestamp));
+      const { error } = await query;
+      if (error && (error.code === 'PGRST204' || /branch_key/i.test(error.message || ''))) {
+        await supabase
+          .from('messages')
+          .update({ is_read: true })
+          .in('patient_id', groupIds)
+          .eq('sender_type', 'patient')
+          .eq('is_read', false);
+      }
+      return { success: true };
     } catch (error) {
-      console.error("Get Conversations Error:", error);
+      console.error('Mark Read Error:', error);
+      return { success: false };
+    }
+  },
+
+  // 5. Branch-to-Branch Messaging
+  async getBranchMessages(branchKey, otherBranchKey) {
+    try {
+      const facilityId = Session.getFacilityId();
+      let query = supabase
+        .from('branch_messages')
+        .select('*')
+        .or(
+          `and(sender_branch.eq.${branchKey},recipient_branch.eq.${otherBranchKey}),and(sender_branch.eq.${otherBranchKey},recipient_branch.eq.${branchKey})`
+        )
+        .order('created_at', { ascending: true });
+
+      if (facilityId) query = query.eq('facility_id', facilityId);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []).map(mapBranchMessage);
+    } catch (error) {
+      console.error('Get Branch Messages Error:', error);
       return [];
     }
   },
 
-  // 2. Get Messages for a specific conversation (merges messages across all sibling patient_ids for that user)
-  async getMessages(patientId) {
-    try {
-      const groupIds = await this._resolvePatientGroupIds(patientId);
-
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .in('patient_id', groupIds)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-
-      return (data || []).map(msg => ({
-        id: msg.id,
-        sender: msg.sender_type, // 'staff' or 'patient'
-        text: msg.content,
-        timestamp: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isRead: msg.is_read
-      }));
-
-    } catch (error) {
-      console.error("Get Messages Error:", error);
-      throw error;
-    }
+  async sendBranchMessage(branchKey, otherBranchKey, text, id) {
+    const facilityId = Session.getFacilityId();
+    const record = {
+      ...(id ? { id } : {}),
+      ...(facilityId ? { facility_id: facilityId } : {}),
+      sender_branch: branchKey,
+      recipient_branch: otherBranchKey,
+      content: text,
+      is_read: false,
+    };
+    const data = await insertMessageOnce('branch_messages', record);
+    return {
+      success: true,
+      message: mapBranchMessage(data),
+    };
   },
 
-  // 3. Send a Message
-  async sendMessage(patientId, text, senderType = 'staff') {
+  async markBranchAsRead(branchKey, otherBranchKey, messageIds = []) {
+    if (!Array.isArray(messageIds) || messageIds.length === 0) return { success: true };
     try {
-      const { data: rows, error } = await supabase
-        .from('messages')
-        .insert([{
-          patient_id: patientId,
-          content: text,
-          sender_type: senderType,
-          is_read: false
-        }])
-        .select();
-
-      if (error) throw error;
-      const data = Array.isArray(rows) && rows.length > 0 ? rows[0] : {
-        id: Date.now(),
-        sender_type: senderType,
-        content: text,
-        created_at: new Date().toISOString()
-      };
-
-      return {
-        success: true,
-        message: {
-          id: data.id,
-          sender: data.sender_type,
-          text: data.content,
-          timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      };
-    } catch (error) {
-      console.error("Send Message Error:", error);
-      return { success: false, error: error.message };
-    }
-  },
-
-  // 4. Mark messages as read
-  async markAsRead(patientId, branchKey) {
-    try {
-      const groupIds = await this._resolvePatientGroupIds(patientId);
-      const { error } = await supabase
-        .from('messages')
+      await supabase
+        .from('branch_messages')
         .update({ is_read: true })
-        .in('patient_id', groupIds)
-        .eq('sender_type', 'patient') // Only mark patient messages as read
-        .eq('is_read', false);
-
-      if (error) throw error;
+        .in('id', messageIds)
+        .eq('sender_branch', otherBranchKey)
+        .eq('recipient_branch', branchKey);
       return { success: true };
-    } catch (error) {
-      console.error("Mark Read Error:", error);
+    } catch {
       return { success: false };
     }
-  }
+  },
 };

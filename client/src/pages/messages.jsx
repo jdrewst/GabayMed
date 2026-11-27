@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ArrowLeft, Building2, MessageSquare, Search, Send } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -8,71 +8,34 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getMessageBranchKey, messagesAPI } from "../../services/messages"
 
-export function Messages() {
-  const [activeConversationId, setActiveConversationId] = useState(null)
-  const [conversations, setConversations] = useState([])
-  const [messages, setMessages] = useState([])
-  const [messageText, setMessageText] = useState("")
-  const [searchQuery, setSearchQuery] = useState("")
-  const [loading, setLoading] = useState(true)
-  const messagesEndRef = useRef(null)
-
-  // Scroll to bottom of messages
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+function ConversationAvatar({ conversation }) {
+  if (conversation?.branchKey) {
+    return (
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+        <Building2 className="size-5" />
+      </div>
+    )
   }
+  const name = conversation?.patientName || conversation?.name || "Patient"
+  const initials =
+    conversation?.initials ||
+    name
+      .split(" ")
+      .filter(Boolean)
+      .map(n => n[0])
+      .join("")
+      .substring(0, 2)
+      .toUpperCase()
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
-
-  // Fetch conversations on mount
-  useEffect(() => {
-    const fetchConversations = async () => {
-      setLoading(true)
-      const data = await messagesAPI.getConversations()
-      setConversations(data)
-      
-      // Check URL parameters
-      const urlParams = new URLSearchParams(window.location.search)
-      const patientId = urlParams.get("patient")
-      
-      if (patientId) {
-        setActiveConversationId(patientId)
-      } else if (data.length > 0 && !activeConversationId) {
-        setActiveConversationId(data[0].id)
-      }
-      setLoading(false)
-    }
-    fetchConversations()
-    
-    // Poll for new conversations every 5s so incoming mobile messages appear quickly
-    const interval = setInterval(fetchConversations, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Fetch messages when active conversation changes + poll every 4s for live mobile messages
-  useEffect(() => {
-    if (!activeConversationId) return
-
-    const fetchMessages = async (markRead = false) => {
-      const data = await messagesAPI.getMessages(activeConversationId)
-      setMessages(data)
-      if (markRead) {
-        await messagesAPI.markAsRead(activeConversationId)
-        setConversations(prev => prev.map(c => 
-          String(c.id) === String(activeConversationId) ? { ...c, unread: false } : c
-        ))
-      }
-    }
-    fetchMessages(true)
-
-    const msgInterval = setInterval(() => fetchMessages(false), 4000)
-    return () => clearInterval(msgInterval)
-  }, [activeConversationId])
-
-  const filteredConversations = conversations.filter((conv) =>
-    conv.patientName.toLowerCase().includes(searchQuery.toLowerCase()),
+  return (
+    <Avatar className="size-10 shrink-0">
+      {conversation?.avatar && !conversation.avatar.startsWith("preset:") ? (
+        <AvatarImage src={conversation.avatar} alt={name} />
+      ) : null}
+      <AvatarFallback className="bg-sky-100 text-sky-700 font-semibold text-xs">
+        {initials || "P"}
+      </AvatarFallback>
+    </Avatar>
   )
 }
 
@@ -88,11 +51,6 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
   const endRef = useRef(null)
   const pendingSend = useRef(null)
   const sendInProgress = useRef(false)
-  const activeConversation = conversations.find(
-    (c) =>
-      String(c.id) === String(activeConversationId) ||
-      (Array.isArray(c.patientIds) && c.patientIds.some(pid => String(pid) === String(activeConversationId)))
-  )
 
   useEffect(() => {
     let active = true
@@ -120,7 +78,7 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
       }
     }
     load()
-    const interval = setInterval(load, 10000)
+    const interval = setInterval(load, 4000)
     return () => {
       active = false
       clearInterval(interval)
@@ -255,7 +213,7 @@ function BranchMessages({ branchKey, branchName, contacts }) {
       }
     }
     load()
-    const interval = setInterval(load, 15000)
+    const interval = setInterval(load, 5000)
     return () => {
       active = false
       clearInterval(interval)
@@ -263,8 +221,14 @@ function BranchMessages({ branchKey, branchName, contacts }) {
   }, [branchKey])
 
   const branchContacts = Array.from(contacts, ([key, name]) => ({ id: `branch:${key}`, branchKey: key, name }))
-  const selected = branchContacts.find(contact => contact.id === activeId)
-    || conversations.find(conversation => String(conversation.id) === String(activeId))
+  const selected =
+    branchContacts.find(contact => contact.id === activeId) ||
+    conversations.find(
+      conversation =>
+        String(conversation.id) === String(activeId) ||
+        (Array.isArray(conversation.patientIds) &&
+          conversation.patientIds.some(pid => String(pid) === String(activeId)))
+    )
   const searchTerms = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
   const visible = conversations.filter(conversation =>
     searchTerms.every(term => conversation.patientName.toLowerCase().includes(term))
