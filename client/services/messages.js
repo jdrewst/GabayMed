@@ -16,7 +16,38 @@ const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
 const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+function mapBranchMessage(row) {
+  return {
+    id: row.id,
+    senderBranch: row.sender_branch,
+    text: row.content,
+    timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+}
+
 export const messagesAPI = {
+
+  async getBranchMessages(branchKey, otherBranchKey) {
+    const pair = [branchKey, otherBranchKey];
+    const { data, error } = await supabase.from('branch_messages')
+      .select('id, sender_branch, content, created_at')
+      .eq('facility_id', Session.getFacilityId())
+      .in('sender_branch', pair)
+      .in('recipient_branch', pair)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true });
+    if (error) throw error;
+    return data.map(mapBranchMessage);
+  },
+
+  async sendBranchMessage(branchKey, otherBranchKey, text) {
+    const { data, error } = await supabase.from('branch_messages')
+      .insert({ facility_id: Session.getFacilityId(), sender_branch: branchKey, recipient_branch: otherBranchKey, content: text })
+      .select('id, sender_branch, content, created_at')
+      .single();
+    if (error) throw error;
+    return { success: true, message: mapBranchMessage(data) };
+  },
   
   async getConversations(branchKey) {
     const facilityId = Session.getFacilityId();

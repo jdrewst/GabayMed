@@ -1,22 +1,27 @@
 ﻿import { useEffect, useRef, useState } from "react"
-import { ArrowLeft, MessageSquare, Search, Send } from "lucide-react"
+import { ArrowLeft, Building2, MessageSquare, Search, Send } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { useBranch } from "@/lib/branch-context"
 import { Header } from "@/components/header"
 import { Input } from "@/components/ui/input"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { messagesAPI } from "../../services/messages"
 
-function PatientAvatar({ conversation }) {
+function ConversationAvatar({ conversation }) {
   return (
     <Avatar className="h-11 w-11 shrink-0">
       {conversation.avatar && <AvatarImage src={conversation.avatar} />}
-      <AvatarFallback className="bg-sky-100 font-semibold text-sky-800">{conversation.initials}</AvatarFallback>
+      <AvatarFallback className="bg-sky-100 font-semibold text-sky-800">
+        {conversation.branchKey ? <Building2 className="size-5" /> : conversation.initials}
+      </AvatarFallback>
     </Avatar>
   )
 }
 
-function PatientChat({ conversation, branchKey, onBack, onSent }) {
+function Chat({ conversation, branchKey, onBack, onSent }) {
+  const otherBranchKey = conversation.branchKey
+  const name = conversation.name || conversation.patientName
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
@@ -29,14 +34,16 @@ function PatientChat({ conversation, branchKey, onBack, onSent }) {
     let active = true
     async function load() {
       try {
-        const history = await messagesAPI.getMessages(conversation.id, branchKey)
+        const history = otherBranchKey
+          ? await messagesAPI.getBranchMessages(branchKey, otherBranchKey)
+          : await messagesAPI.getMessages(conversation.id, branchKey)
         if (!active) return
         setMessages(previous => {
           const ids = new Set(history.map(message => message.id))
           return [...history, ...previous.filter(message => !ids.has(message.id))]
         })
         setHistoryError(false)
-        if (history.some(message => message.sender === "patient" && !message.isRead)) {
+        if (!otherBranchKey && history.some(message => message.sender === "patient" && !message.isRead)) {
           await messagesAPI.markAsRead(conversation.id, branchKey)
         }
       } catch {
@@ -51,7 +58,7 @@ function PatientChat({ conversation, branchKey, onBack, onSent }) {
       active = false
       clearInterval(interval)
     }
-  }, [conversation.id, branchKey])
+  }, [conversation.id, branchKey, otherBranchKey])
 
   const lastMessageId = messages.at(-1)?.id
   useEffect(() => {
@@ -65,11 +72,13 @@ function PatientChat({ conversation, branchKey, onBack, onSent }) {
     setSending(true)
     setSendError(false)
     try {
-      const result = await messagesAPI.sendMessage(conversation.id, branchKey, text)
+      const result = otherBranchKey
+        ? await messagesAPI.sendBranchMessage(branchKey, otherBranchKey, text)
+        : await messagesAPI.sendMessage(conversation.id, branchKey, text)
       if (!result.success) throw new Error("Message could not be sent")
       setMessages(previous => previous.some(message => message.id === result.message.id) ? previous : [...previous, result.message])
       setDraft("")
-      onSent(conversation.id, text)
+      if (!otherBranchKey) onSent(conversation.id, text)
     } catch {
       setSendError(true)
     } finally {
@@ -83,10 +92,10 @@ function PatientChat({ conversation, branchKey, onBack, onSent }) {
         <Button type="button" variant="ghost" size="icon" className="md:hidden" aria-label="Back to conversations" onClick={onBack}>
           <ArrowLeft className="size-5" />
         </Button>
-        <PatientAvatar conversation={conversation} />
+        <ConversationAvatar conversation={conversation} />
         <div className="min-w-0">
-          <h2 className="truncate font-semibold text-slate-900">{conversation.patientName}</h2>
-          <p className="text-xs text-slate-500">Patient</p>
+          <h2 className="truncate font-semibold text-slate-900">{name}</h2>
+          <p className="text-xs text-slate-500">{otherBranchKey ? "Branch" : "Patient"}</p>
         </div>
       </header>
       <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 sm:p-6">
@@ -96,11 +105,11 @@ function PatientChat({ conversation, branchKey, onBack, onSent }) {
           <div className="mx-auto mt-10 grid max-w-sm justify-items-center gap-2 text-center">
             <div className="rounded-full bg-sky-100 p-3 text-sky-700"><MessageSquare className="size-6" /></div>
             <h3 className="font-semibold text-slate-900">Start a conversation</h3>
-            <p className="text-sm text-slate-600">Send the first message to {conversation.patientName} using the field below.</p>
+            <p className="text-sm text-slate-600">Send the first message to {name} using the field below.</p>
           </div>
         )}
         {messages.map(message => {
-          const outgoing = message.sender === "staff"
+          const outgoing = otherBranchKey ? message.senderBranch === branchKey : message.sender === "staff"
           return (
             <div key={message.id} className={outgoing ? "flex justify-end" : "flex justify-start"}>
               <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 sm:max-w-[70%] ${outgoing ? "rounded-br-sm bg-sky-700 text-white" : "rounded-bl-sm border border-slate-200 bg-white text-slate-900"}`}>
@@ -125,24 +134,33 @@ function PatientChat({ conversation, branchKey, onBack, onSent }) {
   )
 }
 
+const branchAliases = new Map([["MAIN", "main"], ["QC", "branch-qc"], ["KAT", "branch-katipunan"]])
+
+function getBranchKey(branch) {
+  return branchAliases.get(branch?.abbreviation?.toUpperCase()) ?? branch?.branch_id
+}
+
 export function Messages() {
-  const { selectedBranch, selectedBranchId, loading } = useBranch()
-  const branchAliases = { MAIN: "main", QC: "branch-qc", KAT: "branch-katipunan" }
-  const branchKey = selectedBranchId === "all"
-    ? "main"
-    : branchAliases[selectedBranch?.abbreviation?.toUpperCase()] ?? selectedBranch?.branch_id
+  const { branches, selectedBranch, selectedBranchId, loading } = useBranch()
+  const branchKey = selectedBranchId === "all" ? "main" : getBranchKey(selectedBranch)
+  const contacts = new Map([["main", "Main"]])
+  for (const branch of branches) {
+    const key = getBranchKey(branch)
+    if (key && branch.is_active !== false) contacts.set(key, branch.name)
+  }
+  contacts.delete(branchKey)
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
       {branchKey && !loading
-        ? <BranchMessages key={branchKey} branchKey={branchKey} branchName={selectedBranch?.name || "Main"} />
-        : <p className="p-6 text-sm text-slate-600">{loading ? "Loading branches?" : "Select a branch to open messages."}</p>}
+        ? <BranchMessages key={branchKey} branchKey={branchKey} branchName={selectedBranch?.name || "Main"} contacts={contacts} />
+        : <p className="p-6 text-sm text-slate-600">{loading ? "Loading branches…" : "Select a branch to open messages."}</p>}
     </div>
   )
 }
 
-function BranchMessages({ branchKey, branchName }) {
+function BranchMessages({ branchKey, branchName, contacts }) {
   const [activeId, setActiveId] = useState(() => new URLSearchParams(window.location.search).get("patient"))
   const [showChat, setShowChat] = useState(() => Boolean(activeId))
   const [conversations, setConversations] = useState([])
@@ -172,61 +190,119 @@ function BranchMessages({ branchKey, branchName }) {
     }
   }, [branchKey])
 
-  const selected = conversations.find(conversation => String(conversation.id) === String(activeId))
+  const branchContacts = Array.from(contacts, ([key, name]) => ({ id: `branch:${key}`, branchKey: key, name }))
+  const selected = branchContacts.find(contact => contact.id === activeId)
+    || conversations.find(conversation => String(conversation.id) === String(activeId))
   const searchTerms = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
   const visible = conversations.filter(conversation =>
     searchTerms.every(term => conversation.patientName.toLowerCase().includes(term))
   )
+  const newPatients = visible.filter(conversation => !conversation.rawTimestamp)
+  const existingChats = visible.filter(conversation => conversation.rawTimestamp)
+
+  function openChat(id) {
+    setActiveId(id)
+    setShowChat(true)
+  }
 
   function updatePreview(id, text) {
+    const rawTimestamp = new Date().toISOString()
     setConversations(previous => {
       const item = previous.find(conversation => conversation.id === id)
-      return item ? [{ ...item, lastMessage: text, timestamp: "Just now" }, ...previous.filter(conversation => conversation.id !== id)] : previous
+      return item ? [{ ...item, lastMessage: text, timestamp: "Just now", rawTimestamp }, ...previous.filter(conversation => conversation.id !== id)] : previous
     })
   }
 
   return (
-      <main className="mx-auto flex h-[calc(100dvh-9rem)] min-h-[24rem] max-w-7xl gap-4 px-4 pb-4 sm:px-6">
-        <aside aria-label="Hospital patient conversations" className={`${showChat && selected ? "hidden md:flex" : "flex"} w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white md:w-80 md:shrink-0`}>
-          <div className="border-b border-slate-200 p-4">
-            <h1 className="text-xl font-semibold text-slate-900">Messages</h1>
-            <p className="mb-3 text-sm text-slate-600">{branchName}</p>
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 size-4 text-slate-500" />
-              <Input type="search" aria-label="Search patients at your hospital" placeholder="Search hospital patients" className="pl-9" value={search} onChange={event => setSearch(event.target.value)} />
-            </div>
+      <main className="container mx-auto flex h-[calc(100dvh-9rem)] min-h-[24rem] gap-4 px-6 pb-4">
+        <aside aria-label="Hospital conversations" className={`${showChat && selected ? "hidden md:flex" : "flex"} w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white md:w-96 md:shrink-0`}>
+          <div className="flex items-center justify-between gap-3 px-4 pt-4">
+            <h1 className="shrink-0 text-xl font-semibold text-slate-900">Messages</h1>
+            <p className="min-w-0 truncate text-right text-sm text-slate-600" title={branchName}>{branchName}</p>
           </div>
-          <div className="space-y-2 overflow-y-auto p-3">
-            {visible.length === 0 && <p className="p-3 text-sm text-slate-500">{loading ? "Loading patients…" : loadError ? "Unable to load patients. Please try again shortly." : search.trim() ? "No matching patients." : "No patients found for this clinic."}</p>}
-            {visible.map(conversation => {
-              const isSelected = selected?.id === conversation.id
-              return (
+          <Tabs defaultValue="patients" className="flex min-h-0 flex-1 flex-col">
+            <TabsList aria-label="Conversation type" className="mx-4 mt-3 grid shrink-0 grid-cols-2">
+              <TabsTrigger value="patients">Patients</TabsTrigger>
+              <TabsTrigger value="branches">Other branches</TabsTrigger>
+            </TabsList>
+            <TabsContent value="patients" className="mt-0 min-h-0 flex-1 flex-col data-[state=active]:flex">
+              <div className="border-b border-slate-200 p-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 size-4 text-slate-500" />
+                  <Input type="search" aria-label="Search patients at your hospital" placeholder="Search hospital patients" className="pl-9" value={search} onChange={event => setSearch(event.target.value)} />
+                </div>
+                {newPatients.length > 0 && (
+                  <div role="group" aria-label="Start a conversation" className="mt-3 flex gap-2 overflow-x-auto p-1 pb-2">
+                    {newPatients.map(patient => (
+                      <button
+                        key={patient.id}
+                        type="button"
+                        title={patient.patientName}
+                        aria-label={`Start a conversation with ${patient.patientName}`}
+                        aria-pressed={selected?.id === patient.id}
+                        onClick={() => openChat(patient.id)}
+                        className="flex w-20 shrink-0 flex-col items-center gap-1 rounded-lg p-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700 aria-pressed:bg-sky-50"
+                      >
+                        <ConversationAvatar conversation={patient} />
+                        <span className="w-full truncate text-center text-xs font-medium text-slate-700">{patient.patientName}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 space-y-2 overflow-y-auto p-3">
+                {visible.length === 0 && <p className="p-3 text-sm text-slate-500">{loading ? "Loading patients…" : loadError ? "Unable to load patients. Please try again shortly." : search.trim() ? "No matching patients." : "No patients found for this clinic."}</p>}
+                {visible.length > 0 && existingChats.length === 0 && <p className="p-3 text-sm text-slate-500">{searchTerms.length ? "No matching conversations." : "No conversations in this branch yet."}</p>}
+                {existingChats.map(conversation => {
+                  const isSelected = selected?.id === conversation.id
+                  return (
+                    <button
+                      type="button"
+                      key={conversation.id}
+                      aria-pressed={isSelected}
+                      onClick={() => openChat(conversation.id)}
+                      className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${isSelected ? "border-sky-300 bg-sky-50" : "border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      <ConversationAvatar conversation={conversation} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span className="min-w-0 truncate text-sm font-semibold text-slate-900">{conversation.patientName}</span>
+                          {conversation.timestamp && <span className="shrink-0 text-right text-xs text-slate-500">{conversation.timestamp}</span>}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-xs text-slate-600">{conversation.lastMessage}</span>
+                          {conversation.unread && !isSelected && <span aria-label="Unread messages" className="size-2 shrink-0 rounded-full bg-sky-600" />}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </TabsContent>
+            <TabsContent value="branches" className="mt-0 min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+              {branchContacts.length === 0 && <p className="p-3 text-sm text-slate-500">No other branches available.</p>}
+              {branchContacts.map(contact => (
                 <button
+                  key={contact.id}
                   type="button"
-                  key={conversation.id}
-                  aria-pressed={isSelected}
-                  onClick={() => { setActiveId(conversation.id); setShowChat(true) }}
-                  className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${isSelected ? "border-sky-300 bg-sky-50" : "border-slate-200 hover:bg-slate-50"}`}
+                  aria-pressed={selected?.id === contact.id}
+                  onClick={() => openChat(contact.id)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-slate-200 p-3 text-left hover:bg-slate-50 aria-pressed:border-sky-300 aria-pressed:bg-sky-50"
                 >
-                  <PatientAvatar conversation={conversation} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-900">{conversation.patientName}</span>
-                    <span className="block truncate text-xs text-slate-600">{conversation.lastMessage || "Start a conversation"}</span>
-                    {conversation.timestamp && <span className="mt-1 block text-xs text-slate-500">{conversation.timestamp}</span>}
-                  </span>
-                  {conversation.unread && !isSelected && <span aria-label="Unread messages" className="size-2 shrink-0 rounded-full bg-sky-600" />}
+                  <ConversationAvatar conversation={contact} />
+                  <span className="truncate text-sm font-semibold text-slate-900">{contact.name}</span>
                 </button>
-              )
-            })}
-          </div>
+              ))}
+            </TabsContent>
+          </Tabs>
         </aside>
         <section aria-label="Chat" className={`${showChat && selected ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white`}>
           {selected ? (
-            <PatientChat key={selected.id} branchKey={branchKey} conversation={selected} onBack={() => setShowChat(false)} onSent={updatePreview} />
+            <Chat key={selected.id} branchKey={branchKey} conversation={selected} onBack={() => setShowChat(false)} onSent={updatePreview} />
           ) : (
             <div className="m-auto grid justify-items-center gap-3 p-4 text-center text-sm text-slate-600">
               <MessageSquare className="size-7 text-sky-700" />
-              Select a patient conversation to open the chat.
+              Select a patient or branch to open the chat.
             </div>
           )}
         </section>
