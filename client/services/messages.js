@@ -52,129 +52,203 @@ async function insertMessageOnce(table, record) {
 }
 
 export const messagesAPI = {
+  
+  // Helper: Resolve all sibling patient_ids belonging to the same user profile in this facility
+  async _resolvePatientGroupIds(patientId) {
+    try {
+      const facilityId = Session.getFacilityId();
+      const { data: targetRow } = await supabase
+        .from('patients')
+        .select('patient_id, profile_id, facility_id')
+        .eq('patient_id', patientId)
+        .maybeSingle();
 
-  async getUnreadCount(branchKey) {
-    const facilityId = Session.getFacilityId();
-    const [patients, branches] = await Promise.all([
-      supabase.from('messages').select('id, patients!inner(facility_id)', { head: true, count: 'exact' })
-        .eq('patients.facility_id', facilityId).eq('branch_key', branchKey).eq('sender_type', 'patient').eq('is_read', false),
-      supabase.from('branch_messages').select('id', { head: true, count: 'exact' })
-        .eq('facility_id', facilityId).eq('recipient_branch', branchKey).eq('is_read', false),
-    ]);
-    if (patients.error) throw patients.error;
-    return (patients.count ?? 0) + (branches.count ?? 0);
-  },
+      if (!targetRow?.profile_id) return [patientId];
 
-  watchUnread(branchKey, refresh) {
-    const channel = supabase.channel(`staff-unread-messages:${++subscriptionId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `branch_key=eq.${branchKey}` }, refresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_messages', filter: `recipient_branch=eq.${branchKey}` }, refresh)
-      .subscribe(status => { if (status === 'SUBSCRIBED') refresh(); });
-    const fallback = setInterval(refresh, 10000);
-    return () => {
-      clearInterval(fallback);
-      void supabase.removeChannel(channel);
-    };
-  },
+      let query = supabase
+        .from('patients')
+        .select('patient_id')
+        .eq('profile_id', targetRow.profile_id);
 
-  async markBranchAsRead(branchKey, otherBranchKey, ids) {
-    if (!ids.length) return;
-    const { error } = await supabase.from('branch_messages').update({ is_read: true })
-      .eq('facility_id', Session.getFacilityId()).eq('recipient_branch', branchKey)
-      .eq('sender_branch', otherBranchKey).eq('is_read', false).in('id', ids);
-    if (error) throw error;
-  },
-
-  async getBranchMessages(branchKey, otherBranchKey) {
-    const pair = [branchKey, otherBranchKey];
-    const { data, error } = await supabase.from('branch_messages')
-      .select('id, sender_branch, content, created_at, is_read')
-      .eq('facility_id', Session.getFacilityId())
-      .in('sender_branch', pair)
-      .in('recipient_branch', pair)
-      .order('created_at', { ascending: true })
-      .order('id', { ascending: true });
-    if (error) throw error;
-    return data.map(mapBranchMessage);
-  },
-
-  async sendBranchMessage(branchKey, otherBranchKey, text, id) {
-    const data = await insertMessageOnce('branch_messages', {
-      id, facility_id: Session.getFacilityId(), sender_branch: branchKey, recipient_branch: otherBranchKey, content: text,
-    });
-    return { success: true, message: mapBranchMessage(data) };
-  },
-
-  async getConversations(branchKey) {
-    const facilityId = Session.getFacilityId();
-    const { data: patients, error: patientsError } = await supabase
-      .from('patients')
-      .select('patient_id, profile_id, full_name, first_name, middle_name, last_name')
-      .eq('facility_id', facilityId);
-
-    if (patientsError) throw patientsError;
-    if (!patients.length) return [];
-
-    const profileIds = [...new Set(patients.map(patient => patient.profile_id).filter(Boolean))];
-    const [messageResult, profileResult] = await Promise.all([
-      supabase.from('messages')
-        .select('patient_id, content, created_at, is_read, sender_type')
-        .in('patient_id', patients.map(patient => patient.patient_id))
-        .eq('branch_key', branchKey)
-        .order('created_at', { ascending: false }),
-      profileIds.length ? supabase.from('profiles')
-        .select('id, full_name, avatar_url')
-        .in('id', profileIds) : { data: [] },
-    ]);
-
-    const latestMessages = new Map();
-    for (const message of messageResult.data || []) {
-      if (!latestMessages.has(message.patient_id)) latestMessages.set(message.patient_id, message);
-    }
-
-    const profiles = new Map((profileResult.data || []).map(profile => [profile.id, profile]));
-    return patients.map(patient => {
-      const lastMessage = latestMessages.get(patient.patient_id);
-      const profile = profiles.get(patient.profile_id);
-      const structuredName = [patient.first_name, patient.middle_name, patient.last_name].filter(Boolean).join(' ');
-      const patientName = (patient.full_name !== 'Unknown' && patient.full_name?.trim())
-        || structuredName || profile?.full_name?.trim() || 'Unknown Patient';
-      const rawTimestamp = lastMessage?.created_at || '';
-      let timestamp = '';
-      if (rawTimestamp) {
-        const minutes = Math.floor((Date.now() - Date.parse(rawTimestamp)) / 60000);
-        if (minutes < 1) timestamp = 'Just now';
-        else if (minutes < 60) timestamp = `${minutes} min ago`;
-        else if (minutes < 1440) timestamp = `${Math.floor(minutes / 60)} hours ago`;
-        else timestamp = `${Math.floor(minutes / 1440)} days ago`;
+      const facId = facilityId || targetRow.facility_id;
+      if (facId) {
+        query = query.eq('facility_id', facId);
       }
 
-      return {
-        id: patient.patient_id,
-        patientName,
-        avatar: profile?.avatar_url || null,
-        initials: patientName.split(/\s+/).slice(0, 2).map(name => name[0]).join('').toUpperCase(),
-        lastMessage: lastMessage?.content || '',
-        timestamp,
-        unread: lastMessage?.sender_type === 'patient' && !lastMessage.is_read,
-        rawTimestamp,
-      };
-    }).sort((a, b) => b.rawTimestamp.localeCompare(a.rawTimestamp) || a.patientName.localeCompare(b.patientName));
+      const { data: siblings } = await query;
+      const ids = (siblings || []).map(r => r.patient_id).filter(Boolean);
+      return ids.length > 0 ? ids : [patientId];
+    } catch {
+      return [patientId];
+    }
   },
 
-  // 2. Get Messages for a specific conversation
-  async getMessages(patientId, branchKey) {
+  // 1. Get Conversations (List of patients with their last message)
+  // Consolidates multiple patient rows sharing the same profile_id so mobile & HIS always share one thread
+  async getConversations() {
     try {
+      let facilityId = Session.getFacilityId();
+      if (!facilityId) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) {
+            const { data: acct } = await supabase
+              .from('users')
+              .select('facility_id')
+              .eq('id', user.id)
+              .maybeSingle();
+            if (acct?.facility_id) {
+              facilityId = acct.facility_id;
+              Session.setFacilityId(facilityId);
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!facilityId) {
+        console.warn("getConversations: No facilityId found in Session");
+        return [];
+      }
+
+      // Step 1: Get all patients linked to this facility
+      const { data: facilityPatients, error: patientsError } = await supabase
+        .from('patients')
+        .select(`
+          patient_id,
+          profile_id,
+          full_name,
+          first_name,
+          middle_name,
+          last_name,
+          profiles ( id, full_name, first_name, middle_name, last_name, avatar_url )
+        `)
+        .eq('facility_id', facilityId);
+
+      if (patientsError) throw patientsError;
+      if (!facilityPatients || facilityPatients.length === 0) return [];
+
+      const validPatientIds = facilityPatients.map(p => p.patient_id);
+
+      // Step 2: Fetch messages for all patient rows in this facility
+      const { data: messages, error } = await supabase
+        .from('messages')
+        .select(`
+          id,
+          patient_id,
+          content,
+          created_at,
+          is_read,
+          sender_type
+        `)
+        .in('patient_id', validPatientIds)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Group patient records by profile_id (or patient_id if unlinked)
+      const patientById = new Map(facilityPatients.map(p => [String(p.patient_id), p]));
+      const groupKeyForPatient = (p) => (p.profile_id ? `profile:${p.profile_id}` : `patient:${p.patient_id}`);
+
+      const groups = new Map();
+      for (const p of facilityPatients) {
+        const key = groupKeyForPatient(p);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            canonicalPatient: p,
+            patientIds: [p.patient_id],
+            latestMsg: null,
+          });
+        } else {
+          groups.get(key).patientIds.push(p.patient_id);
+        }
+      }
+
+      // Attach the newest message across any sibling patient_id in each group
+      for (const msg of messages || []) {
+        const pat = patientById.get(String(msg.patient_id));
+        if (!pat) continue;
+        const key = groupKeyForPatient(pat);
+        const group = groups.get(key);
+        if (group && !group.latestMsg) {
+          group.latestMsg = msg;
+          // Prefer the patient row that received the latest message as canonical id
+          group.canonicalPatient = pat;
+        }
+      }
+
+      // Build conversation list for groups that have at least one message
+      const conversations = [];
+      for (const group of groups.values()) {
+        if (!group.latestMsg) continue;
+        const p = group.canonicalPatient;
+        const lastMsg = group.latestMsg;
+        const profile = p.profiles;
+
+        const fullName =
+          [
+            profile?.first_name ?? p.first_name,
+            profile?.middle_name ?? p.middle_name,
+            profile?.last_name ?? p.last_name,
+          ]
+            .filter(Boolean)
+            .join(' ') ||
+          profile?.full_name ||
+          p.full_name ||
+          'Unknown Patient';
+
+        const date = new Date(lastMsg.created_at);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+
+        let timestamp = '';
+        if (diffMins < 1) timestamp = 'Just now';
+        else if (diffMins < 60) timestamp = `${diffMins} min ago`;
+        else if (diffHours < 24) timestamp = `${diffHours} hours ago`;
+        else timestamp = `${diffDays} days ago`;
+
+        conversations.push({
+          id: p.patient_id,
+          patientIds: group.patientIds,
+          patientName: fullName,
+          avatar: profile?.avatar_url || null,
+          initials: (fullName || 'U')
+            .split(' ')
+            .filter(Boolean)
+            .map(n => n[0])
+            .join('')
+            .substring(0, 2)
+            .toUpperCase(),
+          lastMessage: lastMsg.content,
+          timestamp,
+          unread: !lastMsg.is_read && lastMsg.sender_type === 'patient',
+          rawTimestamp: lastMsg.created_at,
+        });
+      }
+
+      return conversations.sort((a, b) => new Date(b.rawTimestamp) - new Date(a.rawTimestamp));
+    } catch (error) {
+      console.error("Get Conversations Error:", error);
+      return [];
+    }
+  },
+
+  // 2. Get Messages for a specific conversation (merges messages across all sibling patient_ids for that user)
+  async getMessages(patientId) {
+    try {
+      const groupIds = await this._resolvePatientGroupIds(patientId);
+
       const { data, error } = await supabase
         .from('messages')
         .select('*')
-        .eq('patient_id', patientId)
-        .eq('branch_key', branchKey)
+        .in('patient_id', groupIds)
         .order('created_at', { ascending: true });
 
       if (error) throw error;
 
-      return data.map(msg => ({
+      return (data || []).map(msg => ({
         id: msg.id,
         sender: msg.sender_type, // 'staff' or 'patient'
         text: msg.content,
@@ -189,29 +263,49 @@ export const messagesAPI = {
   },
 
   // 3. Send a Message
-  async sendMessage(patientId, branchKey, text, id) {
-    const data = await insertMessageOnce('messages', {
-      id, patient_id: patientId, branch_key: branchKey, content: text, sender_type: 'staff',
-    });
-    return {
-      success: true,
-      message: {
-        id: data.id,
-        sender: data.sender_type,
-        text: data.content,
-        timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
-    };
+  async sendMessage(patientId, text, senderType = 'staff') {
+    try {
+      const { data: rows, error } = await supabase
+        .from('messages')
+        .insert([{
+          patient_id: patientId,
+          content: text,
+          sender_type: senderType,
+          is_read: false
+        }])
+        .select();
+
+      if (error) throw error;
+      const data = Array.isArray(rows) && rows.length > 0 ? rows[0] : {
+        id: Date.now(),
+        sender_type: senderType,
+        content: text,
+        created_at: new Date().toISOString()
+      };
+
+      return {
+        success: true,
+        message: {
+          id: data.id,
+          sender: data.sender_type,
+          text: data.content,
+          timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      };
+    } catch (error) {
+      console.error("Send Message Error:", error);
+      return { success: false, error: error.message };
+    }
   },
 
   // 4. Mark messages as read
   async markAsRead(patientId, branchKey) {
     try {
+      const groupIds = await this._resolvePatientGroupIds(patientId);
       const { error } = await supabase
         .from('messages')
         .update({ is_read: true })
-        .eq('patient_id', patientId)
-        .eq('branch_key', branchKey)
+        .in('patient_id', groupIds)
         .eq('sender_type', 'patient') // Only mark patient messages as read
         .eq('is_read', false);
 

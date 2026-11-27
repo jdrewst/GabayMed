@@ -8,14 +8,71 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getMessageBranchKey, messagesAPI } from "../../services/messages"
 
-function ConversationAvatar({ conversation }) {
-  return (
-    <Avatar className="h-11 w-11 shrink-0">
-      {conversation.avatar && <AvatarImage src={conversation.avatar} />}
-      <AvatarFallback className="bg-sky-100 font-semibold text-sky-800">
-        {conversation.branchKey ? <Building2 className="size-5" /> : conversation.initials}
-      </AvatarFallback>
-    </Avatar>
+export function Messages() {
+  const [activeConversationId, setActiveConversationId] = useState(null)
+  const [conversations, setConversations] = useState([])
+  const [messages, setMessages] = useState([])
+  const [messageText, setMessageText] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [loading, setLoading] = useState(true)
+  const messagesEndRef = useRef(null)
+
+  // Scroll to bottom of messages
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  // Fetch conversations on mount
+  useEffect(() => {
+    const fetchConversations = async () => {
+      setLoading(true)
+      const data = await messagesAPI.getConversations()
+      setConversations(data)
+      
+      // Check URL parameters
+      const urlParams = new URLSearchParams(window.location.search)
+      const patientId = urlParams.get("patient")
+      
+      if (patientId) {
+        setActiveConversationId(patientId)
+      } else if (data.length > 0 && !activeConversationId) {
+        setActiveConversationId(data[0].id)
+      }
+      setLoading(false)
+    }
+    fetchConversations()
+    
+    // Poll for new conversations every 5s so incoming mobile messages appear quickly
+    const interval = setInterval(fetchConversations, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Fetch messages when active conversation changes + poll every 4s for live mobile messages
+  useEffect(() => {
+    if (!activeConversationId) return
+
+    const fetchMessages = async (markRead = false) => {
+      const data = await messagesAPI.getMessages(activeConversationId)
+      setMessages(data)
+      if (markRead) {
+        await messagesAPI.markAsRead(activeConversationId)
+        setConversations(prev => prev.map(c => 
+          String(c.id) === String(activeConversationId) ? { ...c, unread: false } : c
+        ))
+      }
+    }
+    fetchMessages(true)
+
+    const msgInterval = setInterval(() => fetchMessages(false), 4000)
+    return () => clearInterval(msgInterval)
+  }, [activeConversationId])
+
+  const filteredConversations = conversations.filter((conv) =>
+    conv.patientName.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 }
 
@@ -31,6 +88,11 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
   const endRef = useRef(null)
   const pendingSend = useRef(null)
   const sendInProgress = useRef(false)
+  const activeConversation = conversations.find(
+    (c) =>
+      String(c.id) === String(activeConversationId) ||
+      (Array.isArray(c.patientIds) && c.patientIds.some(pid => String(pid) === String(activeConversationId)))
+  )
 
   useEffect(() => {
     let active = true
