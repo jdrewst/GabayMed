@@ -9,8 +9,10 @@ CREATE TABLE IF NOT EXISTS public.messages (
   is_read boolean NOT NULL DEFAULT false
 );
 
-CREATE INDEX IF NOT EXISTS messages_patient_created_idx
-  ON public.messages (patient_id, created_at DESC, id);
+-- Preserve existing conversations in Main. Each branch starts with its own history.
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS branch_key text NOT NULL DEFAULT 'main';
+CREATE INDEX IF NOT EXISTS messages_branch_patient_created_idx
+  ON public.messages (branch_key, patient_id, created_at DESC, id);
 
 -- Resolve identity from the database so callers cannot choose their clinic or role.
 CREATE OR REPLACE FUNCTION public.can_access_clinic_message(target_patient uuid, participant text)
@@ -35,9 +37,23 @@ $$;
 REVOKE ALL ON FUNCTION public.can_access_clinic_message(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.can_access_clinic_message(uuid, text) TO authenticated;
 
+CREATE OR REPLACE FUNCTION public.is_clinic_message_branch(target_patient uuid, target_branch text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT (public.can_access_clinic_message(target_patient, 'patient')
+       OR public.can_access_clinic_message(target_patient, 'staff'))
+    AND (target_branch IN ('main', 'branch-katipunan', 'branch-qc') OR EXISTS (
+    SELECT 1 FROM public.patients AS patient
+    JOIN public.clinic_branches AS branch ON branch.facility_id = patient.facility_id
+    WHERE patient.patient_id = target_patient AND branch.branch_id::text = target_branch
+  ));
+$$;
+
+REVOKE ALL ON FUNCTION public.is_clinic_message_branch(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.is_clinic_message_branch(uuid, text) TO authenticated;
+
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.messages FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT (patient_id, sender_type, content), UPDATE (is_read) ON public.messages TO authenticated;
+GRANT SELECT, INSERT (patient_id, sender_type, content, branch_key), UPDATE (is_read) ON public.messages TO authenticated;
 
 DROP POLICY IF EXISTS messages_participant_select ON public.messages;
 CREATE POLICY messages_participant_select ON public.messages FOR SELECT TO authenticated
@@ -45,7 +61,8 @@ CREATE POLICY messages_participant_select ON public.messages FOR SELECT TO authe
 
 DROP POLICY IF EXISTS messages_sender_insert ON public.messages;
 CREATE POLICY messages_sender_insert ON public.messages FOR INSERT TO authenticated
-  WITH CHECK (public.can_access_clinic_message(patient_id, sender_type));
+  WITH CHECK (public.can_access_clinic_message(patient_id, sender_type)
+    AND public.is_clinic_message_branch(patient_id, branch_key));
 
 DROP POLICY IF EXISTS messages_recipient_read_receipt ON public.messages;
 CREATE POLICY messages_recipient_read_receipt ON public.messages FOR UPDATE TO authenticated

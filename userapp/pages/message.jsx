@@ -48,7 +48,8 @@ export function MessagesPage({ onBack }) {
   const chat = conversation ? (
     <ConversationView
       key={conversation.id}
-      conversationId={conversation.id}
+      patientId={conversation.patientId}
+      branchKey={conversation.branchKey}
       name={conversation.name}
       avatar={conversation.avatar}
       embedded={wide}

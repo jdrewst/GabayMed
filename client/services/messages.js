@@ -18,7 +18,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const messagesAPI = {
   
-  async getConversations() {
+  async getConversations(branchKey) {
     const facilityId = Session.getFacilityId();
     const { data: patients, error: patientsError } = await supabase
       .from('patients')
@@ -33,6 +33,7 @@ export const messagesAPI = {
       supabase.from('messages')
         .select('patient_id, content, created_at, is_read, sender_type')
         .in('patient_id', patients.map(patient => patient.patient_id))
+        .eq('branch_key', branchKey)
         .order('created_at', { ascending: false }),
       profileIds.length ? supabase.from('profiles')
         .select('id, full_name, avatar_url')
@@ -75,12 +76,13 @@ export const messagesAPI = {
   },
 
   // 2. Get Messages for a specific conversation
-  async getMessages(patientId) {
+  async getMessages(patientId, branchKey) {
     try {
       const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('patient_id', patientId)
+        .eq('branch_key', branchKey)
         .order('created_at', { ascending: true });
 
       if (error) throw error;
@@ -100,14 +102,15 @@ export const messagesAPI = {
   },
 
   // 3. Send a Message
-  async sendMessage(patientId, text, senderType = 'staff') {
+  async sendMessage(patientId, branchKey, text) {
     try {
       const { data, error } = await supabase
         .from('messages')
         .insert([{
           patient_id: patientId,
           content: text,
-          sender_type: senderType
+          sender_type: 'staff',
+          branch_key: branchKey
         }])
         .select()
         .single();
@@ -130,12 +133,13 @@ export const messagesAPI = {
   },
 
   // 4. Mark messages as read
-  async markAsRead(patientId) {
+  async markAsRead(patientId, branchKey) {
     try {
       const { error } = await supabase
         .from('messages')
         .update({ is_read: true })
         .eq('patient_id', patientId)
+        .eq('branch_key', branchKey)
         .eq('sender_type', 'patient') // Only mark patient messages as read
         .eq('is_read', false);
 

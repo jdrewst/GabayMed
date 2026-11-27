@@ -2,6 +2,7 @@
 import { ArrowLeft, MessageSquare, Search, Send } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { useBranch } from "@/lib/branch-context"
 import { Header } from "@/components/header"
 import { Input } from "@/components/ui/input"
 import { messagesAPI } from "../../services/messages"
@@ -15,7 +16,7 @@ function PatientAvatar({ conversation }) {
   )
 }
 
-function PatientChat({ conversation, onBack, onSent }) {
+function PatientChat({ conversation, branchKey, onBack, onSent }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
@@ -28,7 +29,7 @@ function PatientChat({ conversation, onBack, onSent }) {
     let active = true
     async function load() {
       try {
-        const history = await messagesAPI.getMessages(conversation.id)
+        const history = await messagesAPI.getMessages(conversation.id, branchKey)
         if (!active) return
         setMessages(previous => {
           const ids = new Set(history.map(message => message.id))
@@ -36,7 +37,7 @@ function PatientChat({ conversation, onBack, onSent }) {
         })
         setHistoryError(false)
         if (history.some(message => message.sender === "patient" && !message.isRead)) {
-          await messagesAPI.markAsRead(conversation.id)
+          await messagesAPI.markAsRead(conversation.id, branchKey)
         }
       } catch {
         if (active) setHistoryError(true)
@@ -50,7 +51,7 @@ function PatientChat({ conversation, onBack, onSent }) {
       active = false
       clearInterval(interval)
     }
-  }, [conversation.id])
+  }, [conversation.id, branchKey])
 
   const lastMessageId = messages.at(-1)?.id
   useEffect(() => {
@@ -64,7 +65,7 @@ function PatientChat({ conversation, onBack, onSent }) {
     setSending(true)
     setSendError(false)
     try {
-      const result = await messagesAPI.sendMessage(conversation.id, text)
+      const result = await messagesAPI.sendMessage(conversation.id, branchKey, text)
       if (!result.success) throw new Error("Message could not be sent")
       setMessages(previous => previous.some(message => message.id === result.message.id) ? previous : [...previous, result.message])
       setDraft("")
@@ -125,6 +126,23 @@ function PatientChat({ conversation, onBack, onSent }) {
 }
 
 export function Messages() {
+  const { selectedBranch, selectedBranchId, loading } = useBranch()
+  const branchAliases = { MAIN: "main", QC: "branch-qc", KAT: "branch-katipunan" }
+  const branchKey = selectedBranchId === "all"
+    ? "main"
+    : branchAliases[selectedBranch?.abbreviation?.toUpperCase()] ?? selectedBranch?.branch_id
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <Header />
+      {branchKey && !loading
+        ? <BranchMessages key={branchKey} branchKey={branchKey} branchName={selectedBranch?.name || "Main"} />
+        : <p className="p-6 text-sm text-slate-600">{loading ? "Loading branches?" : "Select a branch to open messages."}</p>}
+    </div>
+  )
+}
+
+function BranchMessages({ branchKey, branchName }) {
   const [activeId, setActiveId] = useState(() => new URLSearchParams(window.location.search).get("patient"))
   const [showChat, setShowChat] = useState(() => Boolean(activeId))
   const [conversations, setConversations] = useState([])
@@ -136,7 +154,7 @@ export function Messages() {
     let active = true
     async function load() {
       try {
-        const data = await messagesAPI.getConversations()
+        const data = await messagesAPI.getConversations(branchKey)
         if (!active) return
         setConversations(data)
         setLoadError(false)
@@ -152,7 +170,7 @@ export function Messages() {
       active = false
       clearInterval(interval)
     }
-  }, [])
+  }, [branchKey])
 
   const selected = conversations.find(conversation => String(conversation.id) === String(activeId))
   const searchTerms = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
@@ -168,15 +186,14 @@ export function Messages() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
       <main className="mx-auto flex h-[calc(100dvh-9rem)] min-h-[24rem] max-w-7xl gap-4 px-4 pb-4 sm:px-6">
-        <aside aria-label="Patient conversations" className={`${showChat && selected ? "hidden md:flex" : "flex"} w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white md:w-80 md:shrink-0`}>
+        <aside aria-label="Hospital patient conversations" className={`${showChat && selected ? "hidden md:flex" : "flex"} w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white md:w-80 md:shrink-0`}>
           <div className="border-b border-slate-200 p-4">
-            <h1 className="mb-3 text-xl font-semibold text-slate-900">Messages</h1>
+            <h1 className="text-xl font-semibold text-slate-900">Messages</h1>
+            <p className="mb-3 text-sm text-slate-600">{branchName}</p>
             <div className="relative">
               <Search className="absolute left-3 top-2.5 size-4 text-slate-500" />
-              <Input type="search" aria-label="Search patients" placeholder="Search patients" className="pl-9" value={search} onChange={event => setSearch(event.target.value)} />
+              <Input type="search" aria-label="Search patients at your hospital" placeholder="Search hospital patients" className="pl-9" value={search} onChange={event => setSearch(event.target.value)} />
             </div>
           </div>
           <div className="space-y-2 overflow-y-auto p-3">
@@ -205,7 +222,7 @@ export function Messages() {
         </aside>
         <section aria-label="Chat" className={`${showChat && selected ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white`}>
           {selected ? (
-            <PatientChat key={selected.id} conversation={selected} onBack={() => setShowChat(false)} onSent={updatePreview} />
+            <PatientChat key={selected.id} branchKey={branchKey} conversation={selected} onBack={() => setShowChat(false)} onSent={updatePreview} />
           ) : (
             <div className="m-auto grid justify-items-center gap-3 p-4 text-center text-sm text-slate-600">
               <MessageSquare className="size-7 text-sky-700" />
@@ -214,6 +231,5 @@ export function Messages() {
           )}
         </section>
       </main>
-    </div>
   )
 }

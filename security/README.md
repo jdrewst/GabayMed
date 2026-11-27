@@ -4,6 +4,8 @@
 
 Run `security/messaging.sql` in the Supabase SQL Editor for the project used by the staff website and patient app. It creates message storage and limits access to the linked patient and staff assigned to the patient's facility. After applying it, test a staff-to-patient message and a patient-to-staff reply using accounts linked to the same clinic.
 
+Re-run the script on projects with an existing messages table to enable branch-specific threads. Existing messages stay in Main. Test using the same patient in Main and a branch, then confirm each reply appears in its original thread. The branch selector determines the staff thread. Staff authorization remains scoped to the assigned hospital.
+
 Implemented: verified in-memory clinic context (no hardcoded clinic fallback), immediate screen lock on sign-out, 30-minute browser inactivity logout shared between tabs, account recheck when returning to the tab, and basic response security headers on Vercel.
 
 The inactivity control is a browser convenience, not server-enforced session expiry. Existing access tokens may remain valid until expiry. RLS must protect every request.

@@ -35,67 +35,50 @@ const MessagesAPI = {
 
       if (msgError) throw msgError;
 
-      // C. Group/Map messages to Facilities
-      const conversations = [];
-      
-      // Create a map of patient_id -> facility details
-      const facilityMap = {};
-      patientRecords.forEach(p => {
-        facilityMap[p.patient_id] = p.facilities;
-      });
+      const patients = new Map(patientRecords.map(patient => [patient.patient_id, patient]));
+      const branchNames = new Map([
+        ['main', 'Main'],
+        ['branch-qc', 'QC Branch'],
+        ['branch-katipunan', 'Katipunan Branch'],
+      ]);
+      const extraBranches = [...new Set(messages.map(message => message.branch_key))]
+        .filter(key => key && !branchNames.has(key));
+      if (extraBranches.length) {
+        const { data: branches } = await supabase.from('clinic_branches')
+          .select('branch_id, name').in('branch_id', extraBranches);
+        for (const branch of branches || []) branchNames.set(String(branch.branch_id), branch.name);
+      }
 
-      // Track processed patient_ids to avoid duplicates (we only want the latest message per facility)
-      const processedPatientIds = new Set();
-
-      messages.forEach(msg => {
-        if (!processedPatientIds.has(msg.patient_id)) {
-          const facility = facilityMap[msg.patient_id];
-          
-          if (facility) {
-            // Calculate relative time
-            const date = new Date(msg.created_at);
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMins / 60);
-            const diffDays = Math.floor(diffHours / 24);
-
-            let timestamp = '';
-            if (diffMins < 1) timestamp = 'Just now';
-            else if (diffMins < 60) timestamp = `${diffMins} min ago`;
-            else if (diffHours < 24) timestamp = `${diffHours} hours ago`;
-            else timestamp = `${diffDays} days ago`;
-
-            conversations.push({
-              id: msg.patient_id, // We use patient_id as the conversation ID (unique per facility-user pair)
-              facilityId: patientRecords.find(p => p.patient_id === msg.patient_id)?.facility_id,
-              name: facility.name || 'Unknown Facility',
-              avatar: facility.image_url || null,
-              initials: (facility.name || 'U').charAt(0).toUpperCase(),
-              lastMessage: msg.content,
-              timestamp: timestamp,
-              unread: !msg.is_read && msg.sender_type === 'staff', // Unread if from staff and not read
-              rawTimestamp: msg.created_at
-            });
-            
-            processedPatientIds.add(msg.patient_id);
-          }
+      const conversations = new Map();
+      function addConversation(patient, branchKey, message) {
+        if (!patient?.facilities) return;
+        const id = `${patient.patient_id}:${branchKey}`;
+        if (conversations.has(id)) {
+          if (message?.sender_type === 'staff' && !message.is_read) conversations.get(id).unread = true;
+          return;
         }
-      });
 
-      for (const patient of patientRecords) {
-        if (processedPatientIds.has(patient.patient_id) || !patient.facilities) continue;
-        conversations.push({
-          id: patient.patient_id,
-          facilityId: patient.facility_id,
-          name: patient.facilities.name || 'Unknown Facility',
-          avatar: patient.facilities.image_url || null,
-          lastMessage: '',
-          timestamp: '',
-          unread: false,
+        const facility = patient.facilities;
+        const name = facility.name || 'Unknown Facility';
+        const branchName = branchNames.get(branchKey) || 'Clinic branch';
+        conversations.set(id, {
+          id,
+          patientId: patient.patient_id,
+          branchKey,
+          name: `${name} ? ${branchName}`,
+          avatar: facility.image_url || null,
+          lastMessage: message?.content || '',
+          timestamp: message ? new Date(message.created_at).toLocaleDateString() : '',
+          unread: message?.sender_type === 'staff' && !message.is_read,
         });
       }
-      return conversations;
+
+      for (const message of messages) {
+        addConversation(patients.get(message.patient_id), message.branch_key, message);
+      }
+      for (const patient of patientRecords) addConversation(patient, 'main');
+
+      return [...conversations.values()];
 
     } catch (error) {
       console.error("Get Conversations Error:", error);
@@ -104,12 +87,13 @@ const MessagesAPI = {
   },
 
   // 2. Get Messages for a specific conversation (using patient_id as conversation ID)
-  async getMessages(patientId) {
+  async getMessages(patientId, branchKey) {
     try {
       const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('patient_id', patientId)
+        .eq('branch_key', branchKey)
         .order('created_at', { ascending: true });
 
       if (error) throw error;
@@ -129,12 +113,13 @@ const MessagesAPI = {
   },
 
   // 3. Send a Message
-  async sendMessage(patientId, text) {
+  async sendMessage(patientId, branchKey, text) {
     try {
       const { data, error } = await supabase
         .from('messages')
         .insert([{
           patient_id: patientId,
+          branch_key: branchKey,
           content: text,
           sender_type: 'patient' // Always 'patient' from user app
         }])
@@ -159,12 +144,13 @@ const MessagesAPI = {
   },
 
   // 4. Mark messages as read
-  async markAsRead(patientId) {
+  async markAsRead(patientId, branchKey) {
     try {
       const { error } = await supabase
         .from('messages')
         .update({ is_read: true })
         .eq('patient_id', patientId)
+        .eq('branch_key', branchKey)
         .eq('sender_type', 'staff') // Only mark staff messages as read
         .eq('is_read', false);
 

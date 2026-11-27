@@ -4,7 +4,7 @@ import { ArrowLeft, Send, Hospital } from 'lucide-react-native';
 import { GradientView } from './ui/gradient-button';
 import MessagesAPI from '../services/messagesApi';
 
-export function ConversationView({ conversationId, name, avatar, onBack, onSent, embedded }) {
+export function ConversationView({ patientId, branchKey, name, avatar, onBack, onSent, embedded }) {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,16 +15,16 @@ export function ConversationView({ conversationId, name, avatar, onBack, onSent,
   useEffect(() => {
     loadMessages();
     // Mark as read when opening
-    MessagesAPI.markAsRead(conversationId);
+    MessagesAPI.markAsRead(patientId, branchKey);
 
     // Optional: Poll for new messages every 5 seconds
     const interval = setInterval(loadMessages, 5000);
     return () => clearInterval(interval);
-  }, [conversationId]);
+  }, [patientId, branchKey]);
 
   const loadMessages = async () => {
     try {
-      const data = await MessagesAPI.getMessages(conversationId);
+      const data = await MessagesAPI.getMessages(patientId, branchKey);
       setMessages(data);
     } catch (error) {
       console.error("Error loading messages:", error);
@@ -42,7 +42,7 @@ export function ConversationView({ conversationId, name, avatar, onBack, onSent,
     setSendError(false);
 
     try {
-      const result = await MessagesAPI.sendMessage(conversationId, textToSend);
+      const result = await MessagesAPI.sendMessage(patientId, branchKey, textToSend);
       if (result.success) {
         onSent(result.message);
         await loadMessages();
