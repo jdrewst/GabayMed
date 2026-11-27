@@ -107,8 +107,7 @@ export const messagesAPI = {
         .insert([{
           patient_id: patientId,
           content: text,
-          sender_type: senderType,
-          is_read: false
+          sender_type: senderType
         }])
         .select()
         .single();

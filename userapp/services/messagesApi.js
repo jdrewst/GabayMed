@@ -136,8 +136,7 @@ const MessagesAPI = {
         .insert([{
           patient_id: patientId,
           content: text,
-          sender_type: 'patient', // Always 'patient' from user app
-          is_read: false
+          sender_type: 'patient' // Always 'patient' from user app
         }])
         .select()
         .single();

@@ -91,7 +91,13 @@ function PatientChat({ conversation, onBack, onSent }) {
       <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 sm:p-6">
         {loading && <p className="text-center text-sm text-slate-500">Loading messages…</p>}
         {historyError && <p role="alert" className="text-center text-sm text-red-700">Messaging is currently unavailable.</p>}
-        {!loading && !historyError && messages.length === 0 && <p className="text-center text-sm text-slate-500">No messages yet. Send a message to start the conversation.</p>}
+        {!loading && !historyError && messages.length === 0 && (
+          <div className="mx-auto mt-10 grid max-w-sm justify-items-center gap-2 text-center">
+            <div className="rounded-full bg-sky-100 p-3 text-sky-700"><MessageSquare className="size-6" /></div>
+            <h3 className="font-semibold text-slate-900">Start a conversation</h3>
+            <p className="text-sm text-slate-600">Send the first message to {conversation.patientName} using the field below.</p>
+          </div>
+        )}
         {messages.map(message => {
           const outgoing = message.sender === "staff"
           return (
@@ -108,7 +114,7 @@ function PatientChat({ conversation, onBack, onSent }) {
       <form onSubmit={send} className="border-t border-slate-200 p-4 sm:px-6">
         {sendError && <p role="alert" className="mb-2 text-sm text-red-700">Message could not be sent. Try again.</p>}
         <div className="flex gap-2">
-          <Input aria-label="Message" placeholder="Type a message…" value={draft} onChange={event => setDraft(event.target.value)} disabled={loading || historyError || sending} />
+          <Input aria-label="Message" placeholder="Type a message…" value={draft} onChange={event => setDraft(event.target.value)} maxLength={4000} disabled={loading || historyError || sending} />
           <Button type="submit" aria-label="Send message" size="icon" className="shrink-0 bg-sky-700 hover:bg-sky-800" disabled={loading || historyError || sending || !draft.trim()}>
             <Send className="size-4" />
           </Button>

@@ -133,6 +133,7 @@ export function ConversationView({ conversationId, name, avatar, onBack, onSent,
           value={message}
           onChangeText={setMessage}
           accessibilityLabel="Message"
+          maxLength={4000}
           editable={!sending}
           multiline
         />
