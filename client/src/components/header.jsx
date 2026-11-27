@@ -9,12 +9,16 @@ import { BranchSelector } from "@/components/branch-selector"
 import { useBranch } from "@/lib/branch-context"
 import { GabayAPI } from "../../services/gabayApi"
 import { profileAPI } from "../../services/profile"
+import { getMessageBranchKey, messagesAPI } from "../../services/messages"
 import LogoSvg from "@/assets/Logo.svg"
 
 import { appointmentNotificationHref, formatNotificationTime, notificationPreview, useClinicNotifications } from "@/lib/clinic-notifications"
 
 export function Header() {
-  const { selectedBranch } = useBranch()
+  const { selectedBranch, selectedBranchId, loading: branchesLoading } = useBranch()
+  const messageBranch = branchesLoading ? null : selectedBranchId === "all" ? "main" : getMessageBranchKey(selectedBranch)
+  const [messageBadge, setMessageBadge] = useState(null)
+  const unreadMessages = messageBadge?.branch === messageBranch ? messageBadge.count : 0
   const [currentPage, setCurrentPage] = useState('dashboard')
   const { notifications, unreadCount, branchName, loading, error, actionError, markAsRead } = useClinicNotifications({ limit: 8 })
   const [facility, setFacility] = useState(() => {
@@ -26,6 +30,24 @@ export function Header() {
     }
     return null
   })
+
+  useEffect(() => {
+    if (!messageBranch) return
+    let active = true
+    let request = 0
+    const refresh = async () => {
+      const current = ++request
+      try {
+        const count = await messagesAPI.getUnreadCount(messageBranch)
+        if (active && current === request) setMessageBadge({ branch: messageBranch, count })
+      } catch {
+        // Keep the last count until the connection returns.
+      }
+    }
+    refresh()
+    const stop = messagesAPI.watchUnread(messageBranch, refresh)
+    return () => { active = false; stop() }
+  }, [messageBranch])
 
   useEffect(() => {
     const fetchFacilityDetails = async () => {
@@ -148,8 +170,9 @@ export function Header() {
               <BranchSelector />
 
               <a href="/messages">
-                <Button variant="ghost" size="icon" className="rounded-full">
+                <Button variant="ghost" size="icon" className="relative rounded-full" aria-label={`Messages, ${unreadMessages} unread`}>
                   <MessageSquare className="w-5 h-5" />
+                  {unreadMessages > 0 && <span className="pointer-events-none absolute right-0 top-0 rounded-full bg-blue-700 px-1 text-[10px] font-semibold leading-4 text-white">{unreadMessages > 9 ? "9+" : unreadMessages}</span>}
                 </Button>
               </a>
 

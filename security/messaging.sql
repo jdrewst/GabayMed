@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS public.branch_messages (
 CREATE INDEX IF NOT EXISTS branch_messages_thread_idx
   ON public.branch_messages (facility_id, sender_branch, recipient_branch, created_at, id);
 
+-- Existing messages predate read receipts. Count only newly delivered messages as unread.
+ALTER TABLE public.branch_messages ADD COLUMN IF NOT EXISTS is_read boolean NOT NULL DEFAULT true;
+ALTER TABLE public.branch_messages ALTER COLUMN is_read SET DEFAULT false;
+
 CREATE OR REPLACE FUNCTION public.can_message_hospital_branches(hospital uuid, sender text, recipient text)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
   SELECT EXISTS (
@@ -103,7 +107,7 @@ GRANT EXECUTE ON FUNCTION public.can_message_hospital_branches(uuid, text, text)
 
 ALTER TABLE public.branch_messages ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.branch_messages FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT (facility_id, sender_branch, recipient_branch, content) ON public.branch_messages TO authenticated;
+GRANT SELECT, INSERT (facility_id, sender_branch, recipient_branch, content), UPDATE (is_read) ON public.branch_messages TO authenticated;
 
 DROP POLICY IF EXISTS branch_messages_staff_select ON public.branch_messages;
 CREATE POLICY branch_messages_staff_select ON public.branch_messages FOR SELECT TO authenticated
@@ -113,6 +117,11 @@ DROP POLICY IF EXISTS branch_messages_staff_insert ON public.branch_messages;
 CREATE POLICY branch_messages_staff_insert ON public.branch_messages FOR INSERT TO authenticated
   WITH CHECK (public.can_message_hospital_branches(facility_id, sender_branch, recipient_branch));
 
+DROP POLICY IF EXISTS branch_messages_staff_mark_read ON public.branch_messages;
+CREATE POLICY branch_messages_staff_mark_read ON public.branch_messages FOR UPDATE TO authenticated
+  USING (public.can_message_hospital_branches(facility_id, sender_branch, recipient_branch) AND NOT is_read)
+  WITH CHECK (public.can_message_hospital_branches(facility_id, sender_branch, recipient_branch) AND is_read);
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime')
@@ -121,6 +130,13 @@ BEGIN
        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'messages'
      ) THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime')
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_publication_tables
+       WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'branch_messages'
+     ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.branch_messages;
   END IF;
 END;
 $$;

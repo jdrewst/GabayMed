@@ -15,11 +15,19 @@ const getEnv = (key) => {
 const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
 const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 const supabase = createClient(supabaseUrl, supabaseKey);
+let subscriptionId = 0;
+
+const branchAliases = new Map([['MAIN', 'main'], ['QC', 'branch-qc'], ['KAT', 'branch-katipunan']]);
+
+export function getMessageBranchKey(branch) {
+  return branchAliases.get(branch?.abbreviation?.toUpperCase()) ?? branch?.branch_id;
+}
 
 function mapBranchMessage(row) {
   return {
     id: row.id,
     senderBranch: row.sender_branch,
+    isRead: row.is_read,
     text: row.content,
     timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   };
@@ -27,10 +35,42 @@ function mapBranchMessage(row) {
 
 export const messagesAPI = {
 
+  async getUnreadCount(branchKey) {
+    const facilityId = Session.getFacilityId();
+    const [patients, branches] = await Promise.all([
+      supabase.from('messages').select('id, patients!inner(facility_id)', { head: true, count: 'exact' })
+        .eq('patients.facility_id', facilityId).eq('branch_key', branchKey).eq('sender_type', 'patient').eq('is_read', false),
+      supabase.from('branch_messages').select('id', { head: true, count: 'exact' })
+        .eq('facility_id', facilityId).eq('recipient_branch', branchKey).eq('is_read', false),
+    ]);
+    if (patients.error) throw patients.error;
+    return (patients.count ?? 0) + (branches.count ?? 0);
+  },
+
+  watchUnread(branchKey, refresh) {
+    const channel = supabase.channel(`staff-unread-messages:${++subscriptionId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `branch_key=eq.${branchKey}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_messages', filter: `recipient_branch=eq.${branchKey}` }, refresh)
+      .subscribe(status => { if (status === 'SUBSCRIBED') refresh(); });
+    const fallback = setInterval(refresh, 10000);
+    return () => {
+      clearInterval(fallback);
+      void supabase.removeChannel(channel);
+    };
+  },
+
+  async markBranchAsRead(branchKey, otherBranchKey, ids) {
+    if (!ids.length) return;
+    const { error } = await supabase.from('branch_messages').update({ is_read: true })
+      .eq('facility_id', Session.getFacilityId()).eq('recipient_branch', branchKey)
+      .eq('sender_branch', otherBranchKey).eq('is_read', false).in('id', ids);
+    if (error) throw error;
+  },
+
   async getBranchMessages(branchKey, otherBranchKey) {
     const pair = [branchKey, otherBranchKey];
     const { data, error } = await supabase.from('branch_messages')
-      .select('id, sender_branch, content, created_at')
+      .select('id, sender_branch, content, created_at, is_read')
       .eq('facility_id', Session.getFacilityId())
       .in('sender_branch', pair)
       .in('recipient_branch', pair)

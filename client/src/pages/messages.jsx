@@ -6,7 +6,7 @@ import { useBranch } from "@/lib/branch-context"
 import { Header } from "@/components/header"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { messagesAPI } from "../../services/messages"
+import { getMessageBranchKey, messagesAPI } from "../../services/messages"
 
 function ConversationAvatar({ conversation }) {
   return (
@@ -43,7 +43,10 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
           return [...history, ...previous.filter(message => !ids.has(message.id))]
         })
         setHistoryError(false)
-        if (!otherBranchKey && history.some(message => message.sender === "patient" && !message.isRead)) {
+        if (otherBranchKey) {
+          const unread = history.filter(message => message.senderBranch === otherBranchKey && !message.isRead)
+          await messagesAPI.markBranchAsRead(branchKey, otherBranchKey, unread.map(message => message.id))
+        } else if (history.some(message => message.sender === "patient" && !message.isRead)) {
           await messagesAPI.markAsRead(conversation.id, branchKey)
         }
       } catch {
@@ -134,18 +137,12 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
   )
 }
 
-const branchAliases = new Map([["MAIN", "main"], ["QC", "branch-qc"], ["KAT", "branch-katipunan"]])
-
-function getBranchKey(branch) {
-  return branchAliases.get(branch?.abbreviation?.toUpperCase()) ?? branch?.branch_id
-}
-
 export function Messages() {
   const { branches, selectedBranch, selectedBranchId, loading } = useBranch()
-  const branchKey = selectedBranchId === "all" ? "main" : getBranchKey(selectedBranch)
+  const branchKey = selectedBranchId === "all" ? "main" : getMessageBranchKey(selectedBranch)
   const contacts = new Map([["main", "Main"]])
   for (const branch of branches) {
-    const key = getBranchKey(branch)
+    const key = getMessageBranchKey(branch)
     if (key && branch.is_active !== false) contacts.set(key, branch.name)
   }
   contacts.delete(branchKey)

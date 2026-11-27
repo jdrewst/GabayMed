@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MessageCircle, Bell } from 'lucide-react-native';
 import ProfileAPI from '../services/profileApi';
 import NotificationsAPI, { notificationCategories } from '../services/notificationsApi';
+import MessagesAPI from '../services/messagesApi';
 import { PatientAvatar } from './patient-avatar';
 
 function buildHeaderUserData(profile) {
@@ -39,7 +40,24 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
     buildHeaderUserData(ProfileAPI.getCachedProfile())
   );
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [greeting, setGreeting] = useState(computeGreeting);
+
+  useEffect(() => {
+    let active = true;
+    let request = 0;
+    const refresh = async () => {
+      const current = ++request;
+      try {
+        const count = await MessagesAPI.getUnreadCount();
+        if (active && current === request) setUnreadMessages(count);
+      } catch {
+        // Keep the last count while reconnecting.
+      }
+    };
+    const stop = MessagesAPI.subscribeToMessages(refresh, { includeReadUpdates: true });
+    return () => { active = false; stop(); };
+  }, []);
 
   useEffect(() => {
     fetchUserData();
@@ -117,9 +135,14 @@ export function AppHeader({ onOpenMessages, onOpenNotifications, onOpenProfile }
         </View>
       </TouchableOpacity>
       <View style={styles.rightSection}>
-        <TouchableOpacity onPress={onOpenMessages} style={styles.iconButton}>
+        <TouchableOpacity onPress={onOpenMessages} style={styles.iconButton} accessibilityRole="button"
+          accessibilityLabel={`Messages, ${unreadMessages} unread`}>
           <MessageCircle size={24} color="#4b5563" fill={"#3A4D51"} />
-
+          {unreadMessages > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unreadMessages > 9 ? '9+' : unreadMessages}</Text>
+            </View>
+          )}
         </TouchableOpacity>
         <TouchableOpacity
           onPress={onOpenNotifications}

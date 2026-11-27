@@ -4,10 +4,10 @@ import Session from './session';
 let subscriptionId = 0;
 
 const MessagesAPI = {
-  subscribeToMessages(refresh, { patientId, branchKey } = {}) {
+  subscribeToMessages(refresh, { patientId, branchKey, includeReadUpdates = false } = {}) {
     let active = true;
     const reload = () => { if (active) refresh(); };
-    const changes = { event: 'INSERT', schema: 'public', table: 'messages' };
+    const changes = { event: includeReadUpdates ? '*' : 'INSERT', schema: 'public', table: 'messages' };
     if (patientId) changes.filter = `patient_id=eq.${patientId}`;
 
     const channel = supabase.channel(`patient-messages:${++subscriptionId}`)
@@ -26,6 +26,16 @@ const MessagesAPI = {
       clearInterval(fallback);
       void supabase.removeChannel(channel);
     };
+  },
+
+  async getUnreadCount() {
+    const profileId = Session.getUserId();
+    if (!profileId) return 0;
+    const { count, error } = await supabase.from('messages')
+      .select('id, patients!inner(profile_id)', { head: true, count: 'exact' })
+      .eq('patients.profile_id', profileId).eq('sender_type', 'staff').eq('is_read', false);
+    if (error) throw error;
+    return count ?? 0;
   },
 
   // 1. Get Conversations (Grouped by Facility)
