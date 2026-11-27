@@ -153,40 +153,142 @@ export const profileAPI = {
 
   // 2. Get Insurance Plans
   async getInsurancePlans(patientId) {
+    if (!patientId) return [];
     try {
-      // Fetch from patient_insurance table (linking table)
-      const { data, error } = await supabase
+      // 1. Fetch patient record (and any sibling patient records sharing the same profile_id)
+      const { data: patientRow } = await supabase
+        .from('patients')
+        .select('patient_id, profile_id, insurance_id, created_at')
+        .eq('patient_id', patientId)
+        .maybeSingle();
+
+      const allPatientIds = [patientId];
+      const directInsuranceIds = new Set();
+
+      if (patientRow?.insurance_id != null) {
+        directInsuranceIds.add(String(patientRow.insurance_id));
+      }
+
+      if (patientRow?.profile_id) {
+        const { data: siblingRows } = await supabase
+          .from('patients')
+          .select('patient_id, insurance_id')
+          .eq('profile_id', patientRow.profile_id);
+        for (const row of siblingRows || []) {
+          if (row.patient_id && !allPatientIds.includes(row.patient_id)) {
+            allPatientIds.push(row.patient_id);
+          }
+          if (row.insurance_id != null) {
+            directInsuranceIds.add(String(row.insurance_id));
+          }
+        }
+      }
+
+      // 2. Fetch rows from patient_insurance linking table (if any exist)
+      const { data: linkedRows } = await supabase
         .from('patient_insurance')
-        .select(`
-          insurance_id,
-          subscriber_id,
-          coverage_start_date,
-          coverage_end_date,
-          coverage_type,
-          notes,
-          insurance_plans (
-            plan_name,
-            type,
-            carrier ( name )
-          )
-        `)
-        .eq('patient_id', patientId);
+        .select('*')
+        .in('patient_id', allPatientIds);
 
-      if (error) throw error;
+      const allPlanIds = new Set(directInsuranceIds);
+      for (const item of linkedRows || []) {
+        if (item.insurance_id != null) {
+          allPlanIds.add(String(item.insurance_id));
+        }
+      }
 
-      // Transform for UI
-      return data.map(item => ({
-        id: item.patient_id,
-        carrier: item.insurance_plans?.carrier?.name || 'Unknown Carrier',
-        coverageType: item.insurance_plans?.plan_name || 'Unknown Plan',
-        subscriberId: item.subscriber_id,
-        coverageStartDate: item.coverage_start_date,
-        coverageEndDate: item.coverage_end_date,
-        status: item.status,
-        notes: item.notes,
-        verificationDate: null // Add column if exists in DB
-      }));
+      // Also check claims for this patient in case an insurance_id was linked via a submitted claim
+      const { data: claimRows } = await supabase
+        .from('claims')
+        .select('insurance_id')
+        .in('patient_id', allPatientIds);
+      for (const c of claimRows || []) {
+        if (c.insurance_id != null) {
+          allPlanIds.add(String(c.insurance_id));
+        }
+      }
 
+      if (allPlanIds.size === 0 && (!linkedRows || linkedRows.length === 0)) {
+        return [];
+      }
+
+      // 3. Look up insurance_plans and carrier details directly
+      let plansById = new Map();
+      const planIdList = [...allPlanIds];
+      if (planIdList.length > 0) {
+        const { data: planRows } = await supabase
+          .from('insurance_plans')
+          .select('*')
+          .in('insurance_id', planIdList);
+
+        const carrierIds = [...new Set((planRows || []).map(p => p.carrier_id).filter(Boolean))];
+        let carriersById = new Map();
+        if (carrierIds.length > 0) {
+          const { data: carrierRows } = await supabase
+            .from('carrier')
+            .select('carrier_id, name, status')
+            .in('carrier_id', carrierIds);
+          for (const c of carrierRows || []) {
+            carriersById.set(String(c.carrier_id), c);
+          }
+        }
+
+        for (const p of planRows || []) {
+          const carrierObj = carriersById.get(String(p.carrier_id)) || null;
+          plansById.set(String(p.insurance_id), {
+            ...p,
+            carrierName: carrierObj?.name || 'Insurance Carrier',
+            carrierStatus: carrierObj?.status || 'ACTIVE'
+          });
+        }
+      }
+
+      const results = [];
+      const seenPlanIds = new Set();
+
+      // A. Add plans from patient_insurance linking table
+      for (const item of linkedRows || []) {
+        const planKey = item.insurance_id != null ? String(item.insurance_id) : null;
+        if (planKey) seenPlanIds.add(planKey);
+        const planInfo = planKey ? plansById.get(planKey) : null;
+
+        results.push({
+          id: item.id ?? item.patient_insurance_id ?? `pi-${item.patient_id}-${planKey}`,
+          insuranceId: item.insurance_id ?? null,
+          carrier: planInfo?.carrierName || 'Insurance Carrier',
+          planName: planInfo?.plan_name || 'Standard Plan',
+          coverageType: item.coverage_type || planInfo?.type || planInfo?.plan_name || 'Primary',
+          subscriberId: item.subscriber_id || 'On File',
+          coverageStartDate: item.coverage_start_date || patientRow?.created_at || null,
+          coverageEndDate: item.coverage_end_date || null,
+          status: item.status || 'Active',
+          notes: item.notes || ''
+        });
+      }
+
+      // B. Add plans assigned directly on patients.insurance_id (or claims.insurance_id) not yet in patient_insurance
+      for (const planKey of allPlanIds) {
+        if (seenPlanIds.has(planKey)) continue;
+        const planInfo = plansById.get(planKey);
+        if (!planInfo) continue;
+
+        results.push({
+          id: `direct-plan-${planKey}`,
+          insuranceId: planInfo.insurance_id,
+          carrier: planInfo.carrierName || 'Insurance Carrier',
+          planName: planInfo.plan_name || `Plan #${planKey}`,
+          coverageType: planInfo.type ? `${planInfo.plan_name} (${planInfo.type})` : (planInfo.plan_name || 'Primary'),
+          subscriberId: 'Linked to Profile',
+          coverageStartDate: patientRow?.created_at || null,
+          coverageEndDate: null,
+          status: 'Active',
+          notes: planInfo.max_limit
+            ? `Max Limit / LOA: ₱${Number(planInfo.max_limit).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+            : ''
+        });
+      }
+
+      return results;
     } catch (error) {
       console.error("Get Insurance Plans Error:", error.message);
       return [];

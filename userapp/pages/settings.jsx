@@ -1496,14 +1496,6 @@ export function SettingsPage({
           action: onOpenRecordVault,
         }]
       : []),
-    ...(onOpenBilling
-      ? [{
-          id: 'billing',
-          icon: Receipt,
-          label: t.billing || 'Billing & Payments',
-          action: onOpenBilling,
-        }]
-      : []),
     ...(onOpenClaims
       ? [{
           id: 'claims',

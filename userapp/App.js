@@ -203,7 +203,6 @@ export default function App() {
               onOpenMessages={() => setShowMessages(true)}
               onOpenNotifications={() => setShowNotifications(true)}
               onOpenProfile={handleOpenProfilePage}
-              onOpenBilling={() => setShowBilling(true)}
               onOpenClaims={() => setShowClaims(true)}
               onOpenMfaSettings={() => setShowMfaSettings(true)}
               onOpenRecordVault={() => setShowRecordVault(true)}

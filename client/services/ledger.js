@@ -103,6 +103,20 @@ export const ledgerAPI = {
         }
       });
 
+      // If user has no appointments or we also want all facility providers available for editing/adding
+      if (uniqueProviders.length === 0) {
+        const facilityId = Session.getFacilityId();
+        let query = supabase.from('providers').select('provider_id, name').order('name');
+        if (facilityId) query = query.eq('facility_id', facilityId);
+        const { data: facProvs } = await query;
+        (facProvs || []).forEach(p => {
+          if (!seen.has(p.provider_id)) {
+            seen.add(p.provider_id);
+            uniqueProviders.push({ id: p.provider_id, name: p.name });
+          }
+        });
+      }
+
       return uniqueProviders;
     } catch (error) {
       console.error("Get Patient Providers Error:", error.message);
@@ -149,20 +163,36 @@ export const ledgerAPI = {
 
       const activeStatuses = new Set(['SUBMITTED', 'PENDING', 'IN_REVIEW', 'IN REVIEW', 'PROCESSING', 'APPROVED', 'PAID']);
 
+      const cleanChargeDesc = (raw) =>
+        String(raw || '')
+          .replace(/\s*\[(?:Bill to Insurance|Self-Pay)\]\s*$/i, '')
+          .trim();
+
+      const isChargeBilledToInsurance = (t) => {
+        if (typeof t.bill_to_insurance === 'boolean') return t.bill_to_insurance;
+        const raw = String(t.description || '');
+        if (/\[Self-Pay\]/i.test(raw)) return false;
+        if (/\[Bill to Insurance\]/i.test(raw)) return true;
+        return true;
+      };
+
       const transactions = data.map(t => {
         const claim = latestClaimByLedger.get(String(t.ledger_id)) || null;
         const claimStatus = claim?.status || null;
         const hasSubmittedClaim = claimStatus ? activeStatuses.has(String(claimStatus).trim().toUpperCase()) : false;
+        const billToInsurance = t.type === 'CHARGE' ? isChargeBilledToInsurance(t) : false;
+        const rawDateSource = t.date || t.appointments?.appointment_date || t.created_at || '';
 
         return {
           id: t.ledger_id, 
+          rawDate: rawDateSource ? String(rawDateSource).slice(0, 10) : '',
           date: (t.date || t.appointments?.appointment_date) 
             ? new Date(t.date || t.appointments?.appointment_date).toLocaleDateString() 
             : '-',
           created: new Date(t.created_at).toLocaleDateString(),
           // Ensure it falls back to the direct procedure_id if code is empty
           code: t.code || t.procedure_id || t.appointments?.procedures?.procedure_id || '-',
-          description: t.description || t.appointments?.reason_for_visit || 'Visit Charge',
+          description: cleanChargeDesc(t.description) || t.appointments?.reason_for_visit || 'Visit Charge',
           providerId: t.provider_id || t.appointments?.providers?.provider_id || null,
           // Fetch name from the direct provider relation first
           provider: t.providers?.name || t.appointments?.providers?.name || '-',
@@ -172,6 +202,7 @@ export const ledgerAPI = {
           appointmentId: t.appointment_id,
           procedureId: t.procedure_id,
           paymentStatus: t.payment_status,
+          billToInsurance,
           claimId: claim?.claim_id ?? claim?.id ?? null,
           claimStatus,
           claimSubmissionDate: claim?.submission_date || null,
@@ -330,55 +361,121 @@ export const ledgerAPI = {
   // Get Payment Distribution
   async getPaymentDistribution(patientId) {
     try {
-      // 1. Get sum of all charges (where type is not PMT/PAYMENT)
+      // 1. Get all ledger transactions for this patient
       const { data: ledgerData, error: ledgerError } = await supabase
         .from('ledger')
-        .select('total_bill_amount, type')
+        .select('*')
         .eq('patient_id', patientId);
         
       if (ledgerError) throw ledgerError;
 
-      const totalBalance = ledgerData.reduce((sum, item) => sum + parseFloat(item.total_bill_amount || 0), 0);
+      const rows = ledgerData || [];
+      const totalBalance = rows.reduce((sum, item) => sum + parseFloat(item.total_bill_amount || 0), 0);
+
+      if (totalBalance <= 0) {
+        return { totalBalance: Math.max(0, totalBalance), insurancePortion: 0, patientPortion: 0 };
+      }
+
+      // Helper to determine if a charge is Bill to Insurance vs Self-Pay
+      const isBilledToInsurance = (t) => {
+        if (typeof t.bill_to_insurance === 'boolean') return t.bill_to_insurance;
+        const raw = String(t.description || '');
+        if (/\[Self-Pay\]/i.test(raw)) return false;
+        if (/\[Bill to Insurance\]/i.test(raw)) return true;
+        return true;
+      };
+
+      const charges = rows.filter(t => String(t.type || '').toUpperCase() === 'CHARGE' || parseFloat(t.total_bill_amount || 0) > 0);
+      const payments = rows.filter(t => String(t.type || '').toUpperCase() === 'PAYMENT' || parseFloat(t.total_bill_amount || 0) < 0);
+
+      // Calculate remaining unpaid balance per charge, separating Insurance-billed vs Self-Pay charges
+      let insuranceEligibleBalance = 0;
+      let selfPayBalance = 0;
+      let allocatedPaymentsTotal = 0;
+
+      for (const charge of charges) {
+        const chargeAmt = Math.abs(parseFloat(charge.total_bill_amount || 0));
+        const paidOnCharge = payments
+          .filter(p => {
+            if (p.description && p.description.includes(`[Charge #${charge.ledger_id}]`)) return true;
+            if (charge.appointment_id && p.appointment_id && String(p.appointment_id) === String(charge.appointment_id) &&
+                (!charge.procedure_id || !p.procedure_id || String(p.procedure_id) === String(charge.procedure_id))) return true;
+            if (!charge.appointment_id && charge.procedure_id && p.procedure_id && String(p.procedure_id) === String(charge.procedure_id)) return true;
+            return false;
+          })
+          .reduce((sum, p) => sum + Math.abs(parseFloat(p.total_bill_amount || 0)), 0);
+
+        allocatedPaymentsTotal += Math.min(chargeAmt, paidOnCharge);
+        const remaining = Math.max(0, chargeAmt - paidOnCharge);
+
+        if (isBilledToInsurance(charge)) {
+          insuranceEligibleBalance += remaining;
+        } else {
+          // Not "Bill to Insurance" -> goes directly to Patient Portion
+          selfPayBalance += remaining;
+        }
+      }
+
+      // Deduct any unallocated general payments from selfPayBalance first, then insuranceEligibleBalance
+      const totalPayments = payments.reduce((sum, p) => sum + Math.abs(parseFloat(p.total_bill_amount || 0)), 0);
+      let unallocatedPayment = Math.max(0, totalPayments - allocatedPaymentsTotal);
+      if (unallocatedPayment > 0) {
+        const deductSelf = Math.min(selfPayBalance, unallocatedPayment);
+        selfPayBalance -= deductSelf;
+        unallocatedPayment -= deductSelf;
+        insuranceEligibleBalance = Math.max(0, insuranceEligibleBalance - unallocatedPayment);
+      }
 
       // 2. Fetch the patient's insurance plan details
-      const { data: patientData, error: patientError } = await supabase
+      let plan = null;
+      const { data: patientData } = await supabase
         .from('patients')
-        .select(`
-          insurance_id,
-          insurance_plans (
-            max_limit,
-            deductible,
-            copay_amount
-          )
-        `)
+        .select('insurance_id')
         .eq('patient_id', patientId)
-        .single();
+        .maybeSingle();
 
-      if (patientError && patientError.code !== 'PGRST116') throw patientError;
+      let activeInsuranceId = patientData?.insurance_id || null;
+      if (!activeInsuranceId) {
+        const { data: piRow } = await supabase
+          .from('patient_insurance')
+          .select('insurance_id')
+          .eq('patient_id', patientId)
+          .limit(1)
+          .maybeSingle();
+        activeInsuranceId = piRow?.insurance_id || null;
+      }
+
+      if (activeInsuranceId) {
+        const { data: planRow } = await supabase
+          .from('insurance_plans')
+          .select('max_limit, deductible, copay_amount, copay_type')
+          .eq('insurance_id', activeInsuranceId)
+          .maybeSingle();
+        plan = planRow || null;
+      }
 
       let insurancePortion = 0;
       let patientPortion = totalBalance;
 
-      // 3. Apply the distribution logic
-      const plan = patientData?.insurance_plans;
-      if (plan && totalBalance > 0) {
+      // 3. Apply the distribution logic ONLY to insurance-billed charges; self-pay charges always go to patientPortion
+      if (plan && insuranceEligibleBalance > 0) {
         const maxLimit = parseFloat(plan.max_limit || 0);
         const deductible = parseFloat(plan.deductible || 0);
-        const copay = parseFloat(plan.copay_amount || 0);
 
-        if (totalBalance <= deductible) {
+        if (insuranceEligibleBalance <= deductible) {
           insurancePortion = 0;
-        } else if (totalBalance > deductible) {
-          insurancePortion = totalBalance - deductible;
-          patientPortion = deductible;
+        } else {
+          const afterDeductible = insuranceEligibleBalance - deductible;
+          insurancePortion = maxLimit > 0 ? Math.min(afterDeductible, maxLimit) : afterDeductible;
         }
-        else if (totalBalance > maxLimit) {
-          insurancePortion = maxLimit;
-          patientPortion = totalBalance - insurancePortion;
-        }
-        
-        // Prevent negative patient portion if insurance portion exceeds balance
-        patientPortion = Math.max(0, totalBalance - insurancePortion);
+
+        // Prevent insurance portion from exceeding eligible balance or total balance
+        insurancePortion = Math.min(insurancePortion, insuranceEligibleBalance, totalBalance);
+        const insurancePatientShare = Math.max(0, insuranceEligibleBalance - insurancePortion);
+        patientPortion = selfPayBalance + insurancePatientShare;
+      } else {
+        insurancePortion = 0;
+        patientPortion = totalBalance;
       }
 
       return {
@@ -493,25 +590,119 @@ export const ledgerAPI = {
   // Add Charge (Procedure)
   async addCharge(patientId, chargeData) {
     try {
-      const { error } = await supabase
+      const billToIns = Boolean(chargeData.billToInsurance);
+      const baseDesc = (chargeData.description || '').replace(/\s*\[(?:Bill to Insurance|Self-Pay)\]\s*$/i, '').trim();
+      const taggedDesc = billToIns
+        ? `${baseDesc} [Bill to Insurance]`.trim()
+        : `${baseDesc} [Self-Pay]`.trim();
+
+      const basePayload = {
+        patient_id: patientId,
+        appointment_id: chargeData.appointmentId || null, // Link to appointment if provided
+        date: chargeData.date,
+        created_at: new Date().toISOString(),
+        type: 'CHARGE',
+        procedure_id: chargeData.code,
+        description: taggedDesc,
+        provider_id: chargeData.provider,
+        total_bill_amount: Math.abs(parseFloat(chargeData.amount)), // Store as positive
+        payment_status: 'UNPAID' // Logical default for new charge
+      };
+
+      // Try inserting with bill_to_insurance column if present, fallback to basePayload
+      let { error } = await supabase
         .from('ledger')
-        .insert([{
-          patient_id: patientId,
-          appointment_id: chargeData.appointmentId || null, // Link to appointment if provided
-          date: chargeData.date,
-          created_at: new Date().toISOString(),
-          type: 'CHARGE',
-          procedure_id: chargeData.code,
-          description: chargeData.description,
-          provider_id: chargeData.provider,
-          total_bill_amount: Math.abs(parseFloat(chargeData.amount)), // Store as positive
-          payment_status: 'UNPAID' // Logical default for new charge
-        }]);
+        .insert([{ ...basePayload, bill_to_insurance: billToIns }]);
+
+      if (error && (error.code === 'PGRST204' || /bill_to_insurance/i.test(error.message || ''))) {
+        const retry = await supabase.from('ledger').insert([basePayload]);
+        error = retry.error;
+      }
 
       if (error) throw error;
       return { success: true };
     } catch (error) {
       console.error("Add Charge Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Update an existing Ledger Transaction (Charge or Payment)
+  async updateTransaction(ledgerId, updateData) {
+    try {
+      if (!ledgerId) throw new Error('Ledger ID is required.');
+      const isPayment = updateData.type === 'PAYMENT' || Number(updateData.originalAmount) < 0;
+      const numericAmount = Math.abs(parseFloat(updateData.amount || 0));
+
+      let taggedDesc = (updateData.description || '').replace(/\s*\[(?:Bill to Insurance|Self-Pay)\]\s*$/i, '').trim();
+      if (!isPayment) {
+        const billToIns = Boolean(updateData.billToInsurance);
+        taggedDesc = billToIns
+          ? `${taggedDesc} [Bill to Insurance]`.trim()
+          : `${taggedDesc} [Self-Pay]`.trim();
+      }
+
+      const procId = updateData.code && updateData.code !== '-' && updateData.code !== 'PMT'
+        ? (/^\d+$/.test(String(updateData.code)) ? parseInt(updateData.code, 10) : updateData.code)
+        : null;
+
+      const provId = updateData.provider && updateData.provider !== '-'
+        ? (/^\d+$/.test(String(updateData.provider)) ? parseInt(updateData.provider, 10) : updateData.provider)
+        : null;
+
+      const basePayload = {
+        date: updateData.date,
+        procedure_id: procId,
+        description: taggedDesc,
+        provider_id: provId,
+        total_bill_amount: isPayment ? -numericAmount : numericAmount
+      };
+
+      let { error } = !isPayment
+        ? await supabase
+            .from('ledger')
+            .update({ ...basePayload, bill_to_insurance: Boolean(updateData.billToInsurance) })
+            .eq('ledger_id', ledgerId)
+        : await supabase
+            .from('ledger')
+            .update(basePayload)
+            .eq('ledger_id', ledgerId);
+
+      if (error && (error.code === 'PGRST204' || /bill_to_insurance/i.test(error.message || ''))) {
+        const retry = await supabase
+          .from('ledger')
+          .update(basePayload)
+          .eq('ledger_id', ledgerId);
+        error = retry.error;
+      }
+
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error("Update Transaction Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Delete a Ledger Transaction (and any associated claim rows for that ledger_id)
+  async deleteTransaction(ledgerId) {
+    try {
+      if (!ledgerId) throw new Error('Ledger ID is required.');
+
+      // Remove linked claims first so FK constraints don't block deleting the charge
+      try {
+        await supabase.from('claims').delete().eq('ledger_id', ledgerId);
+      } catch (_) {}
+
+      const { error } = await supabase
+        .from('ledger')
+        .delete()
+        .eq('ledger_id', ledgerId);
+
+      if (error) throw error;
+      return { success: true };
+    } catch (error) {
+      console.error("Delete Transaction Error:", error.message);
       return { success: false, error: error.message };
     }
   }

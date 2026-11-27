@@ -84,10 +84,38 @@ export const GabayAPI = {
    * @returns {Promise<Object>} Session data
    */
   async login(email, password) {
-    const response = await fetch('/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
+    let response;
+    try {
+      response = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+    } catch {
+      response = null;
+    }
+
+    // If the local backend API (port 3000) is unreachable / returns 502-504 proxy error,
+    // fall back to direct Supabase Auth signInWithPassword so login still works when only Vite is running.
+    if (!response || [502, 503, 504].includes(response.status)) {
+      const { data: directAuth, error: directErr } = await supabase.auth.signInWithPassword({
+        email: String(email || '').trim(),
+        password
+      });
+      if (directErr) {
+        throw Object.assign(new Error(directErr.message || 'Invalid email or password.'), {
+          status: 401,
+          code: 'invalid_credentials'
+        });
+      }
+      try {
+        const account = await this.getClinicAccount();
+        return { ...directAuth, account };
+      } catch (accountError) {
+        await supabase.auth.signOut();
+        throw accountError;
+      }
+    }
+
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw Object.assign(new Error(result.error || 'Login is temporarily unavailable.'), {
       status: response.status,
@@ -588,11 +616,22 @@ export const GabayAPI = {
   // ADD Patient Insurance
   async addPatientInsurance(patientId, planData) {
     try {
-      const { error } = await supabase
+      // 1. Always update patients.insurance_id so the patient's active plan is stored on their patient record
+      const numericPlanId = /^\d+$/.test(String(planData.planId))
+        ? parseInt(planData.planId, 10)
+        : planData.planId;
+
+      const { error: patientUpdErr } = await supabase
+        .from('patients')
+        .update({ insurance_id: numericPlanId })
+        .eq('patient_id', patientId);
+
+      // 2. Also insert into patient_insurance linking table if available
+      const { error: linkErr } = await supabase
         .from('patient_insurance')
         .insert([{
           patient_id: patientId,
-          insurance_id: planData.planId,
+          insurance_id: numericPlanId,
           subscriber_id: planData.subscriberId,
           coverage_type: planData.coverageType,
           coverage_start_date: planData.coverageStartDate,
@@ -601,7 +640,7 @@ export const GabayAPI = {
           status: 'active'
         }]);
 
-      if (error) throw error;
+      if (linkErr && patientUpdErr) throw linkErr;
       return { success: true };
     } catch (error) {
       console.error("Add Insurance Error:", error.message);
