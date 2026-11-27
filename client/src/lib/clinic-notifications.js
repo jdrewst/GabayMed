@@ -27,7 +27,7 @@ export function useClinicNotifications({ limit = 100, unreadOnly = false } = {})
       const facilityId = Session.getFacilityId()
       const applyScope = query => inboxQuery(facilityId, scope, query)
       let list = applyScope(supabase.from("clinic_notifications")
-        .select("id, category, title, message, created_at, is_read, branch_key, appointment_date"))
+        .select("id, category, title, message, created_at, is_read, branch_key, appointment_date, procedure_code"))
       if (unreadOnly) list = list.eq("is_read", false)
       const [rows, unread] = await Promise.all([
         list.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(limit),
@@ -98,4 +98,14 @@ export function appointmentNotificationHref(notification) {
   const query = new URLSearchParams({ date: notification.appointment_date })
   query.set("branch", notification.branch_key === "main" ? "all" : notification.branch_key)
   return `/appointments?${query}`
+}
+
+export function notificationPreview(notification) {
+  if (notification.category !== "appointment") return notification.message
+  const [summary, ...details] = notification.message.split("\n")
+  const separator = summary.indexOf(" | ")
+  const patient = separator === -1 ? "" : summary.slice(separator + 3)
+  const code = notification.procedure_code ? `Procedure ${notification.procedure_code}` : ""
+  const heading = [code, patient].filter(Boolean).join(" | ")
+  return [heading, ...details].filter(Boolean).join("\n")
 }

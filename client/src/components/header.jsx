@@ -11,7 +11,7 @@ import { GabayAPI } from "../../services/gabayApi"
 import { profileAPI } from "../../services/profile"
 import LogoSvg from "@/assets/Logo.svg"
 
-import { appointmentNotificationHref, formatNotificationTime, useClinicNotifications } from "@/lib/clinic-notifications"
+import { appointmentNotificationHref, formatNotificationTime, notificationPreview, useClinicNotifications } from "@/lib/clinic-notifications"
 
 export function Header() {
   const { selectedBranch } = useBranch()
@@ -212,11 +212,11 @@ export function Header() {
                                 )}
                               </div>
                               <p className="mt-0.5 whitespace-pre-line break-words text-xs text-muted-foreground">
-                                {notification.message}
+                                {notificationPreview(notification)}
                               </p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {formatNotificationTime(notification.created_at)}
-                              </p>
+                              <time dateTime={notification.created_at} className="mt-1 block text-right text-xs text-muted-foreground">
+                                Notified {formatNotificationTime(notification.created_at)}
+                              </time>
                             </div>
                           </ItemContent>
                         </DropdownMenuItem>

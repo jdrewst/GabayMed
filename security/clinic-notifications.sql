@@ -15,12 +15,15 @@ CREATE TABLE IF NOT EXISTS public.clinic_notifications (
 );
 
 ALTER TABLE public.clinic_notifications ADD COLUMN IF NOT EXISTS appointment_date date;
+ALTER TABLE public.clinic_notifications ADD COLUMN IF NOT EXISTS procedure_code text;
 
 -- Older appointment alerts already include their appointment ID in the message.
 UPDATE public.clinic_notifications AS alert
-SET appointment_date = appointment.appointment_date
+SET appointment_date = coalesce(alert.appointment_date, appointment.appointment_date),
+    procedure_code = appointment.procedure_id::text
 FROM public.appointments AS appointment
-WHERE alert.category = 'appointment' AND alert.appointment_date IS NULL
+WHERE alert.category = 'appointment'
+  AND (alert.appointment_date IS NULL OR (alert.procedure_code IS NULL AND appointment.procedure_id IS NOT NULL))
   AND alert.facility_id = appointment.facility_id
   AND alert.message LIKE 'Appointment %'
   AND split_part(alert.message, ' ', 2) = appointment.appointment_id::text;
@@ -65,6 +68,7 @@ DECLARE
   details text;
   status_label text;
   calendar_date date;
+  appointment_code text;
   facility_name text;
   branch_name text;
   patient_name text;
@@ -87,6 +91,7 @@ BEGIN
       IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN RETURN NEW; END IF;
       category := 'appointment';
       calendar_date := NEW.appointment_date;
+      appointment_code := NEW.procedure_id::text;
       status_label := initcap(replace(NEW.status::text, '_', ' '));
       title := CASE WHEN TG_OP = 'INSERT' AND upper(NEW.status::text) = 'PENDING' THEN 'New appointment request'
                     WHEN TG_OP = 'INSERT' THEN 'Appointment created' ELSE 'Appointment status updated' END;
@@ -158,8 +163,8 @@ BEGIN
 
   IF hospital IS NULL THEN RETURN NULL; END IF;
   IF branch IS NOT NULL THEN
-    INSERT INTO public.clinic_notifications (facility_id, branch_key, category, title, message, appointment_date)
-    VALUES (hospital, branch, category, title, details, calendar_date);
+    INSERT INTO public.clinic_notifications (facility_id, branch_key, category, title, message, appointment_date, procedure_code)
+    VALUES (hospital, branch, category, title, details, calendar_date, appointment_code);
   ELSE
     -- Fee schedules apply to the hospital. Give each inbox its own read state.
     INSERT INTO public.clinic_notifications (facility_id, branch_key, category, title, message)

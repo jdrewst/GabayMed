@@ -135,10 +135,7 @@ export function Notifications() {
                             <p className="mb-2 whitespace-pre-line break-words text-sm leading-relaxed text-muted-foreground">
                               {notification.message}
                             </p>
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-muted-foreground">
-                                {formatNotificationTime(notification.created_at)}
-                              </span>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               {!notification.is_read && (
                                 <Button
                                   variant="ghost"
@@ -150,6 +147,9 @@ export function Notifications() {
                                   Mark as read
                                 </Button>
                               )}
+                              <time dateTime={notification.created_at} className="ml-auto text-right text-xs text-muted-foreground">
+                                Notified {formatNotificationTime(notification.created_at)}
+                              </time>
                             </div>
                           </div>
                         </div>
