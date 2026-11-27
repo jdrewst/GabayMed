@@ -29,20 +29,43 @@ export function isClaimActiveStatus(status) {
   return ACTIVE_CLAIM_STATUSES.has(String(status).trim().toUpperCase());
 }
 
+function cleanChargeDescription(raw) {
+  return String(raw || '')
+    .replace(/\s*\[(?:Bill to Insurance|Self-Pay)\]\s*$/i, '')
+    .trim();
+}
+
+function isChargeEligibleForInsuranceClaim(record) {
+  // 1. Must be a positive CHARGE transaction
+  if (String(record.type || '').toUpperCase() === 'PAYMENT') return false;
+  if (parseFloat(record.total_bill_amount || 0) <= 0) return false;
+
+  // 2. If already fully PAID by a non-insurance payment (no claim exists), exclude from Send Claims
+  if (String(record.payment_status || '').toUpperCase() === 'PAID' && !record.hasExistingClaim) {
+    return false;
+  }
+
+  // 3. Respect explicit "Bill to Insurance" toggle when adding a procedure charge
+  if (typeof record.bill_to_insurance === 'boolean') {
+    return record.bill_to_insurance;
+  }
+  const desc = String(record.description || '');
+  if (/\[Self-Pay\]/i.test(desc)) return false;
+  if (/\[Bill to Insurance\]/i.test(desc)) return true;
+
+  // Legacy charges without explicit tag default to eligible unless marked Self-Pay
+  return true;
+}
+
 export const claimsAPI = {
-  // Fetch transactions (charges) from the ledger for a specific patient, joined with their current claim status
+  // Fetch transactions (charges) from the ledger for a specific patient that are marked "Bill to Insurance"
   async getEligibleClaims(patientId) {
     try {
-      const [{ data: charges, error: chargeError }, { data: claimsData }] = await Promise.all([
+      const [{ data: allLedger, error: chargeError }, { data: claimsData }] = await Promise.all([
         supabase
           .from('ledger')
           .select(`
-            ledger_id,
-            total_bill_amount,
-            created_at,
-            date,
-            description,
-            procedure_id,
+            *,
             procedures ( procedure_id, description ),
             providers ( name ),
             patients (
@@ -56,7 +79,6 @@ export const claimsAPI = {
             )
           `)
           .eq('patient_id', patientId)
-          .eq('type', 'CHARGE')
           .order('created_at', { ascending: false }),
         supabase
           .from('claims')
@@ -75,17 +97,47 @@ export const claimsAPI = {
         }
       });
 
-      return (charges || []).map(record => {
-        const claim = latestClaimByLedger.get(String(record.ledger_id)) || null;
-        const claimStatus = claim?.status || null;
-        return {
-          ...record,
-          claim_id: claim?.claim_id ?? claim?.id ?? null,
-          claimStatus,
-          claimSubmissionDate: claim?.submission_date || null,
-          hasActiveClaim: isClaimActiveStatus(claimStatus)
-        };
+      // Track non-insurance payments applied to specific charges
+      const nonInsPaidChargeIds = new Set();
+      (allLedger || []).forEach(row => {
+        const isPayment = String(row.type || '').toUpperCase() === 'PAYMENT' || parseFloat(row.total_bill_amount || 0) < 0;
+        if (!isPayment) return;
+        const method = String(row.payment_method || '').toLowerCase();
+        const isInsMethod = method === 'ins_check' || method === 'ins_eft' || /Insurance (?:Check|EFT)/i.test(row.description || '');
+        if (!isInsMethod) {
+          const match = String(row.description || '').match(/\[Charge #(\d+)\]/i);
+          if (match?.[1]) {
+            nonInsPaidChargeIds.add(String(match[1]));
+          }
+        }
       });
+
+      const charges = (allLedger || []).filter(r => String(r.type || '').toUpperCase() === 'CHARGE');
+
+      return charges
+        .map(record => {
+          const claim = latestClaimByLedger.get(String(record.ledger_id)) || null;
+          const claimStatus = claim?.status || null;
+          return {
+            ...record,
+            description: cleanChargeDescription(record.description),
+            rawDescription: record.description,
+            hasExistingClaim: Boolean(claim),
+            paidByNonInsurance: nonInsPaidChargeIds.has(String(record.ledger_id)) && String(record.payment_status || '').toUpperCase() === 'PAID',
+            claim_id: claim?.claim_id ?? claim?.id ?? null,
+            claimStatus,
+            claimSubmissionDate: claim?.submission_date || null,
+            hasActiveClaim: isClaimActiveStatus(claimStatus)
+          };
+        })
+        .filter(record => {
+          // Exclude charges paid via non-insurance payment or not marked "Bill to Insurance"
+          if (record.paidByNonInsurance && !record.hasExistingClaim) return false;
+          return isChargeEligibleForInsuranceClaim({
+            ...record,
+            description: record.rawDescription
+          });
+        });
     } catch (error) {
       console.error("Get Eligible Claims Error:", error.message);
       return [];
@@ -119,21 +171,32 @@ export const claimsAPI = {
         .order('submission_date', { ascending: false });
 
       if (error) throw error;
-      return (data || []).map(c => ({
-        id: c.claim_id ?? c.id,
-        ledgerId: c.ledger_id,
-        patientId: c.patient_id,
-        insuranceId: c.insurance_id,
-        status: c.status || 'Submitted',
-        submissionDate: c.submission_date,
-        serviceDate: c.ledger?.date || null,
-        amount: parseFloat(c.ledger?.total_bill_amount || 0),
-        procedureName: c.ledger?.procedures?.description || c.ledger?.description || (c.ledger?.procedure_id ? `Procedure #${c.ledger.procedure_id}` : 'Healthcare Charge'),
-        procedureCode: c.ledger?.procedures?.procedure_id || c.ledger?.procedure_id || '-',
-        providerName: c.ledger?.providers?.name || '-',
-        carrierName: c.insurance_plans?.carrier?.name || 'Insurance Carrier',
-        planName: c.insurance_plans?.plan_name || (c.insurance_id ? `Plan #${c.insurance_id}` : '-')
-      }));
+      return (data || []).map(c => {
+        const procDesc = cleanChargeDescription(
+          c.ledger?.procedures?.description ||
+          c.ledger?.description ||
+          (c.ledger?.procedure_id ? `Procedure #${c.ledger.procedure_id}` : 'Healthcare Charge')
+        );
+        const procCode = c.ledger?.procedures?.procedure_id || c.ledger?.procedure_id || '';
+        const provName = c.ledger?.providers?.name || '-';
+        return {
+          id: c.claim_id ?? c.id,
+          ledgerId: c.ledger_id,
+          patientId: c.patient_id,
+          insuranceId: c.insurance_id,
+          status: c.status || 'Submitted',
+          submissionDate: c.submission_date,
+          serviceDate: c.ledger?.date || null,
+          amount: parseFloat(c.ledger?.total_bill_amount || 0),
+          procedure: procDesc,
+          procedureName: procDesc,
+          procedureCode: procCode,
+          provider: provName,
+          providerName: provName,
+          carrierName: c.insurance_plans?.carrier?.name || 'Insurance Carrier',
+          planName: c.insurance_plans?.plan_name || (c.insurance_id ? `Plan #${c.insurance_id}` : '-')
+        };
+      });
     } catch (error) {
       console.error("Get Patient Claims Error:", error.message);
       return [];
@@ -158,7 +221,7 @@ export const claimsAPI = {
         return { success: false, error: 'A claim has already been submitted for this charge.' };
       }
 
-      // 2. Resolve insurance_id from patient record if not provided
+      // 2. Resolve insurance_id from patient record or patient_insurance if not provided
       let insuranceId = claimData.insurance_id ?? null;
       if (!insuranceId) {
         const { data: pat } = await supabase
@@ -167,6 +230,15 @@ export const claimsAPI = {
           .eq('patient_id', claimData.patient_id)
           .maybeSingle();
         insuranceId = pat?.insurance_id ?? null;
+      }
+      if (!insuranceId) {
+        const { data: pi } = await supabase
+          .from('patient_insurance')
+          .select('insurance_id')
+          .eq('patient_id', claimData.patient_id)
+          .limit(1)
+          .maybeSingle();
+        insuranceId = pi?.insurance_id ?? null;
       }
 
       if (!insuranceId) {
@@ -189,6 +261,35 @@ export const claimsAPI = {
       console.error("Submit Claim Error:", error.message);
       return { success: false, error: error.message };
     }
+  },
+
+  // Submit multiple selected claims in one batch
+  async submitClaims(claimsList = []) {
+    if (!Array.isArray(claimsList) || claimsList.length === 0) {
+      return { success: false, error: 'Please select at least one procedure transaction to send.' };
+    }
+
+    let submittedCount = 0;
+    let lastError = '';
+
+    for (const item of claimsList) {
+      const res = await this.submitClaim(item);
+      if (res.success) {
+        submittedCount += 1;
+      } else if (!lastError && res.error) {
+        lastError = res.error;
+      }
+    }
+
+    if (submittedCount === 0) {
+      return { success: false, error: lastError || 'Failed to submit selected claims.' };
+    }
+
+    return {
+      success: true,
+      submittedCount,
+      warning: lastError ? `Submitted ${submittedCount} claim(s). Some could not be sent: ${lastError}` : ''
+    };
   },
 
   // Update claim status from clinic web (syncs directly with patient's mobile app Digital Claims dashboard)

@@ -303,10 +303,140 @@ async function getPatientBilling(admin, userId, options = {}) {
   };
 }
 
+/**
+ * Post a patient payment into the clinic ledger using the exact same format & allocation tags
+ * as the clinic HIS (`Payment - <Method> [Charge #<ledger_id>]`), updating `payment_status` to
+ * `PAID` (or `PARTIALLY_PAID`) and syncing linked `claims` to `Paid` when settled.
+ */
+async function submitPatientPayment(admin, userId, payload = {}) {
+  if (!userId) throw new RequestError(401, 'User authentication required.');
+
+  const chargeId = payload.chargeId ?? payload.ledgerId ?? payload.ledger_id ?? null;
+  const amountNum = round2(Math.abs(num(payload.amount)));
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    throw new RequestError(400, 'Please enter a valid payment amount greater than 0.');
+  }
+
+  const rawMethod = String(payload.method || 'cash').trim().toLowerCase();
+  const methodCodeMap = {
+    cash: 'cash',
+    'pay at counter': 'cash',
+    check: 'check',
+    cc: 'cc',
+    'credit/debit card': 'cc',
+    'credit card': 'cc',
+    gcash: 'gcash',
+    maya: 'maya',
+    'online banking': 'cc',
+  };
+  const methodCode = methodCodeMap[rawMethod] || rawMethod;
+  const methodText = PAYMENT_METHOD_LABELS[methodCode] || payload.method || 'Cash';
+
+  // Verify the logged-in patient owns the target patient record / charge
+  const { data: patientRows, error: pError } = await admin
+    .from('patients')
+    .select('patient_id, facility_id')
+    .eq('profile_id', userId);
+
+  if (pError) throw new RequestError(500, 'Failed to verify patient record: ' + pError.message);
+  if (!patientRows || patientRows.length === 0) {
+    throw new RequestError(404, 'No patient record linked to your account.');
+  }
+
+  const ownedPatientIds = new Set(patientRows.map(p => String(p.patient_id)));
+
+  let targetCharge = null;
+  if (chargeId != null && chargeId !== '') {
+    const { data: chargeRow, error: cErr } = await admin
+      .from('ledger')
+      .select('*')
+      .eq('ledger_id', chargeId)
+      .maybeSingle();
+
+    if (cErr) throw new RequestError(500, 'Failed to look up charge: ' + cErr.message);
+    if (!chargeRow || !ownedPatientIds.has(String(chargeRow.patient_id))) {
+      throw new RequestError(404, 'Selected charge was not found on your account.');
+    }
+    targetCharge = chargeRow;
+  }
+
+  const targetPatientId = targetCharge
+    ? targetCharge.patient_id
+    : (payload.patientId && ownedPatientIds.has(String(payload.patientId))
+        ? payload.patientId
+        : patientRows[0].patient_id);
+
+  const desc = targetCharge
+    ? `Payment - ${methodText} [Charge #${targetCharge.ledger_id}]`
+    : `Payment - ${methodText}`;
+
+  const nowIso = new Date().toISOString();
+  const todayStr = nowIso.split('T')[0];
+
+  const { data: inserted, error: insError } = await admin
+    .from('ledger')
+    .insert([{
+      patient_id: targetPatientId,
+      appointment_id: targetCharge?.appointment_id || payload.appointmentId || null,
+      provider_id: targetCharge?.provider_id || payload.providerId || null,
+      procedure_id: targetCharge?.procedure_id || payload.procedureId || null,
+      created_at: nowIso,
+      date: payload.date || todayStr,
+      type: 'PAYMENT',
+      payment_method: methodCode,
+      description: desc,
+      total_bill_amount: -Math.abs(amountNum),
+      payment_status: 'PAID',
+    }])
+    .select()
+    .single();
+
+  if (insError) throw new RequestError(500, 'Failed to record payment: ' + insError.message);
+
+  // Re-evaluate charge balance and update charge status in HIS ledger & claims table
+  if (targetCharge) {
+    const { data: patientLedgerRows } = await admin
+      .from('ledger')
+      .select('*')
+      .eq('patient_id', targetPatientId);
+
+    const chargeGross = Math.abs(num(targetCharge.total_bill_amount));
+    const totalPaidOnCharge = (patientLedgerRows || [])
+      .filter(r => isPayment(r) && (
+        (r.description && r.description.includes(`[Charge #${targetCharge.ledger_id}]`)) ||
+        (targetCharge.appointment_id && r.appointment_id && String(r.appointment_id) === String(targetCharge.appointment_id) &&
+         (!targetCharge.procedure_id || !r.procedure_id || String(r.procedure_id) === String(targetCharge.procedure_id))) ||
+        (!targetCharge.appointment_id && targetCharge.procedure_id && r.procedure_id && String(r.procedure_id) === String(targetCharge.procedure_id))
+      ))
+      .reduce((sum, p) => sum + Math.abs(num(p.total_bill_amount)), 0);
+
+    if (chargeGross - totalPaidOnCharge <= 0.01) {
+      await admin
+        .from('ledger')
+        .update({ payment_status: 'PAID' })
+        .eq('ledger_id', targetCharge.ledger_id);
+
+      try {
+        await admin
+          .from('claims')
+          .update({ status: 'Paid' })
+          .eq('ledger_id', targetCharge.ledger_id)
+          .neq('status', 'Denied');
+      } catch (_) {}
+    }
+  }
+
+  return {
+    success: true,
+    payment: inserted,
+  };
+}
+
 module.exports = {
   PAYMENT_METHOD_LABELS,
   buildBreakdown,
   allocatePayments,
   derivePaymentStatus,
   getPatientBilling,
+  submitPatientPayment,
 };

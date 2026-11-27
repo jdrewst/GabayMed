@@ -1,11 +1,11 @@
 import { Switch } from "@/components/ui/switch"
 import { useState, useEffect } from "react"
-import { Plus, CreditCard, AlertCircle, CheckCircle2, Clock } from "lucide-react"
+import { Plus, CreditCard, AlertCircle, CheckCircle2, Clock, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -65,6 +65,29 @@ export function PatientLedger({ patientId, refreshTrigger = 0, onPaymentChanged 
     source: '',
     scheduleName: ''
   })
+
+  // Edit & Delete Transaction state
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [editTransactionForm, setEditTransactionForm] = useState({
+    id: null,
+    type: 'CHARGE',
+    originalAmount: 0,
+    date: '',
+    provider: '',
+    code: '',
+    description: '',
+    amount: '',
+    billToInsurance: false
+  })
+  const [editFeeLookupInfo, setEditFeeLookupInfo] = useState({
+    loading: false,
+    source: '',
+    scheduleName: ''
+  })
+  const [editSkipInitialFeeLookup, setEditSkipInitialFeeLookup] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingTransaction, setDeletingTransaction] = useState(null)
+  const [deletingBusy, setDeletingBusy] = useState(false)
 
   // Helper to calculate total payments already applied to a specific charge
   const getPaymentsForCharge = (charge, allTransactions) => {
@@ -262,6 +285,104 @@ const fetchTransactions = async () => {
     fetchProcedureFee();
     return () => { cancelled = true; };
   }, [procedureForm.provider, procedureForm.code]);
+
+  // Auto-populate amount in Edit Transaction modal when Procedure Code or Provider changes
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isEditDialogOpen) return undefined;
+    if (editSkipInitialFeeLookup) {
+      setEditSkipInitialFeeLookup(false);
+      return undefined;
+    }
+
+    const fetchEditProcedureFee = async () => {
+      if (!editTransactionForm.provider || !editTransactionForm.code) {
+        setEditFeeLookupInfo({ loading: false, source: '', scheduleName: '' });
+        return;
+      }
+
+      setEditFeeLookupInfo({ loading: true, source: '', scheduleName: '' });
+      const result = await ledgerAPI.getProcedureFee(editTransactionForm.provider, editTransactionForm.code);
+      if (cancelled) return;
+
+      if (result && result.amount !== null && result.amount !== undefined) {
+        setEditTransactionForm(prev => ({ ...prev, amount: String(result.amount) }));
+        setEditFeeLookupInfo({
+          loading: false,
+          source: result.source || 'provider_schedule',
+          scheduleName: result.scheduleName || ''
+        });
+      } else {
+        setEditFeeLookupInfo({ loading: false, source: 'none', scheduleName: '' });
+      }
+    };
+
+    fetchEditProcedureFee();
+    return () => { cancelled = true; };
+  }, [editTransactionForm.provider, editTransactionForm.code, isEditDialogOpen]);
+
+  const handleOpenEditTransaction = (t) => {
+    const codeStr = t.code && t.code !== '-' && t.code !== 'PMT' ? String(t.code) : (t.procedureId ? String(t.procedureId) : '');
+    const matchedProc = procedureCodes.find(c => String(c.code) === codeStr);
+    const autoDesc = matchedProc?.description || t.description || '';
+    const dateVal = t.rawDate || (t.date && t.date !== '-' ? new Date(t.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+
+    setEditSkipInitialFeeLookup(true);
+    setEditFeeLookupInfo({ loading: false, source: '', scheduleName: '' });
+    setEditTransactionForm({
+      id: t.id,
+      type: t.type || (t.amount < 0 ? 'PAYMENT' : 'CHARGE'),
+      originalAmount: t.amount,
+      date: dateVal,
+      provider: t.providerId ? String(t.providerId) : '',
+      code: codeStr,
+      description: autoDesc,
+      amount: String(Math.abs(t.amount || 0)),
+      billToInsurance: Boolean(t.billToInsurance)
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const isEditTransactionValid = () => {
+    return (
+      editTransactionForm.date &&
+      editTransactionForm.code &&
+      editTransactionForm.provider &&
+      editTransactionForm.amount !== '' &&
+      parseFloat(editTransactionForm.amount) > 0
+    );
+  };
+
+  const handleUpdateTransactionSubmit = async () => {
+    if (!editTransactionForm.id || !isEditTransactionValid() || savingEdit) return;
+    setSavingEdit(true);
+    const result = await ledgerAPI.updateTransaction(editTransactionForm.id, editTransactionForm);
+    setSavingEdit(false);
+
+    if (result.success) {
+      setIsEditDialogOpen(false);
+      await fetchTransactions();
+      onPaymentChanged?.();
+    } else {
+      alert('Failed to update transaction: ' + result.error);
+    }
+  };
+
+  const handleConfirmDeleteTransaction = async () => {
+    if (!deletingTransaction || deletingBusy) return;
+    setDeletingBusy(true);
+    const result = await ledgerAPI.deleteTransaction(deletingTransaction.id);
+    setDeletingBusy(false);
+
+    if (result.success) {
+      setDeletingTransaction(null);
+      await fetchTransactions();
+      onPaymentChanged?.();
+    } else {
+      alert('Failed to delete transaction: ' + result.error);
+    }
+  };
 
   // Handle payment submission
   const handlePaymentSubmit = async () => {
@@ -491,12 +612,12 @@ const fetchTransactions = async () => {
                 Payment
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Enter Payment</DialogTitle>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4 py-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Payment Date <span className="text-red-500">*</span></Label>
                     <Input 
@@ -568,7 +689,7 @@ const fetchTransactions = async () => {
                   </div>
                 </div>
 
-                <div className="space-y-2 col-span-2">
+                <div className="space-y-2">
                   <Label>Allocation Method</Label>
                   <Select
                     value={selectedChargeId || 'auto'}
@@ -603,7 +724,7 @@ const fetchTransactions = async () => {
                       }
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select an allocation method..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -618,7 +739,7 @@ const fetchTransactions = async () => {
                 </div>
 
                 {/* Allocation Section presenting updated charge, claim status, and auto-populated applied column */}
-                <div className="border rounded-lg p-4 mt-2 bg-slate-50">
+                <div className="border rounded-lg p-4 bg-slate-50 overflow-x-auto">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-medium text-sm">Allocation</h4>
                     {isInsuranceMethod && (
@@ -645,13 +766,17 @@ const fetchTransactions = async () => {
                             key={t.id} 
                             className={String(t.id) === selectedChargeId ? 'bg-blue-50/80 font-medium' : blockedByUnsentClaim ? 'opacity-65' : ''}
                           >
-                            <TableCell>{t.date}</TableCell>
-                            <TableCell>{t.code}</TableCell>
-                            <TableCell>
+                            <TableCell className="whitespace-nowrap">{t.date}</TableCell>
+                            <TableCell className="whitespace-nowrap">{t.code}</TableCell>
+                            <TableCell className="whitespace-nowrap">
                               {t.hasSubmittedClaim ? (
                                 <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
                                   <CheckCircle2 className="w-3 h-3 mr-1" />
                                   {t.claimStatus || 'Submitted'}
+                                </Badge>
+                              ) : t.billToInsurance === false ? (
+                                <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-200 text-xs">
+                                  Self-Pay
                                 </Badge>
                               ) : (
                                 <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
@@ -660,7 +785,7 @@ const fetchTransactions = async () => {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell className="text-slate-900 font-medium">
+                            <TableCell className="text-slate-900 font-medium whitespace-nowrap">
                               ₱{t.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                             </TableCell>
                             <TableCell>
@@ -706,12 +831,15 @@ const fetchTransactions = async () => {
                   </div>
                 )}
 
-                <Button 
-                  onClick={handlePaymentSubmit}
-                  disabled={!isPaymentFormValid()}
-                >
-                  Post Payment
-                </Button>
+                <div className="flex justify-end pt-2">
+                  <Button 
+                    className="w-full sm:w-auto"
+                    onClick={handlePaymentSubmit}
+                    disabled={!isPaymentFormValid()}
+                  >
+                    Post Payment
+                  </Button>
+                </div>
               </div>
             </DialogContent>
           </Dialog>
@@ -877,18 +1005,19 @@ const fetchTransactions = async () => {
                 <TableHead>Provider</TableHead>
                 <TableHead>Claim Status</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     No transactions found
                   </TableCell>
                 </TableRow>
@@ -926,6 +1055,10 @@ const fetchTransactions = async () => {
                           >
                             {t.claimStatus}
                           </Badge>
+                        ) : t.billToInsurance === false ? (
+                          <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 text-xs">
+                            Self-Pay
+                          </Badge>
                         ) : (
                           <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
                             Not Sent
@@ -936,6 +1069,32 @@ const fetchTransactions = async () => {
                         {t.amount < 0 ? "(" : ""}₱{Math.abs(t.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                         {t.amount < 0 ? ")" : ""}
                       </TableCell>
+                      <TableCell className="text-right">
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-600 hover:text-blue-600 hover:bg-blue-50"
+                            title="Edit transaction"
+                            aria-label="Edit transaction"
+                            onClick={() => handleOpenEditTransaction(t)}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            title="Delete transaction"
+                            aria-label="Delete transaction"
+                            onClick={() => setDeletingTransaction(t)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                   
@@ -945,6 +1104,168 @@ const fetchTransactions = async () => {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Edit Transaction Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+        if (!savingEdit) setIsEditDialogOpen(open)
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Ledger Transaction</DialogTitle>
+            <DialogDescription>
+              Update the date, procedure code, and provider. Description and amount automatically update based on your selection.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label>Date <span className="text-red-500">*</span></Label>
+              <Input
+                type="date"
+                value={editTransactionForm.date}
+                onChange={(e) => setEditTransactionForm(prev => ({ ...prev, date: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Provider <span className="text-red-500">*</span></Label>
+              <Select
+                value={editTransactionForm.provider ? String(editTransactionForm.provider) : ''}
+                onValueChange={(value) => setEditTransactionForm(prev => ({ ...prev, provider: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  {providers.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Procedure Code <span className="text-red-500">*</span></Label>
+              <Select
+                value={editTransactionForm.code ? String(editTransactionForm.code) : ''}
+                onValueChange={(val) => {
+                  const selected = procedureCodes.find(c => String(c.code) === String(val));
+                  const autoDesc = selected?.description || `Procedure #${val}`;
+                  setEditTransactionForm(prev => ({
+                    ...prev,
+                    code: val,
+                    description: autoDesc
+                  }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Procedure Code" />
+                </SelectTrigger>
+                <SelectContent>
+                  {procedureCodes.length > 0 ? (
+                    procedureCodes.map((item) => (
+                      <SelectItem key={item.code} value={String(item.code)}>
+                        {item.description && item.description !== String(item.code)
+                          ? `${item.code} - ${item.description}`
+                          : item.code}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="none" disabled>
+                      No procedures found
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Description (Auto-populated from Code)</Label>
+              <Input
+                readOnly
+                className="bg-slate-50"
+                placeholder="Procedure description..."
+                value={editTransactionForm.description}
+              />
+            </div>
+
+            {editTransactionForm.type !== 'PAYMENT' && editTransactionForm.originalAmount >= 0 && (
+              <div className="flex items-center justify-between py-2">
+                <Label>Bill to Insurance</Label>
+                <Switch
+                  checked={editTransactionForm.billToInsurance}
+                  onCheckedChange={(checked) => setEditTransactionForm(prev => ({ ...prev, billToInsurance: checked }))}
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Amount <span className="text-red-500">*</span></Label>
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-muted-foreground">₱</span>
+                <Input
+                  className="pl-7"
+                  placeholder={editFeeLookupInfo.loading ? "Loading fee..." : "0.00"}
+                  type="number"
+                  step="0.01"
+                  value={editTransactionForm.amount}
+                  onChange={(e) => setEditTransactionForm(prev => ({ ...prev, amount: e.target.value }))}
+                />
+              </div>
+              {editFeeLookupInfo.loading && (
+                <p className="text-xs text-muted-foreground">Looking up fee schedule rate...</p>
+              )}
+              {!editFeeLookupInfo.loading && editFeeLookupInfo.source === 'provider_schedule' && (
+                <p className="text-xs text-blue-600">
+                  Auto-filled from provider&apos;s fee schedule{editFeeLookupInfo.scheduleName ? ` (${editFeeLookupInfo.scheduleName})` : ''}.
+                </p>
+              )}
+              {!editFeeLookupInfo.loading && editFeeLookupInfo.source === 'standard_schedule' && (
+                <p className="text-xs text-muted-foreground">
+                  Auto-filled from clinic fee schedule{editFeeLookupInfo.scheduleName ? ` (${editFeeLookupInfo.scheduleName})` : ''}.
+                </p>
+              )}
+              {!editFeeLookupInfo.loading && editFeeLookupInfo.source === 'none' && editTransactionForm.provider && editTransactionForm.code && (
+                <p className="text-xs text-amber-600">
+                  No rate found in the provider&apos;s fee schedule for this procedure. You can enter the amount manually.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" disabled={savingEdit} onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateTransactionSubmit} disabled={!isEditTransactionValid() || savingEdit}>
+                {savingEdit ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Transaction Confirmation Dialog */}
+      <Dialog open={deletingTransaction !== null} onOpenChange={(open) => {
+        if (!open && !deletingBusy) setDeletingTransaction(null)
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Ledger Transaction</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-semibold text-slate-900">{deletingTransaction?.description}</span> ({deletingTransaction?.date}) for <span className="font-semibold text-slate-900">₱{Math.abs(deletingTransaction?.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" disabled={deletingBusy} onClick={() => setDeletingTransaction(null)}>
+              Cancel
+            </Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" disabled={deletingBusy} onClick={handleConfirmDeleteTransaction}>
+              {deletingBusy ? 'Deleting...' : 'Delete Transaction'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

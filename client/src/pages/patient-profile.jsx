@@ -122,7 +122,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
   const [upcomingAppointments, setUpcomingAppointments] = useState([])
   const [pastAppointments, setPastAppointments] = useState([])
   const [claimableRecords, setClaimableRecords] = useState([])
-  const [selectedClaimId, setSelectedClaimId] = useState(null)
+  const [selectedClaimIds, setSelectedClaimIds] = useState([])
   const [patientClaims, setPatientClaims] = useState([])
   const [updatingClaimId, setUpdatingClaimId] = useState(null)
   const [claimError, setClaimError] = useState("")
@@ -540,7 +540,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
 
   const handleOpenClaimDialog = async () => {
     setClaimError("")
-    setSelectedClaimId(null)
+    setSelectedClaimIds([])
     setIsClaimDialogOpen(true)
     setLoadingClaims(true)
     const records = await claimsAPI.getEligibleClaims(patientData.id)
@@ -548,32 +548,55 @@ export function PatientProfile({ patient, onPatientUpdated }) {
     setLoadingClaims(false)
   }
 
+  const toggleClaimSelection = (ledgerId, alreadySent) => {
+    if (alreadySent) return
+    setSelectedClaimIds((prev) =>
+      prev.includes(ledgerId) ? prev.filter((id) => id !== ledgerId) : [...prev, ledgerId]
+    )
+  }
+
+  const toggleSelectAllClaims = () => {
+    const selectableIds = claimableRecords
+      .filter((r) => !r.hasActiveClaim)
+      .map((r) => r.ledger_id)
+    if (selectableIds.length === 0) return
+
+    const allSelected = selectableIds.every((id) => selectedClaimIds.includes(id))
+    setSelectedClaimIds(allSelected ? [] : selectableIds)
+  }
+
   const handleSendClaimSubmit = async () => {
-    if (!selectedClaimId) return
+    if (!selectedClaimIds || selectedClaimIds.length === 0) return
     setClaimError("")
 
-    const selectedRecord = claimableRecords.find((r) => r.ledger_id === selectedClaimId)
-    if (!selectedRecord) return
-
-    if (selectedRecord.hasActiveClaim) {
-      setClaimError("A claim has already been submitted for this charge.")
+    const selectedRecords = claimableRecords.filter(
+      (r) => selectedClaimIds.includes(r.ledger_id) && !r.hasActiveClaim
+    )
+    if (selectedRecords.length === 0) {
+      setClaimError("Please select at least one unsent procedure transaction.")
       return
     }
 
-    const insuranceId = selectedRecord.patients?.insurance_id || null
-
-    const result = await claimsAPI.submitClaim({
-      ledger_id: selectedRecord.ledger_id,
+    const fallbackPlanId = insurancePlans?.[0]?.insuranceId || null
+    const payloads = selectedRecords.map((record) => ({
+      ledger_id: record.ledger_id,
       patient_id: patientData.id,
-      insurance_id: insuranceId,
-    })
+      insurance_id: record.patients?.insurance_id || fallbackPlanId,
+    }))
+
+    const result = await claimsAPI.submitClaims(payloads)
 
     if (result.success) {
       setIsClaimDialogOpen(false)
-      setSelectedClaimId(null)
+      setSelectedClaimIds([])
       await refreshPatientClaims(patientData.id)
       setClaimsRefreshKey((prev) => prev + 1)
-      showBanner("success", "Insurance claim submitted successfully.")
+      showBanner(
+        "success",
+        result.submittedCount > 1
+          ? `${result.submittedCount} insurance claims submitted successfully.`
+          : "Insurance claim submitted successfully."
+      )
     } else {
       setClaimError(result.error || "Failed to submit claim.")
     }
@@ -1399,8 +1422,11 @@ export function PatientProfile({ patient, onPatientUpdated }) {
                             <Shield className="w-5 h-5" />
                           </div>
                           <div>
-                            <p className="text-xs text-slate-400">Plan</p>
-                            <p className="font-semibold text-sm text-slate-900">{plan.carrier}</p>
+                            <p className="text-xs text-slate-400">Carrier / Plan</p>
+                            <p className="font-semibold text-sm text-slate-900">
+                              {plan.carrier}
+                              {plan.planName && plan.planName !== plan.carrier ? ` — ${plan.planName}` : ""}
+                            </p>
                           </div>
                         </div>
                         <div>
@@ -1660,7 +1686,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
         onOpenChange={(open) => {
           setIsClaimDialogOpen(open)
           if (!open) {
-            setSelectedClaimId(null)
+            setSelectedClaimIds([])
             setClaimError("")
           }
         }}
@@ -1684,7 +1710,24 @@ export function PatientProfile({ patient, onPatientUpdated }) {
               <Table>
                 <TableHeader className="bg-slate-100">
                   <TableRow>
-                    <TableHead className="w-12 text-center">Att.</TableHead>
+                    <TableHead className="w-12 text-center">
+                      {(() => {
+                        const selectable = claimableRecords.filter((r) => !r.hasActiveClaim)
+                        const allChecked =
+                          selectable.length > 0 &&
+                          selectable.every((r) => selectedClaimIds.includes(r.ledger_id))
+                        return (
+                          <input
+                            type="checkbox"
+                            aria-label="Select all eligible claims"
+                            className="w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
+                            disabled={loadingClaims || selectable.length === 0}
+                            checked={allChecked}
+                            onChange={toggleSelectAllClaims}
+                          />
+                        )
+                      })()}
+                    </TableHead>
                     <TableHead>Patient</TableHead>
                     <TableHead>Service Date</TableHead>
                     <TableHead>Created On</TableHead>
@@ -1705,33 +1748,40 @@ export function PatientProfile({ patient, onPatientUpdated }) {
                   ) : claimableRecords.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                        No pending charges available for claims.
+                        No insurance-billable procedure charges available for claims.
                       </TableCell>
                     </TableRow>
                   ) : (
                     claimableRecords.map((record) => {
                       const alreadySent = Boolean(record.hasActiveClaim)
+                      const isSelected = selectedClaimIds.includes(record.ledger_id)
+                      const carrierLabel =
+                        record.patients?.insurance_plans?.carrier?.name ||
+                        insurancePlans?.[0]?.carrier ||
+                        "No Carrier"
                       return (
                         <TableRow
                           key={record.ledger_id}
-                          className={alreadySent ? "bg-slate-50/70 opacity-80" : "cursor-pointer"}
-                          onClick={() => {
-                            if (!alreadySent) setSelectedClaimId(record.ledger_id)
-                          }}
+                          className={
+                            alreadySent
+                              ? "bg-slate-50/70 opacity-80"
+                              : isSelected
+                                ? "bg-blue-50/60 cursor-pointer"
+                                : "cursor-pointer"
+                          }
+                          onClick={() => toggleClaimSelection(record.ledger_id, alreadySent)}
                         >
-                          <TableCell className="text-center">
+                          <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               className="w-4 h-4 cursor-pointer disabled:cursor-not-allowed"
                               disabled={alreadySent}
-                              checked={selectedClaimId === record.ledger_id}
-                              onChange={() => {
-                                if (!alreadySent) setSelectedClaimId(record.ledger_id)
-                              }}
+                              checked={isSelected}
+                              onChange={() => toggleClaimSelection(record.ledger_id, alreadySent)}
                             />
                           </TableCell>
                           <TableCell className="font-medium">
-                            {record.patients?.full_name || "None"}
+                            {record.patients?.full_name || patientData.name || "None"}
                           </TableCell>
                           <TableCell>
                             {record.date ? new Date(record.date).toLocaleDateString() : "None"}
@@ -1747,9 +1797,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
                               : record.description || "None"}
                           </TableCell>
                           <TableCell>{record.providers?.name || "None"}</TableCell>
-                          <TableCell>
-                            {record.patients?.insurance_plans?.carrier?.name || "No Carrier"}
-                          </TableCell>
+                          <TableCell>{carrierLabel}</TableCell>
                           <TableCell>
                             {record.claimStatus ? (
                               <Badge
@@ -1787,13 +1835,22 @@ export function PatientProfile({ patient, onPatientUpdated }) {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
-            <Button variant="outline" onClick={() => setIsClaimDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSendClaimSubmit} disabled={!selectedClaimId}>
-              Send Claim
-            </Button>
+          <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t">
+            <span className="text-xs text-muted-foreground">
+              {selectedClaimIds.length > 0
+                ? `${selectedClaimIds.length} procedure transaction(s) selected`
+                : "Select one or more procedure transactions to send claims"}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsClaimDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSendClaimSubmit} disabled={selectedClaimIds.length === 0}>
+                {selectedClaimIds.length > 1
+                  ? `Send Claims (${selectedClaimIds.length})`
+                  : "Send Claim"}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
