@@ -18,107 +18,60 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 export const messagesAPI = {
   
-  // 1. Get Conversations (List of patients with their last message)
-  // UPDATED: Uses Session to get facilityId automatically
   async getConversations() {
-    try {
-      const facilityId = Session.getFacilityId();
-      
-      if (!facilityId) {
-        console.warn("getConversations: No facilityId found in Session");
-        return [];
+    const facilityId = Session.getFacilityId();
+    const { data: patients, error: patientsError } = await supabase
+      .from('patients')
+      .select('patient_id, profile_id, full_name, first_name, middle_name, last_name')
+      .eq('facility_id', facilityId);
+
+    if (patientsError) throw patientsError;
+    if (!patients.length) return [];
+
+    const profileIds = [...new Set(patients.map(patient => patient.profile_id).filter(Boolean))];
+    const [messageResult, profileResult] = await Promise.all([
+      supabase.from('messages')
+        .select('patient_id, content, created_at, is_read, sender_type')
+        .in('patient_id', patients.map(patient => patient.patient_id))
+        .order('created_at', { ascending: false }),
+      profileIds.length ? supabase.from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', profileIds) : { data: [] },
+    ]);
+
+    const latestMessages = new Map();
+    for (const message of messageResult.data || []) {
+      if (!latestMessages.has(message.patient_id)) latestMessages.set(message.patient_id, message);
+    }
+
+    const profiles = new Map((profileResult.data || []).map(profile => [profile.id, profile]));
+    return patients.map(patient => {
+      const lastMessage = latestMessages.get(patient.patient_id);
+      const profile = profiles.get(patient.profile_id);
+      const structuredName = [patient.first_name, patient.middle_name, patient.last_name].filter(Boolean).join(' ');
+      const patientName = (patient.full_name !== 'Unknown' && patient.full_name?.trim())
+        || structuredName || profile?.full_name?.trim() || 'Unknown Patient';
+      const rawTimestamp = lastMessage?.created_at || '';
+      let timestamp = '';
+      if (rawTimestamp) {
+        const minutes = Math.floor((Date.now() - Date.parse(rawTimestamp)) / 60000);
+        if (minutes < 1) timestamp = 'Just now';
+        else if (minutes < 60) timestamp = `${minutes} min ago`;
+        else if (minutes < 1440) timestamp = `${Math.floor(minutes / 60)} hours ago`;
+        else timestamp = `${Math.floor(minutes / 1440)} days ago`;
       }
 
-      // Step 1: Get all patients linked to this facility
-      const { data: facilityPatients, error: patientsError } = await supabase
-        .from('patients')
-        .select('patient_id')
-        .eq('facility_id', facilityId);
-
-      if (patientsError) throw patientsError;
-
-      const validPatientIds = facilityPatients.map(p => p.patient_id);
-
-      if (validPatientIds.length === 0) return [];
-
-      // Step 2: Fetch messages ONLY for these patients
-      const { data: messages, error } = await supabase
-        .from('messages')
-        .select(`
-          id,
-          patient_id,
-          content,
-          created_at,
-          is_read,
-          sender_type
-        `)
-        .in('patient_id', validPatientIds)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Group by patient_id to get the latest message for each conversation
-      const conversationMap = new Map();
-      const activePatientIds = new Set();
-
-      messages.forEach(msg => {
-        if (!conversationMap.has(msg.patient_id)) {
-          conversationMap.set(msg.patient_id, msg);
-          activePatientIds.add(msg.patient_id);
-        }
-      });
-
-      if (activePatientIds.size === 0) return [];
-
-      // Fetch details for these active patients
-      const { data: patients, error: detailsError } = await supabase
-        .from('patients')
-        .select(`
-          patient_id,
-          profiles ( full_name, avatar_url )
-        `)
-        .in('patient_id', Array.from(activePatientIds));
-
-      if (detailsError) throw detailsError;
-
-      // Combine data
-      const conversations = patients.map(p => {
-        const lastMsg = conversationMap.get(p.patient_id);
-        const profile = p.profiles;
-        
-        // Calculate relative time (simple version)
-        const date = new Date(lastMsg.created_at);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMins / 60);
-        const diffDays = Math.floor(diffHours / 24);
-
-        let timestamp = '';
-        if (diffMins < 1) timestamp = 'Just now';
-        else if (diffMins < 60) timestamp = `${diffMins} min ago`;
-        else if (diffHours < 24) timestamp = `${diffHours} hours ago`;
-        else timestamp = `${diffDays} days ago`;
-
-        return {
-          id: p.patient_id,
-          patientName: profile?.full_name || 'Unknown Patient',
-          avatar: profile?.avatar_url || null,
-          initials: (profile?.full_name || 'U').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase(),
-          lastMessage: lastMsg.content,
-          timestamp: timestamp,
-          unread: !lastMsg.is_read && lastMsg.sender_type === 'patient',
-          rawTimestamp: lastMsg.created_at // For sorting if needed
-        };
-      });
-
-      // Sort by newest message
-      return conversations.sort((a, b) => new Date(b.rawTimestamp) - new Date(a.rawTimestamp));
-
-    } catch (error) {
-      console.error("Get Conversations Error:", error);
-      return [];
-    }
+      return {
+        id: patient.patient_id,
+        patientName,
+        avatar: profile?.avatar_url || null,
+        initials: patientName.split(/\s+/).slice(0, 2).map(name => name[0]).join('').toUpperCase(),
+        lastMessage: lastMessage?.content || '',
+        timestamp,
+        unread: lastMessage?.sender_type === 'patient' && !lastMessage.is_read,
+        rawTimestamp,
+      };
+    }).sort((a, b) => b.rawTimestamp.localeCompare(a.rawTimestamp) || a.patientName.localeCompare(b.patientName));
   },
 
   // 2. Get Messages for a specific conversation
@@ -142,7 +95,7 @@ export const messagesAPI = {
 
     } catch (error) {
       console.error("Get Messages Error:", error);
-      return [];
+      throw error;
     }
   },
 

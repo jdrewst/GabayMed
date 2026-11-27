@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Image, RefreshControl } from 'react-native';
-import { ArrowLeft, Search } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Image, RefreshControl, useWindowDimensions } from 'react-native';
+import { ArrowLeft, Hospital, MessageSquare, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ConversationView } from '../components/conversation-view';
 import MessagesAPI from '../services/messagesApi';
@@ -12,12 +12,16 @@ export function MessagesPage({ onBack }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [loadError, setLoadError] = useState(false);
+  const wide = useWindowDimensions().width >= 760;
+
   const fetchConversations = async () => {
     try {
       const data = await MessagesAPI.getConversations();
       setConversations(data);
-    } catch (error) {
-      console.error("Failed to load conversations", error);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -40,20 +44,25 @@ export function MessagesPage({ onBack }) {
     c.lastMessage.toLowerCase().includes(searchText.toLowerCase())
   );
 
-  if (selectedConversation) {
-    const conv = conversations.find((c) => c.id === selectedConversation);
-    return (
-      <ConversationView
-        conversationId={selectedConversation} // Pass the patient_id as conversationId
-        name={conv?.name || ""}
-        avatar={conv?.avatar || ""}
-        onBack={() => {
-          setSelectedConversation(null);
-          fetchConversations(); // Refresh list on back to update unread counts/last message
-        }}
-      />
-    );
-  }
+  const conversation = conversations.find(c => c.id === selectedConversation);
+  const chat = conversation ? (
+    <ConversationView
+      key={conversation.id}
+      conversationId={conversation.id}
+      name={conversation.name}
+      avatar={conversation.avatar}
+      embedded={wide}
+      onSent={message => setConversations(previous => previous.map(item => item.id === conversation.id
+        ? { ...item, lastMessage: message.text, timestamp: 'Just now', unread: false }
+        : item))}
+      onBack={wide ? undefined : () => {
+        setSelectedConversation(null);
+        fetchConversations();
+      }}
+    />
+  ) : null;
+
+  if (!wide && chat) return chat;
 
   return (
     <View style={styles.container}>
@@ -67,78 +76,98 @@ export function MessagesPage({ onBack }) {
         <Text style={styles.headerTitle}>Messages</Text>
       </LinearGradient>
 
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputWrapper}>
-          <Search size={20} color="#9ca3af" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search conversations"
-            placeholderTextColor="#9ca3af"
-            value={searchText}
-            onChangeText={setSearchText}
-          />
+      <View style={styles.workspace}>
+        <View style={[styles.listPane, wide && styles.listPaneWide]}>
+        <View style={styles.searchContainer}>
+          <Text style={styles.listHeading}>Hospitals &amp; clinics</Text>
+          <View style={styles.searchInputWrapper}>
+            <Search size={20} color="#9ca3af" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search hospitals and clinics"
+              accessibilityLabel="Search hospitals and clinics"
+              placeholderTextColor="#9ca3af"
+              value={searchText}
+              onChangeText={setSearchText}
+            />
+          </View>
         </View>
-      </View>
 
-      {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#0ea5e9" />
-        </View>
-      ) : (
-        <ScrollView 
-          style={styles.conversationsList}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {filteredConversations.length === 0 ? (
-            <View style={styles.centerContainer}>
-              <Text style={styles.emptyText}>No messages yet.</Text>
-            </View>
-          ) : (
-            filteredConversations.map((conv) => (
-              <TouchableOpacity
-                key={conv.id}
-                onPress={() => setSelectedConversation(conv.id)}
-                style={styles.conversationItem}
-              >
-                <View style={styles.avatar}>
-                  {conv.avatar ? (
-                    <Image source={{ uri: conv.avatar }} style={styles.avatarImage} />
-                  ) : (
-                    <Text style={styles.avatarText}>{conv.initials}</Text>
+        {loading ? (
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="large" color="#0ea5e9" />
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.conversationsList}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+          >
+            {filteredConversations.length === 0 ? (
+              <View style={styles.centerContainer}>
+                <Text style={styles.emptyText}>{loadError ? 'Unable to load conversations. Pull down to retry.' : searchText ? 'No matching hospitals or clinics.' : 'No linked hospitals or clinics yet.'}</Text>
+              </View>
+            ) : (
+              filteredConversations.map((conv) => (
+                <TouchableOpacity
+                  key={conv.id}
+                  onPress={() => setSelectedConversation(conv.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedConversation === conv.id }}
+                  style={[styles.conversationItem, selectedConversation === conv.id && styles.selectedItem]}
+                >
+                  <View style={styles.avatar}>
+                    {conv.avatar ? (
+                      <Image source={{ uri: conv.avatar }} style={styles.avatarImage} />
+                    ) : (
+                      <Hospital size={22} color="#0369a1" />
+                    )}
+                  </View>
+                  <View style={styles.conversationContent}>
+                    <View style={styles.conversationHeader}>
+                      <Text style={styles.conversationName}>{conv.name}</Text>
+                      <Text style={styles.conversationTime}>{conv.timestamp}</Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.conversationMessage,
+                        conv.unread && styles.conversationMessageUnread
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {conv.lastMessage || 'Start a conversation'}
+                    </Text>
+                  </View>
+                  {conv.unread && (
+                    <View style={styles.unreadBadge}>
+                      <View style={styles.unreadDot} />
+                    </View>
                   )}
-                </View>
-                <View style={styles.conversationContent}>
-                  <View style={styles.conversationHeader}>
-                    <Text style={styles.conversationName}>{conv.name}</Text>
-                    <Text style={styles.conversationTime}>{conv.timestamp}</Text>
-                  </View>
-                  <Text 
-                    style={[
-                      styles.conversationMessage, 
-                      conv.unread && styles.conversationMessageUnread
-                    ]} 
-                    numberOfLines={1}
-                  >
-                    {conv.unread ? '• ' : ''}{conv.lastMessage}
-                  </Text>
-                </View>
-                {conv.unread && (
-                  <View style={styles.unreadBadge}>
-                    <View style={styles.unreadDot} />
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))
-          )}
-        </ScrollView>
-      )}
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        )}
+        </View>
+        {wide && <View style={styles.chatPane}>{chat || (
+          <View style={styles.centerContainer}>
+            <MessageSquare size={26} color="#0369a1" />
+            <Text style={styles.emptyText}>Select a hospital or clinic to open its chat.</Text>
+          </View>
+        )}</View>}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  workspace: { flex: 1, flexDirection: 'row', backgroundColor: '#f8fafc' },
+  listPane: { flex: 1, backgroundColor: '#fff' },
+  listPaneWide: { flex: 0, width: 320, borderRightWidth: 1, borderRightColor: '#e2e8f0' },
+  chatPane: { flex: 1 },
+  listHeading: { fontSize: 16, fontWeight: '700', color: '#0f172a', marginBottom: 12 },
+  selectedItem: { backgroundColor: '#eff6ff', borderColor: '#93c5fd' },
   container: {
     flex: 1,
     backgroundColor: '#fff',
@@ -196,8 +225,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
     gap: 12,
   },
   avatar: {
@@ -212,11 +244,6 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
-  },
-  avatarText: {
-    color: '#0ea5e9',
-    fontSize: 18,
-    fontWeight: '600',
   },
   conversationContent: {
     flex: 1,

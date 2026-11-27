@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
-import { ArrowLeft, Send, Phone, Video } from 'lucide-react-native';
-import { GradientButton, GradientView } from './ui/gradient-button';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
+import { ArrowLeft, Send, Hospital } from 'lucide-react-native';
+import { GradientView } from './ui/gradient-button';
 import MessagesAPI from '../services/messagesApi';
 
-export function ConversationView({ conversationId, name, avatar, onBack }) {
+export function ConversationView({ conversationId, name, avatar, onBack, onSent, embedded }) {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState(false);
   const scrollViewRef = useRef();
 
   useEffect(() => {
@@ -38,19 +39,19 @@ export function ConversationView({ conversationId, name, avatar, onBack }) {
     const textToSend = message.trim();
     setMessage(''); // Clear input immediately for better UX
     setSending(true);
+    setSendError(false);
 
     try {
       const result = await MessagesAPI.sendMessage(conversationId, textToSend);
       if (result.success) {
-        // Add message locally or reload
+        onSent(result.message);
         await loadMessages();
       } else {
-        console.error("Failed to send:", result.error);
-        // Ideally show an error toast here, and maybe restore the text to input
+        setSendError(true);
         setMessage(textToSend); 
       }
-    } catch (error) {
-      console.error("Send error:", error);
+    } catch {
+      setSendError(true);
       setMessage(textToSend);
     } finally {
       setSending(false);
@@ -64,25 +65,17 @@ export function ConversationView({ conversationId, name, avatar, onBack }) {
     >
       <GradientView
         colors={['#66BAFF', '#83BFF0']}
-        style={styles.header}
+        style={[styles.header, embedded && styles.embeddedHeader]}
       >
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+        {onBack && <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityLabel="Back to conversations" accessibilityRole="button">
           <ArrowLeft size={20} color="#fff" />
-        </TouchableOpacity>
+        </TouchableOpacity>}
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{name.charAt(0)}</Text>
+          {avatar ? <Image source={{ uri: avatar }} style={styles.profileImage} /> : <Hospital size={22} color="#0369a1" />}
         </View>
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>{name}</Text>
-          <Text style={styles.headerStatus}>Online</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Phone size={20} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Video size={20} color="#fff" />
-          </TouchableOpacity>
+          <Text style={styles.headerStatus}>Clinic conversation</Text>
         </View>
       </GradientView>
 
@@ -96,6 +89,7 @@ export function ConversationView({ conversationId, name, avatar, onBack }) {
           style={styles.messagesContainer}
           onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
         >
+          {messages.length === 0 && <Text style={styles.emptyThread}>No messages yet. Send a message to start the conversation.</Text>}
           {messages.map((msg) => (
             <View
               key={msg.id}
@@ -131,32 +125,40 @@ export function ConversationView({ conversationId, name, avatar, onBack }) {
         </ScrollView>
       )}
 
+      {sendError && <Text accessibilityRole="alert" style={styles.sendError}>Message could not be sent. Try again.</Text>}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
           placeholder="Type a message..."
           value={message}
           onChangeText={setMessage}
+          accessibilityLabel="Message"
+          editable={!sending}
           multiline
         />
-        <GradientButton 
+        <TouchableOpacity
           onPress={handleSend}
-          colors={['#66BAFF', '#83BFF0']}
-          style={styles.sendButton}
-          disabled={sending}
+          style={[styles.sendButton, !message.trim() && !sending && styles.sendDisabled]}
+          disabled={sending || !message.trim()}
+          accessibilityLabel="Send message"
+          accessibilityRole="button"
         >
           {sending ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
             <Send size={20} color="#fff" />
           )}
-        </GradientButton>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  embeddedHeader: { paddingTop: 12 },
+  profileImage: { width: '100%', height: '100%', borderRadius: 20 },
+  emptyThread: { textAlign: 'center', color: '#475569', margin: 24 },
+  sendError: { color: '#b91c1c', marginHorizontal: 16, marginTop: 8 },
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',
@@ -191,11 +193,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarText: {
-    color: '#0ea5e9',
-    fontSize: 16,
-    fontWeight: '600',
-  },
   headerInfo: {
     flex: 1,
   },
@@ -207,17 +204,6 @@ const styles = StyleSheet.create({
   headerStatus: {
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.8)',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  headerActionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   messagesContainer: {
     flex: 1,
@@ -291,7 +277,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: '#0369a1',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  sendDisabled: { opacity: 0.45 },
 });

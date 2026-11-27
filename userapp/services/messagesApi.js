@@ -83,11 +83,23 @@ const MessagesAPI = {
         }
       });
 
+      for (const patient of patientRecords) {
+        if (processedPatientIds.has(patient.patient_id) || !patient.facilities) continue;
+        conversations.push({
+          id: patient.patient_id,
+          facilityId: patient.facility_id,
+          name: patient.facilities.name || 'Unknown Facility',
+          avatar: patient.facilities.image_url || null,
+          lastMessage: '',
+          timestamp: '',
+          unread: false,
+        });
+      }
       return conversations;
 
     } catch (error) {
       console.error("Get Conversations Error:", error);
-      return [];
+      throw error;
     }
   },
 
