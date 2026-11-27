@@ -34,7 +34,7 @@ async function insertMessageOnce(table, record) {
       .abortSignal(controller.signal)
       .maybeSingle();
 
-    // Fallback if branch_key or client-supplied id column is not present on messages table
+    // Fallback if branch_key is not present on messages table
     if (
       result.error &&
       (result.error.code === 'PGRST204' || /branch_key/i.test(result.error.message || ''))
@@ -46,6 +46,36 @@ async function insertMessageOnce(table, record) {
         .select()
         .abortSignal(controller.signal)
         .maybeSingle();
+    }
+
+    // Fallback if database `id` column is integer/bigint serial and rejects client-generated UUID `id`
+    if (
+      result.error &&
+      record.id !== undefined &&
+      (result.error.code === '22P02' ||
+        result.error.code === '42804' ||
+        /invalid input syntax|bigint|integer|uuid/i.test(result.error.message || ''))
+    ) {
+      const { id, ...withoutId } = record;
+      result = await supabase
+        .from(table)
+        .insert(withoutId)
+        .select()
+        .abortSignal(controller.signal)
+        .maybeSingle();
+
+      if (
+        result.error &&
+        (result.error.code === 'PGRST204' || /branch_key/i.test(result.error.message || ''))
+      ) {
+        const { branch_key, ...withoutIdAndBranch } = withoutId;
+        result = await supabase
+          .from(table)
+          .insert(withoutIdAndBranch)
+          .select()
+          .abortSignal(controller.signal)
+          .maybeSingle();
+      }
     }
 
     const { content, ...identity } = record;
