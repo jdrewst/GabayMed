@@ -15,6 +15,7 @@ const getEnv = (key) => {
 const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL');
 const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY');
 const supabase = createClient(supabaseUrl, supabaseKey);
+let subscriptionId = 0;
 
 const branchAliases = new Map([['MAIN', 'main'], ['QC', 'branch-qc'], ['KAT', 'branch-katipunan']]);
 
@@ -98,6 +99,89 @@ async function insertMessageOnce(table, record) {
 }
 
 export const messagesAPI = {
+  // Count unread incoming messages (patient + inter-branch) for the active branch
+  async getUnreadCount(branchKey = 'main') {
+    try {
+      let facilityId = Session.getFacilityId();
+      if (!facilityId) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) {
+            const { data: acct } = await supabase
+              .from('users')
+              .select('facility_id')
+              .eq('id', user.id)
+              .maybeSingle();
+            if (acct?.facility_id) {
+              facilityId = acct.facility_id;
+              Session.setFacilityId(facilityId);
+            }
+          }
+        } catch (_) {}
+      }
+      if (!facilityId) return 0;
+
+      const effectiveBranch = branchKey || 'main';
+      const { data: facilityPatients } = await supabase
+        .from('patients')
+        .select('patient_id')
+        .eq('facility_id', facilityId);
+
+      const patientIds = (facilityPatients || []).map(p => p.patient_id);
+      let patientUnread = 0;
+
+      if (patientIds.length > 0) {
+        const { data: unreadMsgs } = await supabase
+          .from('messages')
+          .select('id, branch_key')
+          .in('patient_id', patientIds)
+          .eq('sender_type', 'patient')
+          .eq('is_read', false);
+
+        patientUnread = (unreadMsgs || []).filter(m =>
+          !m.branch_key ? effectiveBranch === 'main' : m.branch_key === effectiveBranch
+        ).length;
+      }
+
+      let branchUnread = 0;
+      try {
+        const { count } = await supabase
+          .from('branch_messages')
+          .select('id', { head: true, count: 'exact' })
+          .eq('recipient_branch', effectiveBranch)
+          .eq('is_read', false);
+        branchUnread = count || 0;
+      } catch (_) {}
+
+      return patientUnread + branchUnread;
+    } catch {
+      return 0;
+    }
+  },
+
+  // Watch unread message changes in real time + polling fallback for Header badge
+  watchUnread(branchKey, refresh) {
+    let active = true;
+    const reload = () => {
+      if (active && typeof refresh === 'function') refresh();
+    };
+
+    const channel = supabase
+      .channel(`clinic-unread-messages:${++subscriptionId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => reload())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_messages' }, () => reload())
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') reload();
+      });
+
+    const interval = setInterval(reload, 8000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      void supabase.removeChannel(channel);
+    };
+  },
+
   // Helper: Resolve all sibling patient_ids belonging to the same user profile in this facility
   async _resolvePatientGroupIds(patientId) {
     try {
