@@ -65,6 +65,11 @@ DECLARE
   details text;
   status_label text;
   calendar_date date;
+  facility_name text;
+  branch_name text;
+  patient_name text;
+  appointment_type text;
+  appointment_when text;
 BEGIN
   IF TG_OP = 'UPDATE' AND to_jsonb(NEW) = to_jsonb(OLD) THEN RETURN NEW; END IF;
 
@@ -85,7 +90,40 @@ BEGIN
       status_label := initcap(replace(NEW.status::text, '_', ' '));
       title := CASE WHEN TG_OP = 'INSERT' AND upper(NEW.status::text) = 'PENDING' THEN 'New appointment request'
                     WHEN TG_OP = 'INSERT' THEN 'Appointment created' ELSE 'Appointment status updated' END;
-      details := format('Appointment %s (%s).', NEW.appointment_id, coalesce(status_label, 'status unavailable'));
+      SELECT facility.name, location.name, nullif(btrim(patient.full_name), '')
+        INTO facility_name, branch_name, patient_name
+      FROM public.facilities AS facility
+      LEFT JOIN public.clinic_branches AS location
+        ON location.facility_id = hospital AND location.branch_id::text = branch
+      LEFT JOIN public.patients AS patient
+        ON patient.facility_id = hospital AND patient.patient_id = NEW.patient_id
+      WHERE facility.facility_id = hospital;
+
+      branch_name := coalesce(branch_name, CASE branch
+        WHEN 'main' THEN 'Main'
+        WHEN 'branch-qc' THEN 'QC Branch'
+        WHEN 'branch-katipunan' THEN 'Katipunan Branch'
+        ELSE 'Clinic branch'
+      END);
+
+      -- Preserve the service selected during mobile booking if its procedure is a fallback.
+      appointment_type := nullif(btrim(substring(NEW.notes from '(?i)^\s*Service:\s*([^.]+)\.')), '');
+      IF appointment_type IS NULL THEN
+        SELECT nullif(btrim(procedure.description), '') INTO appointment_type
+        FROM public.procedures AS procedure WHERE procedure.procedure_id = NEW.procedure_id;
+      END IF;
+
+      IF calendar_date IS NOT NULL THEN
+        appointment_when := to_char(calendar_date, 'FMMonth FMDD, YYYY');
+        IF NEW.appointment_time IS NOT NULL THEN
+          appointment_when := appointment_when || ' at ' || to_char(calendar_date + NEW.appointment_time::time, 'FMHH12:MI AM');
+        END IF;
+      END IF;
+
+      details := concat_ws(chr(10),
+        concat_ws(' | ', coalesce(appointment_type, 'General consultation'), patient_name),
+        format('%s (%s)', coalesce(facility_name, 'Hospital'), branch_name),
+        concat_ws(' | ', appointment_when, coalesce(status_label, 'Status unavailable')));
     WHEN 'fee_schedules' THEN
       hospital := (event_row ->> 'facility_id')::uuid;
       category := 'fees';

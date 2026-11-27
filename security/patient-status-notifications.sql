@@ -33,6 +33,10 @@ DECLARE
   next_status text := upper(btrim(NEW.status::text));
   recipient uuid;
   facility_name text;
+  branch_key text;
+  branch_name text;
+  appointment_type text;
+  appointment_when text;
 BEGIN
   IF next_status IS NULL OR next_status = '' OR next_status IS NOT DISTINCT FROM previous_status THEN
     RETURN NEW;
@@ -55,10 +59,37 @@ BEGIN
   END IF;
 
   IF TG_TABLE_NAME = 'appointments' THEN
+    branch_key := coalesce(to_jsonb(NEW) ->> 'branch_key', 'main');
+    SELECT location.name INTO branch_name
+    FROM public.clinic_branches AS location
+    WHERE location.facility_id = NEW.facility_id AND location.branch_id::text = branch_key;
+
+    branch_name := coalesce(branch_name, CASE branch_key
+      WHEN 'main' THEN 'Main'
+      WHEN 'branch-qc' THEN 'QC Branch'
+      WHEN 'branch-katipunan' THEN 'Katipunan Branch'
+      ELSE 'Clinic branch'
+    END);
+
+    -- Mobile bookings record the selected service even when the procedure is a generic fallback.
+    appointment_type := nullif(btrim(substring(NEW.notes from '(?i)^\s*Service:\s*([^.]+)\.')), '');
+    IF appointment_type IS NULL THEN
+      SELECT nullif(btrim(procedure.description), '') INTO appointment_type
+      FROM public.procedures AS procedure WHERE procedure.procedure_id = NEW.procedure_id;
+    END IF;
+
+    IF NEW.appointment_date IS NOT NULL THEN
+      appointment_when := ' on ' || to_char(NEW.appointment_date, 'FMMonth FMDD, YYYY');
+      IF NEW.appointment_time IS NOT NULL THEN
+        appointment_when := appointment_when || ' at ' || to_char(NEW.appointment_date + NEW.appointment_time::time, 'FMHH12:MI AM');
+      END IF;
+    END IF;
+
     INSERT INTO public.patient_status_notifications (profile_id, category, title, message)
     VALUES (recipient, 'appointment',
       CASE WHEN next_status = 'CONFIRMED' THEN 'Appointment confirmed' ELSE 'Appointment cancelled' END,
-      format('Your appointment at %s was %s.', facility_name,
+      format('Your %s appointment at %s (%s)%s was %s.',
+        coalesce(appointment_type, 'general consultation'), facility_name, branch_name, coalesce(appointment_when, ''),
         CASE WHEN next_status = 'CONFIRMED' THEN 'confirmed' ELSE 'cancelled' END));
   ELSE
     INSERT INTO public.patient_status_notifications (profile_id, category, title, message)

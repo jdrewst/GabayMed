@@ -211,7 +211,7 @@ export function Header() {
                                   <Badge className="bg-blue-500 hover:bg-blue-600 text-xs h-4 px-1">New</Badge>
                                 )}
                               </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">
+                              <p className="mt-0.5 whitespace-pre-line break-words text-xs text-muted-foreground">
                                 {notification.message}
                               </p>
                               <p className="text-xs text-muted-foreground mt-1">

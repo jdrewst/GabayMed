@@ -132,7 +132,7 @@ export function Notifications() {
                                 <X className="w-4 h-4" />
                               </Button>
                             </div>
-                            <p className="text-sm text-muted-foreground mb-2">
+                            <p className="mb-2 whitespace-pre-line break-words text-sm leading-relaxed text-muted-foreground">
                               {notification.message}
                             </p>
                             <div className="flex items-center justify-between">
