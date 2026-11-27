@@ -44,6 +44,18 @@ function isChargeBilledToInsurance(row) {
   return true;
 }
 
+function isInsurancePaymentRow(p) {
+  const method = String(p.payment_method || p.code || '').toLowerCase().trim();
+  if (method === 'ins_check' || method === 'ins_eft' || method === 'insurance_check' || method === 'insurance_eft') {
+    return true;
+  }
+  const desc = String(p.description || '');
+  if (/Insurance\s+(?:Check|EFT|ETF)/i.test(desc)) {
+    return true;
+  }
+  return false;
+}
+
 function resolveProcedureLabel(apt) {
   if (apt?.procedures?.name) return apt.procedures.name;
   if (apt?.procedures?.description) return apt.procedures.description;
@@ -362,6 +374,27 @@ const FacilitiesAPI = {
         }
       });
 
+      let fallbackInsurancePlan = patientRows.find(p => p.insurance_plans)?.insurance_plans || null;
+      if (!fallbackInsurancePlan && patientIds.length > 0) {
+        const { data: piRow } = await supabase
+          .from('patient_insurance')
+          .select(`
+            insurance_id,
+            insurance_plans (
+              insurance_id,
+              plan_name,
+              max_limit,
+              deductible,
+              copay_amount,
+              copay_type
+            )
+          `)
+          .in('patient_id', patientIds)
+          .limit(1)
+          .maybeSingle();
+        fallbackInsurancePlan = piRow?.insurance_plans || null;
+      }
+
       const computeDistribution = (facilityFilter = null) => {
         const facCharges = facilityFilter
           ? billingCharges.filter(c => c.facilityId === facilityFilter)
@@ -382,46 +415,69 @@ const FacilitiesAPI = {
           return { totalBalance: 0, insurancePortion: 0, patientPortion: 0 };
         }
 
-        let insuranceEligibleBalance = 0;
-        let selfPayBalance = 0;
+        // 1. Separate gross charges into Insurance-eligible vs Self-Pay
+        let grossInsuranceEligibleCharges = 0;
+        let grossSelfPayCharges = 0;
 
         facCharges.forEach(c => {
           if (c.billToInsurance) {
-            insuranceEligibleBalance += c.remainingBalance;
+            grossInsuranceEligibleCharges += c.amount;
           } else {
-            selfPayBalance += c.remainingBalance;
+            grossSelfPayCharges += c.amount;
+          }
+        });
+
+        // 2. Separate payments into Insurance Payments (ins_check / ins_eft) vs Patient Payments (all other methods)
+        const facPayments = facLedger.filter(
+          entry => String(entry.type || '').toUpperCase() === 'PAYMENT' || parseFloat(entry.total_bill_amount) < 0
+        );
+        let totalInsurancePayments = 0;
+        let totalPatientPayments = 0;
+
+        facPayments.forEach(p => {
+          const payAmt = Math.abs(parseFloat(p.total_bill_amount) || 0);
+          if (isInsurancePaymentRow(p)) {
+            totalInsurancePayments += payAmt;
+          } else {
+            totalPatientPayments += payAmt;
           }
         });
 
         const plan =
           (facilityFilter && planByFacility[facilityFilter]) ||
-          patientRows.find(p => p.insurance_plans)?.insurance_plans ||
+          fallbackInsurancePlan ||
           null;
 
-        let insurancePortion = 0;
-        let patientPortion = totalBal;
-
-        if (plan && insuranceEligibleBalance > 0) {
+        // 3. Compute initial gross Insurance Portion and gross Patient Portion before payments
+        let grossInsurancePortion = 0;
+        if (plan && grossInsuranceEligibleCharges > 0) {
           const maxLimit = parseFloat(plan.max_limit || 0);
           const deductible = parseFloat(plan.deductible || 0);
 
-          if (insuranceEligibleBalance <= deductible) {
-            insurancePortion = 0;
+          if (grossInsuranceEligibleCharges <= deductible) {
+            grossInsurancePortion = 0;
           } else {
-            const afterDeductible = insuranceEligibleBalance - deductible;
-            insurancePortion = maxLimit > 0 ? Math.min(afterDeductible, maxLimit) : afterDeductible;
+            const afterDeductible = grossInsuranceEligibleCharges - deductible;
+            grossInsurancePortion = maxLimit > 0 ? Math.min(afterDeductible, maxLimit) : afterDeductible;
           }
-
-          insurancePortion = Math.min(insurancePortion, insuranceEligibleBalance, totalBal);
-          const insurancePatientShare = Math.max(0, insuranceEligibleBalance - insurancePortion);
-          patientPortion = selfPayBalance + insurancePatientShare;
-        } else {
-          insurancePortion = 0;
-          patientPortion = totalBal;
+          grossInsurancePortion = Math.min(grossInsurancePortion, grossInsuranceEligibleCharges);
         }
 
+        const grossPatientPortion =
+          grossSelfPayCharges + Math.max(0, grossInsuranceEligibleCharges - grossInsurancePortion);
+
+        // 4. Deduct Insurance Payments from Insurance Portion first, and Patient Payments from Patient Portion first
+        const insAfterInsPay = Math.max(0, grossInsurancePortion - totalInsurancePayments);
+        const excessInsPay = Math.max(0, totalInsurancePayments - grossInsurancePortion);
+
+        const patAfterPatPay = Math.max(0, grossPatientPortion - totalPatientPayments - excessInsPay);
+        const excessPatPay = Math.max(0, (totalPatientPayments + excessInsPay) - grossPatientPortion);
+
+        const insurancePortion = Math.max(0, insAfterInsPay - excessPatPay);
+        const patientPortion = patAfterPatPay;
+
         return {
-          totalBalance: totalBal,
+          totalBalance: Math.max(0, insurancePortion + patientPortion),
           insurancePortion,
           patientPortion,
         };

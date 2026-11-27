@@ -172,7 +172,9 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
     } else if (balances.length > 0) {
       setSelectedProcedure('auto');
       const totalUnpaid = balances.reduce((s, b) => s + Number(b.remainingBalance || b.amount || 0), 0);
-      setPaymentAmount(totalUnpaid > 0 ? String(Number(totalUnpaid.toFixed(2))) : '');
+      const defaultPayAmt =
+        activeDistribution?.patientPortion > 0 ? activeDistribution.patientPortion : totalUnpaid;
+      setPaymentAmount(defaultPayAmt > 0 ? String(Number(defaultPayAmt.toFixed(2))) : '');
     } else {
       setSelectedProcedure('auto');
       setPaymentAmount('');
@@ -800,8 +802,12 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                         (s, b) => s + Number(b.remainingBalance || b.amount || 0),
                         0
                       );
-                      if (!paymentAmount && totalUnpaid > 0) {
-                        setPaymentAmount(String(Number(totalUnpaid.toFixed(2))));
+                      const defaultPayAmt =
+                        activeDistribution?.patientPortion > 0
+                          ? activeDistribution.patientPortion
+                          : totalUnpaid;
+                      if (!paymentAmount && defaultPayAmt > 0) {
+                        setPaymentAmount(String(Number(defaultPayAmt.toFixed(2))));
                       }
                     }}
                     style={[
@@ -815,8 +821,10 @@ export function MyFacilities({ onOpenMessages, onOpenNotifications, onOpenProfil
                         selectedProcedure === 'auto' && styles.selectOptionTextActive,
                       ]}
                     >
-                      Auto-allocate (Oldest First) — Total: {formatPeso(
-                        balances.reduce((s, b) => s + Number(b.remainingBalance || b.amount || 0), 0)
+                      Auto-allocate (Oldest First) — Patient Portion: {formatPeso(
+                        activeDistribution?.patientPortion > 0
+                          ? activeDistribution.patientPortion
+                          : balances.reduce((s, b) => s + Number(b.remainingBalance || b.amount || 0), 0)
                       )}
                     </Text>
                   </TouchableOpacity>

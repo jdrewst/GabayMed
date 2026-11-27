@@ -385,48 +385,50 @@ export const ledgerAPI = {
         return true;
       };
 
+      // Helper to determine if a payment is an Insurance Payment (Insurance Check / Insurance EFT)
+      // Any payment that is NOT insurance check or insurance EFT is a patient payment and deducts from Patient Portion.
+      const isInsurancePayment = (p) => {
+        const method = String(p.payment_method || p.code || '').toLowerCase().trim();
+        if (method === 'ins_check' || method === 'ins_eft' || method === 'insurance_check' || method === 'insurance_eft') {
+          return true;
+        }
+        const desc = String(p.description || '');
+        if (/Insurance\s+(?:Check|EFT|ETF)/i.test(desc)) {
+          return true;
+        }
+        return false;
+      };
+
       const charges = rows.filter(t => String(t.type || '').toUpperCase() === 'CHARGE' || parseFloat(t.total_bill_amount || 0) > 0);
       const payments = rows.filter(t => String(t.type || '').toUpperCase() === 'PAYMENT' || parseFloat(t.total_bill_amount || 0) < 0);
 
-      // Calculate remaining unpaid balance per charge, separating Insurance-billed vs Self-Pay charges
-      let insuranceEligibleBalance = 0;
-      let selfPayBalance = 0;
-      let allocatedPaymentsTotal = 0;
+      // 1. Separate gross charges into Insurance-eligible vs Self-Pay
+      let grossInsuranceEligibleCharges = 0;
+      let grossSelfPayCharges = 0;
 
       for (const charge of charges) {
         const chargeAmt = Math.abs(parseFloat(charge.total_bill_amount || 0));
-        const paidOnCharge = payments
-          .filter(p => {
-            if (p.description && p.description.includes(`[Charge #${charge.ledger_id}]`)) return true;
-            if (charge.appointment_id && p.appointment_id && String(p.appointment_id) === String(charge.appointment_id) &&
-                (!charge.procedure_id || !p.procedure_id || String(p.procedure_id) === String(charge.procedure_id))) return true;
-            if (!charge.appointment_id && charge.procedure_id && p.procedure_id && String(p.procedure_id) === String(charge.procedure_id)) return true;
-            return false;
-          })
-          .reduce((sum, p) => sum + Math.abs(parseFloat(p.total_bill_amount || 0)), 0);
-
-        allocatedPaymentsTotal += Math.min(chargeAmt, paidOnCharge);
-        const remaining = Math.max(0, chargeAmt - paidOnCharge);
-
         if (isBilledToInsurance(charge)) {
-          insuranceEligibleBalance += remaining;
+          grossInsuranceEligibleCharges += chargeAmt;
         } else {
-          // Not "Bill to Insurance" -> goes directly to Patient Portion
-          selfPayBalance += remaining;
+          grossSelfPayCharges += chargeAmt;
         }
       }
 
-      // Deduct any unallocated general payments from selfPayBalance first, then insuranceEligibleBalance
-      const totalPayments = payments.reduce((sum, p) => sum + Math.abs(parseFloat(p.total_bill_amount || 0)), 0);
-      let unallocatedPayment = Math.max(0, totalPayments - allocatedPaymentsTotal);
-      if (unallocatedPayment > 0) {
-        const deductSelf = Math.min(selfPayBalance, unallocatedPayment);
-        selfPayBalance -= deductSelf;
-        unallocatedPayment -= deductSelf;
-        insuranceEligibleBalance = Math.max(0, insuranceEligibleBalance - unallocatedPayment);
+      // 2. Separate payments into Insurance Payments vs Patient Payments
+      let totalInsurancePayments = 0;
+      let totalPatientPayments = 0;
+
+      for (const p of payments) {
+        const payAmt = Math.abs(parseFloat(p.total_bill_amount || 0));
+        if (isInsurancePayment(p)) {
+          totalInsurancePayments += payAmt;
+        } else {
+          totalPatientPayments += payAmt;
+        }
       }
 
-      // 2. Fetch the patient's insurance plan details
+      // 3. Fetch the patient's insurance plan details
       let plan = null;
       const { data: patientData } = await supabase
         .from('patients')
@@ -454,32 +456,36 @@ export const ledgerAPI = {
         plan = planRow || null;
       }
 
-      let insurancePortion = 0;
-      let patientPortion = totalBalance;
-
-      // 3. Apply the distribution logic ONLY to insurance-billed charges; self-pay charges always go to patientPortion
-      if (plan && insuranceEligibleBalance > 0) {
+      // 4. Compute initial gross Insurance Portion and gross Patient Portion before payments
+      let grossInsurancePortion = 0;
+      if (plan && grossInsuranceEligibleCharges > 0) {
         const maxLimit = parseFloat(plan.max_limit || 0);
         const deductible = parseFloat(plan.deductible || 0);
 
-        if (insuranceEligibleBalance <= deductible) {
-          insurancePortion = 0;
+        if (grossInsuranceEligibleCharges <= deductible) {
+          grossInsurancePortion = 0;
         } else {
-          const afterDeductible = insuranceEligibleBalance - deductible;
-          insurancePortion = maxLimit > 0 ? Math.min(afterDeductible, maxLimit) : afterDeductible;
+          const afterDeductible = grossInsuranceEligibleCharges - deductible;
+          grossInsurancePortion = maxLimit > 0 ? Math.min(afterDeductible, maxLimit) : afterDeductible;
         }
-
-        // Prevent insurance portion from exceeding eligible balance or total balance
-        insurancePortion = Math.min(insurancePortion, insuranceEligibleBalance, totalBalance);
-        const insurancePatientShare = Math.max(0, insuranceEligibleBalance - insurancePortion);
-        patientPortion = selfPayBalance + insurancePatientShare;
-      } else {
-        insurancePortion = 0;
-        patientPortion = totalBalance;
+        grossInsurancePortion = Math.min(grossInsurancePortion, grossInsuranceEligibleCharges);
       }
 
+      const grossPatientPortion =
+        grossSelfPayCharges + Math.max(0, grossInsuranceEligibleCharges - grossInsurancePortion);
+
+      // 5. Deduct Insurance Payments from Insurance Portion first, and Patient Payments from Patient Portion first
+      const insAfterInsPay = Math.max(0, grossInsurancePortion - totalInsurancePayments);
+      const excessInsPay = Math.max(0, totalInsurancePayments - grossInsurancePortion);
+
+      const patAfterPatPay = Math.max(0, grossPatientPortion - totalPatientPayments - excessInsPay);
+      const excessPatPay = Math.max(0, (totalPatientPayments + excessInsPay) - grossPatientPortion);
+
+      const insurancePortion = Math.max(0, insAfterInsPay - excessPatPay);
+      const patientPortion = patAfterPatPay;
+
       return {
-        totalBalance,
+        totalBalance: Math.max(0, insurancePortion + patientPortion),
         insurancePortion,
         patientPortion
       };
