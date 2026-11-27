@@ -29,7 +29,7 @@ CREATE POLICY patient_status_notifications_mark_read ON public.patient_status_no
 CREATE OR REPLACE FUNCTION public.notify_patient_status_change()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
-  previous_status text := upper(btrim(OLD.status::text));
+  previous_status text := CASE WHEN TG_OP = 'UPDATE' THEN upper(btrim(OLD.status::text)) END;
   next_status text := upper(btrim(NEW.status::text));
   recipient uuid;
   facility_name text;
@@ -42,7 +42,8 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF TG_TABLE_NAME = 'appointments' AND next_status NOT IN ('CONFIRMED', 'CANCELLED', 'CANCELED') THEN
+  IF TG_TABLE_NAME = 'appointments' AND next_status NOT IN ('CONFIRMED', 'CANCELLED', 'CANCELED')
+    AND NOT (TG_OP = 'INSERT' AND next_status = 'PENDING') THEN
     RETURN NEW;
   END IF;
 
@@ -87,10 +88,12 @@ BEGIN
 
     INSERT INTO public.patient_status_notifications (profile_id, category, title, message)
     VALUES (recipient, 'appointment',
-      CASE WHEN next_status = 'CONFIRMED' THEN 'Appointment confirmed' ELSE 'Appointment cancelled' END,
+      CASE next_status WHEN 'PENDING' THEN 'Appointment pending confirmation'
+        WHEN 'CONFIRMED' THEN 'Appointment confirmed' ELSE 'Appointment cancelled' END,
       format('Your %s appointment at %s (%s)%s was %s.',
         coalesce(appointment_type, 'general consultation'), facility_name, branch_name, coalesce(appointment_when, ''),
-        CASE WHEN next_status = 'CONFIRMED' THEN 'confirmed' ELSE 'cancelled' END));
+        CASE next_status WHEN 'PENDING' THEN 'scheduled and is pending confirmation'
+          WHEN 'CONFIRMED' THEN 'confirmed' ELSE 'cancelled' END));
   ELSE
     INSERT INTO public.patient_status_notifications (profile_id, category, title, message)
     VALUES (recipient, 'claim', 'Digital claim status updated',
@@ -103,7 +106,7 @@ $$;
 REVOKE ALL ON FUNCTION public.notify_patient_status_change() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS notify_patient_appointment_status ON public.appointments;
-CREATE TRIGGER notify_patient_appointment_status AFTER UPDATE OF status ON public.appointments
+CREATE TRIGGER notify_patient_appointment_status AFTER INSERT OR UPDATE OF status ON public.appointments
   FOR EACH ROW EXECUTE FUNCTION public.notify_patient_status_change();
 
 DROP TRIGGER IF EXISTS notify_patient_claim_status ON public.claims;
