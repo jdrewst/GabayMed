@@ -29,6 +29,8 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
   const endRef = useRef(null)
+  const pendingSend = useRef(null)
+  const sendInProgress = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -71,20 +73,31 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
   async function send(event) {
     event.preventDefault()
     const text = draft.trim()
-    if (!text || loading || historyError || sending) return
+    if (!text || loading || sendInProgress.current) return
+    sendInProgress.current = true
     setSending(true)
     setSendError(false)
     try {
+      if (pendingSend.current?.text !== text) {
+        const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+        bytes[6] = (bytes[6] & 15) | 64
+        bytes[8] = (bytes[8] & 63) | 128
+        const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")
+        const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+        pendingSend.current = { text, id }
+      }
+      const { id } = pendingSend.current
       const result = otherBranchKey
-        ? await messagesAPI.sendBranchMessage(branchKey, otherBranchKey, text)
-        : await messagesAPI.sendMessage(conversation.id, branchKey, text)
-      if (!result.success) throw new Error("Message could not be sent")
+        ? await messagesAPI.sendBranchMessage(branchKey, otherBranchKey, text, id)
+        : await messagesAPI.sendMessage(conversation.id, branchKey, text, id)
       setMessages(previous => previous.some(message => message.id === result.message.id) ? previous : [...previous, result.message])
+      pendingSend.current = null
       setDraft("")
       if (!otherBranchKey) onSent(conversation.id, text)
     } catch {
       setSendError(true)
     } finally {
+      sendInProgress.current = false
       setSending(false)
     }
   }
@@ -125,10 +138,10 @@ function Chat({ conversation, branchKey, onBack, onSent }) {
         <div ref={endRef} />
       </div>
       <form onSubmit={send} className="border-t border-slate-200 p-4 sm:px-6">
-        {sendError && <p role="alert" className="mb-2 text-sm text-red-700">Message could not be sent. Try again.</p>}
+        {sendError && <p role="alert" className="mb-2 text-sm text-red-700">Could not confirm delivery. Check your connection and try again.</p>}
         <div className="flex gap-2">
-          <Input aria-label="Message" placeholder="Type a message…" value={draft} onChange={event => setDraft(event.target.value)} maxLength={4000} disabled={loading || historyError || sending} />
-          <Button type="submit" aria-label="Send message" size="icon" className="shrink-0 bg-sky-700 hover:bg-sky-800" disabled={loading || historyError || sending || !draft.trim()}>
+          <Input aria-label="Message" placeholder="Type a message…" value={draft} onChange={event => setDraft(event.target.value)} maxLength={4000} disabled={loading || sending} />
+          <Button type="submit" aria-label="Send message" size="icon" className="shrink-0 bg-sky-700 hover:bg-sky-800" disabled={loading || sending || !draft.trim()}>
             <Send className="size-4" />
           </Button>
         </div>

@@ -53,7 +53,7 @@ GRANT EXECUTE ON FUNCTION public.is_clinic_message_branch(uuid, text) TO authent
 
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.messages FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT (patient_id, sender_type, content, branch_key), UPDATE (is_read) ON public.messages TO authenticated;
+GRANT SELECT, INSERT (id, patient_id, sender_type, content, branch_key), UPDATE (is_read) ON public.messages TO authenticated;
 
 DROP POLICY IF EXISTS messages_participant_select ON public.messages;
 CREATE POLICY messages_participant_select ON public.messages FOR SELECT TO authenticated
@@ -107,7 +107,7 @@ GRANT EXECUTE ON FUNCTION public.can_message_hospital_branches(uuid, text, text)
 
 ALTER TABLE public.branch_messages ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.branch_messages FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT (facility_id, sender_branch, recipient_branch, content), UPDATE (is_read) ON public.branch_messages TO authenticated;
+GRANT SELECT, INSERT (id, facility_id, sender_branch, recipient_branch, content), UPDATE (is_read) ON public.branch_messages TO authenticated;
 
 DROP POLICY IF EXISTS branch_messages_staff_select ON public.branch_messages;
 CREATE POLICY branch_messages_staff_select ON public.branch_messages FOR SELECT TO authenticated

@@ -3,6 +3,24 @@ import Session from './session';
 
 let subscriptionId = 0;
 
+async function insertMessageOnce(table, record) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const result = await supabase.from(table).insert(record).select().abortSignal(controller.signal).single();
+    // An earlier request may have committed before its response reached the sender.
+    const { content, ...identity } = record;
+    const { data, error } = result.error?.code === '23505'
+      ? await supabase.from(table).select().match(identity).abortSignal(controller.signal).single()
+      : result;
+    if (error) throw error;
+    if (data?.content !== content) throw new Error('Message could not be verified.');
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MessagesAPI = {
   subscribeToMessages(refresh, { patientId, branchKey, includeReadUpdates = false } = {}) {
     let active = true;
@@ -147,34 +165,19 @@ const MessagesAPI = {
   },
 
   // 3. Send a Message
-  async sendMessage(patientId, branchKey, text) {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert([{
-          patient_id: patientId,
-          branch_key: branchKey,
-          content: text,
-          sender_type: 'patient' // Always 'patient' from user app
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      return {
-        success: true,
-        message: {
-          id: data.id,
-          sender: data.sender_type,
-          text: data.content,
-          timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      };
-    } catch (error) {
-      console.error("Send Message Error:", error);
-      return { success: false, error: error.message };
-    }
+  async sendMessage(patientId, branchKey, text, id) {
+    const data = await insertMessageOnce('messages', {
+      id, patient_id: patientId, branch_key: branchKey, content: text, sender_type: 'patient',
+    });
+    return {
+      success: true,
+      message: {
+        id: data.id,
+        sender: data.sender_type,
+        text: data.content,
+        timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    };
   },
 
   // 4. Mark messages as read

@@ -4,6 +4,17 @@ import { ArrowLeft, Send, Hospital } from 'lucide-react-native';
 import { GradientView } from './ui/gradient-button';
 import MessagesAPI from '../services/messagesApi';
 
+function createMessageId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function ConversationView({ patientId, branchKey, name, branchName, onBack, onSent, embedded }) {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
@@ -13,6 +24,8 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
   const [sendError, setSendError] = useState(false);
   const scrollViewRef = useRef();
   const latestRequest = useRef(0);
+  const pendingSend = useRef(null);
+  const sendInProgress = useRef(false);
 
   const loadMessages = useCallback(async () => {
     const request = ++latestRequest.current;
@@ -35,26 +48,25 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
     [loadMessages, patientId, branchKey]);
 
   const handleSend = async () => {
-    if (!message.trim() || loading || loadError || sending) return;
+    if (!message.trim() || loading || sendInProgress.current) return;
 
     const textToSend = message.trim();
-    setMessage(''); // Clear input immediately for better UX
+    sendInProgress.current = true;
     setSending(true);
     setSendError(false);
 
     try {
-      const result = await MessagesAPI.sendMessage(patientId, branchKey, textToSend);
-      if (result.success) {
-        onSent(result.message);
-        await loadMessages();
-      } else {
-        setSendError(true);
-        setMessage(textToSend); 
-      }
+      if (pendingSend.current?.text !== textToSend) pendingSend.current = { text: textToSend, id: createMessageId() };
+      const result = await MessagesAPI.sendMessage(patientId, branchKey, textToSend, pendingSend.current.id);
+      pendingSend.current = null;
+      setMessage('');
+      setMessages(previous => previous.some(item => item.id === result.message.id) ? previous : [...previous, result.message]);
+      onSent(result.message);
+      void loadMessages();
     } catch {
       setSendError(true);
-      setMessage(textToSend);
     } finally {
+      sendInProgress.current = false;
       setSending(false);
     }
   };
@@ -138,7 +150,7 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
         </ScrollView>
       )}
 
-      {sendError && <Text accessibilityRole="alert" style={styles.sendError}>Message could not be sent. Try again.</Text>}
+      {sendError && <Text accessibilityRole="alert" style={styles.sendError}>Could not confirm delivery. Check your connection and try again.</Text>}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
@@ -147,13 +159,13 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
           onChangeText={setMessage}
           accessibilityLabel="Message"
           maxLength={4000}
-          editable={!loading && !loadError && !sending}
+          editable={!loading && !sending}
           multiline
         />
         <TouchableOpacity
           onPress={handleSend}
           style={[styles.sendButton, !message.trim() && !sending && styles.sendDisabled]}
-          disabled={loading || loadError || sending || !message.trim()}
+          disabled={loading || sending || !message.trim()}
           accessibilityLabel="Send message"
           accessibilityRole="button"
         >

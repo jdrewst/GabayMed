@@ -33,6 +33,24 @@ function mapBranchMessage(row) {
   };
 }
 
+async function insertMessageOnce(table, record) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const result = await supabase.from(table).insert(record).select().abortSignal(controller.signal).single();
+    // An earlier request may have committed before its response reached the sender.
+    const { content, ...identity } = record;
+    const { data, error } = result.error?.code === '23505'
+      ? await supabase.from(table).select().match(identity).abortSignal(controller.signal).single()
+      : result;
+    if (error) throw error;
+    if (data?.content !== content) throw new Error('Message could not be verified.');
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const messagesAPI = {
 
   async getUnreadCount(branchKey) {
@@ -80,15 +98,13 @@ export const messagesAPI = {
     return data.map(mapBranchMessage);
   },
 
-  async sendBranchMessage(branchKey, otherBranchKey, text) {
-    const { data, error } = await supabase.from('branch_messages')
-      .insert({ facility_id: Session.getFacilityId(), sender_branch: branchKey, recipient_branch: otherBranchKey, content: text })
-      .select('id, sender_branch, content, created_at')
-      .single();
-    if (error) throw error;
+  async sendBranchMessage(branchKey, otherBranchKey, text, id) {
+    const data = await insertMessageOnce('branch_messages', {
+      id, facility_id: Session.getFacilityId(), sender_branch: branchKey, recipient_branch: otherBranchKey, content: text,
+    });
     return { success: true, message: mapBranchMessage(data) };
   },
-  
+
   async getConversations(branchKey) {
     const facilityId = Session.getFacilityId();
     const { data: patients, error: patientsError } = await supabase
@@ -173,34 +189,19 @@ export const messagesAPI = {
   },
 
   // 3. Send a Message
-  async sendMessage(patientId, branchKey, text) {
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .insert([{
-          patient_id: patientId,
-          content: text,
-          sender_type: 'staff',
-          branch_key: branchKey
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      return {
-        success: true,
-        message: {
-          id: data.id,
-          sender: data.sender_type,
-          text: data.content,
-          timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      };
-    } catch (error) {
-      console.error("Send Message Error:", error);
-      return { success: false, error: error.message };
-    }
+  async sendMessage(patientId, branchKey, text, id) {
+    const data = await insertMessageOnce('messages', {
+      id, patient_id: patientId, branch_key: branchKey, content: text, sender_type: 'staff',
+    });
+    return {
+      success: true,
+      message: {
+        id: data.id,
+        sender: data.sender_type,
+        text: data.content,
+        timestamp: new Date(data.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    };
   },
 
   // 4. Mark messages as read
