@@ -162,8 +162,8 @@ export function Header() {
                     )}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80">
-                  <div className="flex items-center justify-between px-4 py-3 border-b">
+                <DropdownMenuContent align="end" className="flex max-h-[min(30rem,var(--radix-dropdown-menu-content-available-height))] w-80 flex-col">
+                  <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
                     <div>
                       <h3 className="font-semibold text-sm">Notifications</h3>
                       <p className="text-xs text-muted-foreground">{branchName} ? {unreadCount} unread</p>
@@ -183,7 +183,7 @@ export function Header() {
                       </Button>
                     )}
                   </div>
-                  <div className="max-h-96 overflow-y-auto">
+                  <div className="min-h-0 overflow-y-auto overscroll-y-contain">
                     {actionError && <p role="alert" className="p-3 text-xs text-red-700">Unable to update notifications.</p>}
                     {notifications.length === 0 && <p className="p-3 text-xs text-muted-foreground">
                       {loading ? "Loading notifications..." : error ? "Unable to load notifications." : "No notifications for this branch yet."}
@@ -223,8 +223,8 @@ export function Header() {
                       )
                     })}
                   </div>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild className="justify-center text-center">
+                  <DropdownMenuSeparator className="shrink-0" />
+                  <DropdownMenuItem asChild className="shrink-0 justify-center text-center">
                     <a href="/notifications" className="text-blue-600 text-sm font-medium w-full">
                       View all notifications
                     </a>
