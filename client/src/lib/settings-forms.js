@@ -55,6 +55,7 @@ export function validateSettingsForm(type, form = {}) {
     if (text(form.email) && !validEmail(form.email)) errors.email = 'Enter a valid email, such as branch@clinic.com.'
   }
   if (type === 'procedure') {
+    required('code', 'Procedure code', 50, 1)
     required('description', 'Description', 160, 2)
     required('category', 'Category', 100)
     for (const [key, label] of [['price', 'Base price'], ['officeFee', 'Office fee'], ['phCaseRate', 'PhilHealth case rate']]) numeric(key, label, 0, 9999999999.99)
@@ -72,12 +73,14 @@ export function validateSettingsForm(type, form = {}) {
       if (text(item).length > 160) errors[`equipment.${index}`] = 'Equipment name must be at most 160 characters.'
     }
   }
-  if (type === 'fee') {
+  if (type === 'fee' || type === 'fee-add') {
     required('scheduleName', 'Schedule name')
     const fromDate = String(form.effectiveFrom || '').slice(0, 10)
     const toDate = String(form.effectiveTo || '').slice(0, 10)
     if (!validDate(fromDate)) errors.effectiveFrom = 'Choose a valid start date.'
     if (toDate && (!validDate(toDate) || toDate <= fromDate)) errors.effectiveTo = 'End date must be later than the start date.'
+  }
+  if (type === 'fee' || type === 'fee-edit') {
     const included = (form.procedureFees || []).filter(p => p.included)
     if (!included.length) errors.procedureFees = 'Include at least one procedure.'
     for (const item of included) {
@@ -92,7 +95,7 @@ export function validateSettingsForm(type, form = {}) {
 export function normalizeSettingsForm(type, form = {}) {
   if (type === 'provider') return { name: text(form.name), email: text(form.email).toLowerCase(), role: text(form.role).toUpperCase(), licenseNo: text(form.licenseNo), specialization: text(form.specialization), schedule: Object.fromEntries(Object.entries(form.schedule || {}).sort()) }
   if (type === 'branch') return { name: text(form.name), abbreviation: text(form.abbreviation).toUpperCase(), address: text(form.address), contact_num: text(form.contact_num).replace(/[\s().-]/g, ''), email: text(form.email).toLowerCase(), is_active: !!form.is_active }
-  if (type === 'procedure') return { description: text(form.description), category: text(form.category), price: number(form.price), officeFee: number(form.officeFee), phCaseRate: number(form.phCaseRate), duration: number(form.duration) }
+  if (type === 'procedure') return { code: text(form.code ?? form.id), description: text(form.description), category: text(form.category), price: number(form.price), officeFee: number(form.officeFee), phCaseRate: number(form.phCaseRate), duration: number(form.duration) }
   if (type === 'room') return { branch_id: text(form.branch_id), code: text(form.code).toUpperCase(), name: text(form.name), floor_location: text(form.floor_location), patient_capacity: number(form.patient_capacity), turnaround_minutes: number(form.turnaround_minutes), status: form.status, equipment: list(form.equipment) }
   return { scheduleName: text(form.scheduleName), insuranceId: text(form.insuranceId), effectiveFrom: String(form.effectiveFrom || '').slice(0, 10), effectiveTo: String(form.effectiveTo || '').slice(0, 10), procedureFees: (form.procedureFees || []).filter(p => p.included).map(p => ({ code: String(p.code), price: number(p.newFee ?? p.scheduleFee) })).sort((a, b) => a.code.localeCompare(b.code)) }
 }
@@ -113,7 +116,7 @@ export function settingsChanges(type, before, after) {
     .map(key => ({ field: labels[key] || key, before: display(old[key]), after: display(current[key]),
       ...(optionalFields[type]?.includes(key) && empty(old[key]) ? { action: 'added' }
         : optionalFields[type]?.includes(key) && empty(current[key]) ? { action: 'deleted' } : {}) }))
-  if (type === 'fee') {
+  if (type === 'fee' || type === 'fee-edit') {
     const codes = new Set([...old.procedureFees, ...current.procedureFees].map(p => p.code))
     for (const code of codes) {
       const previous = old.procedureFees.find(p => p.code === code), next = current.procedureFees.find(p => p.code === code)

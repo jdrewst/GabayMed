@@ -1,11 +1,11 @@
-import { useState } from "react"
-import { Plus, ShieldCheck, ArrowLeft } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Plus, ShieldCheck, ArrowLeft, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -16,13 +16,28 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
   const activeCarriersCount = carriers.filter(c => c.status === 'ACTIVE').length
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingCarrierId, setEditingCarrierId] = useState(null)
   const [isAddPlanDialogOpen, setIsAddPlanDialogOpen] = useState(false)
+  const [isEditPlanDialogOpen, setIsEditPlanDialogOpen] = useState(false)
   const [currentTab, setCurrentTab] = useState("basic")
   const [viewMode, setViewMode] = useState("list") // "list" or "manage"
   const [selectedCarrier, setSelectedCarrier] = useState(null)
   const [editingPlan, setEditingPlan] = useState(null)
+  const [deletingCarrier, setDeletingCarrier] = useState(null)
+  const [deletingPlan, setDeletingPlan] = useState(null)
+  const [deletingBusy, setDeletingBusy] = useState(false)
+
+  // Keep selectedCarrier in sync whenever carriers list refreshes
+  useEffect(() => {
+    if (selectedCarrier?.id && Array.isArray(carriers)) {
+      const updated = carriers.find(c => c.id === selectedCarrier.id)
+      if (updated) {
+        setSelectedCarrier(updated)
+      }
+    }
+  }, [carriers])
   
-  // Form Data for New Carrier
+  // Form Data for New / Edited Carrier
   const [formData, setFormData] = useState({
     carrierName: "",
     planName: "",
@@ -37,6 +52,17 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
 
   // Form Data for New Plan
   const [newPlanData, setNewPlanData] = useState({
+    planName: "",
+    renewalMonth: "January",
+    type: "medical",
+    deductible: "",
+    maxLimit: "",
+    coPayAmount: "",
+    coPayType: "fixed"
+  })
+
+  // Form Data for Editing an Existing Plan
+  const [editPlanData, setEditPlanData] = useState({
     planName: "",
     renewalMonth: "January",
     type: "medical",
@@ -103,16 +129,52 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
     }
   }
 
+  const handleOpenAddCarrier = () => {
+    setEditingCarrierId(null)
+    setFormData({
+      carrierName: "",
+      planName: "",
+      streetAddress: "",
+      city: "",
+      province: "",
+      zipCode: "",
+      payerId: "",
+      accreditationNumber: "",
+      expirationDate: ""
+    })
+    setCurrentTab("basic")
+    setIsDialogOpen(true)
+  }
+
+  const handleOpenEditCarrier = (carrier) => {
+    setEditingCarrierId(carrier.id)
+    setFormData({
+      carrierName: carrier.name || "",
+      planName: carrier.type || "",
+      streetAddress: carrier.street_address || carrier.address || "",
+      city: carrier.city || "",
+      province: carrier.province || "",
+      zipCode: String(carrier.zip_code || ""),
+      payerId: carrier.payer_id || "",
+      accreditationNumber: carrier.accreditation_number || "",
+      expirationDate: carrier.accreditation_expiration ? String(carrier.accreditation_expiration).slice(0, 10) : ""
+    })
+    setCurrentTab("basic")
+    setIsDialogOpen(true)
+  }
+
   const handleSaveCarrier = async () => {
     if (!isPhilHealthValid()) {
       alert('Please fill all required fields correctly')
       return
     }
 
-    const result = await POSTGabayAPI.createInsuranceCarrier(formData);
+    const result = editingCarrierId
+      ? await POSTGabayAPI.updateInsuranceCarrier(editingCarrierId, formData)
+      : await POSTGabayAPI.createInsuranceCarrier(formData);
 
     if (result.success) {
-      alert('Carrier saved successfully!');
+      alert(editingCarrierId ? 'Carrier updated successfully!' : 'Carrier saved successfully!');
       
       // Reset form and close dialog
       setFormData({
@@ -126,9 +188,10 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
         accreditationNumber: "",
         expirationDate: ""
       })
+      setEditingCarrierId(null)
       setCurrentTab("basic")
       setIsDialogOpen(false)
-      if (onRefresh) onRefresh(); // Refresh list
+      if (onRefresh) await onRefresh(); // Auto-refresh list immediately
     } else {
       alert('Failed to save carrier: ' + result.error);
     }
@@ -156,9 +219,74 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
         coPayAmount: "",
         coPayType: "fixed"
       });
-      if (onRefresh) onRefresh();
+      if (onRefresh) await onRefresh();
     } else {
       alert('Failed to add plan: ' + result.error);
+    }
+  }
+
+  const handleOpenEditPlan = (plan) => {
+    const planId = plan.insurance_id ?? plan.plan_id ?? plan.id
+    setEditingPlan({ ...plan, id: planId })
+    setEditPlanData({
+      planName: plan.plan_name || "",
+      renewalMonth: plan.renewal_month || "January",
+      type: (plan.type || "medical").toLowerCase(),
+      deductible: plan.deductible != null ? String(plan.deductible) : "",
+      maxLimit: plan.max_limit != null ? String(plan.max_limit) : "",
+      coPayAmount: plan.copay_amount != null ? String(plan.copay_amount) : "",
+      coPayType: plan.copay_type || "fixed"
+    })
+    setIsEditPlanDialogOpen(true)
+  }
+
+  const handleUpdatePlan = async () => {
+    if (!editingPlan?.id || !editPlanData.planName.trim()) {
+      alert('Plan name is required.')
+      return
+    }
+
+    const result = await POSTGabayAPI.updateInsurancePlan(editingPlan.id, editPlanData)
+    if (result.success) {
+      alert('Plan updated successfully!')
+      setIsEditPlanDialogOpen(false)
+      setEditingPlan(null)
+      if (onRefresh) await onRefresh()
+    } else {
+      alert('Failed to update plan: ' + result.error)
+    }
+  }
+
+  const handleConfirmDeleteCarrier = async () => {
+    if (!deletingCarrier || deletingBusy) return
+    setDeletingBusy(true)
+    const result = await POSTGabayAPI.deleteInsuranceCarrier(deletingCarrier.id)
+    setDeletingBusy(false)
+
+    if (result.success) {
+      if (selectedCarrier?.id === deletingCarrier.id) {
+        setSelectedCarrier(null)
+        setViewMode("list")
+      }
+      setDeletingCarrier(null)
+      if (onRefresh) await onRefresh()
+    } else {
+      alert('Failed to delete carrier: ' + result.error)
+    }
+  }
+
+  const handleConfirmDeletePlan = async () => {
+    if (!deletingPlan || deletingBusy) return
+    const planId = deletingPlan.insurance_id ?? deletingPlan.plan_id ?? deletingPlan.id
+    setDeletingBusy(true)
+    const result = await POSTGabayAPI.deleteInsurancePlan(planId)
+    setDeletingBusy(false)
+
+    if (result.success) {
+      setDeletingPlan(null)
+      if (onRefresh) await onRefresh()
+    } else {
+      alert('Failed to delete plan: ' + result.error)
     }
   }
 
@@ -174,6 +302,7 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
       accreditationNumber: "",
       expirationDate: ""
     })
+    setEditingCarrierId(null)
     setCurrentTab("basic")
     setIsDialogOpen(false)
   }
@@ -186,16 +315,19 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
           <h1 className="text-2xl font-bold text-gray-900">Carrier Management</h1>
           <p className="text-muted-foreground">Manage insurance providers and coverage plans</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open)
+          if (!open) setEditingCarrierId(null)
+        }}>
           <DialogTrigger asChild>
-            <Button className="bg-blue-500 hover:bg-blue-600">
+            <Button className="bg-blue-500 hover:bg-blue-600" onClick={handleOpenAddCarrier}>
               <Plus className="w-4 h-4 mr-2" />
               Add Carrier
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Add New Carrier</DialogTitle>
+              <DialogTitle>{editingCarrierId ? "Edit Carrier" : "Add New Carrier"}</DialogTitle>
             </DialogHeader>
             <Tabs value={currentTab} onValueChange={setCurrentTab} className="mt-4">
               <TabsList className="grid w-full grid-cols-3">
@@ -480,7 +612,7 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
               <TableBody>
                 {selectedCarrier.insurance_plans && selectedCarrier.insurance_plans.length > 0 ? (
                   selectedCarrier.insurance_plans.map((plan) => (
-                  <TableRow key={plan.plan_id}>
+                  <TableRow key={plan.insurance_id ?? plan.plan_id}>
                     <TableCell className="font-medium">{plan.plan_name}</TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="bg-gray-100 text-gray-700">
@@ -488,7 +620,18 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm">Edit</Button>
+                      <div className="inline-flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => handleOpenEditPlan(plan)}>Edit</Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => setDeletingPlan(plan)}
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" />
+                          Delete
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -503,6 +646,146 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
             </Table>
           </CardContent>
         </Card>
+
+        {/* Edit Insurance Plan Dialog */}
+        <Dialog open={isEditPlanDialogOpen} onOpenChange={(open) => {
+          setIsEditPlanDialogOpen(open)
+          if (!open) setEditingPlan(null)
+        }}>
+          <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Insurance Plan</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-6 py-4">
+              <div className="space-y-4">
+                <h3 className="font-semibold text-sm">Plan Details</h3>
+                <div className="space-y-2">
+                  <Label>Plan Name <span className="text-red-500">*</span></Label>
+                  <Input
+                    placeholder="e.g. Standard Corporate Plan"
+                    value={editPlanData.planName}
+                    onChange={(e) => setEditPlanData({ ...editPlanData, planName: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Benefit Renewal Month <span className="text-red-500">*</span></Label>
+                    <Select
+                      value={editPlanData.renewalMonth}
+                      onValueChange={(val) => setEditPlanData({ ...editPlanData, renewalMonth: val })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select month" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[
+                          "January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December",
+                        ].map((month) => (
+                          <SelectItem key={month} value={month}>
+                            {month}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Type <span className="text-red-500">*</span></Label>
+                    <Select
+                      value={editPlanData.type}
+                      onValueChange={(val) => setEditPlanData({ ...editPlanData, type: val })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="medical">Medical</SelectItem>
+                        <SelectItem value="dental">Dental</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 border-t pt-4">
+                <h3 className="font-semibold text-sm">Coverage Table & Limits</h3>
+                <p className="text-xs text-muted-foreground">
+                  Define the billing hierarchy and patient responsibility
+                </p>
+
+                <div className="space-y-3 bg-slate-50 p-4 rounded-lg">
+                  <div className="space-y-2">
+                    <Label className="text-sm">Deductible (First Layer) <span className="text-red-500">*</span></Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-muted-foreground">₱</span>
+                      <Input
+                        className="pl-7"
+                        placeholder="0.00"
+                        value={editPlanData.deductible}
+                        onChange={(e) => setEditPlanData({ ...editPlanData, deductible: e.target.value })}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Amount patient must pay before insurance covers
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm">Maximum Limit / LOA (Second Layer) <span className="text-red-500">*</span></Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-muted-foreground">₱</span>
+                      <Input
+                        className="pl-7"
+                        placeholder="0.00"
+                        value={editPlanData.maxLimit}
+                        onChange={(e) => setEditPlanData({ ...editPlanData, maxLimit: e.target.value })}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Maximum amount the insurance will pay</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm">Co-Pay / Co-Insurance <span className="text-red-500">*</span></Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          placeholder="Amount"
+                          value={editPlanData.coPayAmount}
+                          onChange={(e) => setEditPlanData({ ...editPlanData, coPayAmount: e.target.value })}
+                        />
+                      </div>
+                      <Select
+                        value={editPlanData.coPayType}
+                        onValueChange={(val) => setEditPlanData({ ...editPlanData, coPayType: val })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Fixed or %" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed Amount</SelectItem>
+                          <SelectItem value="percent">Percentage (%)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Patient's share of remaining balance after deductible and LOA
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => { setIsEditPlanDialogOpen(false); setEditingPlan(null) }}>
+                  Cancel
+                </Button>
+                <Button className="bg-blue-500" onClick={handleUpdatePlan}>
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
         </div>
       ) : (
         <div className="space-y-6">
@@ -554,16 +837,34 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => {
-                        setSelectedCarrier(carrier)
-                        setViewMode("manage")
-                      }}
-                    >
-                      Manage
-                    </Button>
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleOpenEditCarrier(carrier)}
+                      >
+                        Edit
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          setSelectedCarrier(carrier)
+                          setViewMode("manage")
+                        }}
+                      >
+                        Manage
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => setDeletingCarrier(carrier)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -574,6 +875,46 @@ export function CarrierManagement({ carriers = [], loading = false, onRefresh })
       </Card>
         </div>
       )}
+
+      {/* Delete Carrier Confirmation Dialog */}
+      <Dialog open={deletingCarrier !== null} onOpenChange={(open) => { if (!open && !deletingBusy) setDeletingCarrier(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Carrier</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-semibold text-gray-900">{deletingCarrier?.name}</span> and its associated insurance plans? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" disabled={deletingBusy} onClick={() => setDeletingCarrier(null)}>
+              Cancel
+            </Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" disabled={deletingBusy} onClick={handleConfirmDeleteCarrier}>
+              {deletingBusy ? "Deleting..." : "Delete Carrier"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Insurance Plan Confirmation Dialog */}
+      <Dialog open={deletingPlan !== null} onOpenChange={(open) => { if (!open && !deletingBusy) setDeletingPlan(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Insurance Plan</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-semibold text-gray-900">{deletingPlan?.plan_name}</span>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" disabled={deletingBusy} onClick={() => setDeletingPlan(null)}>
+              Cancel
+            </Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" disabled={deletingBusy} onClick={handleConfirmDeletePlan}>
+              {deletingBusy ? "Deleting..." : "Delete Plan"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

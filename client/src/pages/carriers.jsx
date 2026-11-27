@@ -7,19 +7,21 @@ export default function CarriersPage() {
   const [carriers, setCarriers] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const loadCarriers = async () => {
-      try {
-        setLoading(true)
-        const data = await GabayAPI.getCarriers()
-        setCarriers(data)
-      } catch (error) {
-        console.error("Failed to load carriers:", error)
-      } finally {
-        setLoading(false)
-      }
+  const loadCarriers = async () => {
+    try {
+      setLoading(true)
+      const data = await GabayAPI.getCarriers()
+      setCarriers(data)
+      return data
+    } catch (error) {
+      console.error("Failed to load carriers:", error)
+      return []
+    } finally {
+      setLoading(false)
     }
+  }
 
+  useEffect(() => {
     loadCarriers()
   }, [])
 
@@ -27,8 +29,8 @@ export default function CarriersPage() {
     <div className="min-h-screen bg-[#f9f9f9]">
       <Header />
       <main className="container mx-auto px-6 py-6">
-        {/* Pass the fetched data to the component */}
-        <CarrierManagement carriers={carriers} loading={loading} />
+        {/* Pass the fetched data and refresh callback to the component */}
+        <CarrierManagement carriers={carriers} loading={loading} onRefresh={loadCarriers} />
       </main>
     </div>
   )
