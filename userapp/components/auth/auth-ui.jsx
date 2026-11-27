@@ -134,13 +134,22 @@ export function TextField({ label, required = false, error, secure = false, hint
 /**
  * Interactive Calendar Date Picker Field (no manual text typing required).
  */
-export function DatePickerField({ label, required = false, value = '', onChange, error, style }) {
+export function DatePickerField({
+  label,
+  required = false,
+  value = '',
+  onChange,
+  error,
+  style,
+  placeholder = 'Select date of birth',
+  defaultToToday = false,
+}) {
   const today = new Date();
   const currentYear = today.getFullYear();
 
   const initialParts = /^\d{4}-\d{2}-\d{2}$/.test(value)
     ? value.split('-').map(Number)
-    : [currentYear - 25, today.getMonth() + 1, 1];
+    : [defaultToToday ? currentYear : currentYear - 25, today.getMonth() + 1, 1];
 
   const [open, setOpen] = useState(false);
   const [pickingYear, setPickingYear] = useState(false);
@@ -208,7 +217,7 @@ export function DatePickerField({ label, required = false, value = '', onChange,
         accessibilityLabel={label}
       >
         <Text style={[styles.input, !formattedDisplay && { color: '#94A3B8' }]}>
-          {formattedDisplay || 'Select date of birth'}
+          {formattedDisplay || placeholder}
         </Text>
         <Calendar size={18} color={COLORS.accent} />
       </TouchableOpacity>

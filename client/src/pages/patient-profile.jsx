@@ -31,6 +31,7 @@ import { profileAPI } from "../../services/profile"
 import { appointmentAPI } from "../../services/appointment"
 import { PatientLedger } from "../components/patient-ledger"
 import { claimsAPI } from "../../services/claims"
+import { PatientHealthRecords } from "../components/patient-health-records"
 
 const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"]
 const SUFFIXES = ["Jr.", "Sr.", "II", "III", "IV", "V"]
@@ -1003,6 +1004,12 @@ export function PatientProfile({ patient, onPatientUpdated }) {
           >
             Clinical Notes
           </TabsTrigger>
+          <TabsTrigger
+            value="records"
+            className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-500 data-[state=active]:bg-transparent px-4 py-3"
+          >
+            Health Records
+          </TabsTrigger>
         </TabsList>
 
         {/* OVERVIEW TAB: 3 Columns — Medical Records | Appointments | Quick Actions */}
@@ -1579,6 +1586,10 @@ export function PatientProfile({ patient, onPatientUpdated }) {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+        {/* HEALTH RECORDS TAB (US-4.0): files the patient shared from their Gabay app vault */}
+        <TabsContent value="records">
+          <PatientHealthRecords patientId={patientData.id} patientName={patientData.name} />
         </TabsContent>
       </Tabs>
 

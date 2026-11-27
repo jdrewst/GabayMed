@@ -56,7 +56,7 @@ const TRANSLATIONS = {
     insuranceConsentTitle: 'Insurance Data Processing',
     insuranceConsentDesc: 'Estimate real-time PhilHealth & HMO coverage deductions',
     dataSharingTitle: 'Hospital Data Sharing',
-    dataSharingDesc: 'Share digital medical forms with partner facilities you choose',
+    dataSharingDesc: 'Share medical forms and the vault files you mark as shared with your clinic. Off keeps them all private.',
     locationTitle: 'Location Access',
     locationDesc: 'Enable smart hospital routing and nearby facility suggestions',
     generalHeader: 'General & Legal',
@@ -98,7 +98,7 @@ const TRANSLATIONS = {
     insuranceConsentTitle: 'Pagproseso ng Insurance Data',
     insuranceConsentDesc: 'Kalkulahin ang bawas mula sa PhilHealth at HMO',
     dataSharingTitle: 'Pagbahagi ng Data sa Ospital',
-    dataSharingDesc: 'Ibahagi ang iyong digital medical form sa napiling ospital',
+    dataSharingDesc: 'Ibahagi sa iyong klinika ang medical form at mga file sa vault na minarkahan mong ibahagi. Kapag naka-off, lahat ay pribado.',
     locationTitle: 'Access sa Lokasyon',
     locationDesc: 'Maghanap ng pinakamalapit na ospital at ruta sa mapa',
     generalHeader: 'Pangkalahatan at Legal',
@@ -228,8 +228,9 @@ function normalizeRowToUi(raw) {
     avatar: raw.avatar_url || '',
     insuranceConsent:
       typeof raw.insurance_consent === 'boolean' ? raw.insurance_consent : true,
+    // Health data is shared with clinics only after an explicit opt-in (US-4.0); unset means restricted.
     dataSharingConsent:
-      typeof raw.data_sharing_consent === 'boolean' ? raw.data_sharing_consent : true,
+      typeof raw.data_sharing_consent === 'boolean' ? raw.data_sharing_consent : false,
   };
 }
 
@@ -356,7 +357,7 @@ const ProfileAPI = {
         medicalHistory: [],
         avatar: sessionProfile.avatar || '',
         insuranceConsent: true,
-        dataSharingConsent: true,
+        dataSharingConsent: false,
       };
     }
     return null;
@@ -399,7 +400,7 @@ const ProfileAPI = {
           ? stored.dataSharingConsent
           : typeof cachedProfile?.dataSharingConsent === 'boolean'
             ? cachedProfile.dataSharingConsent
-            : true,
+            : false,
       // Location is ON only when both the app toggle is allowed AND OS permission is granted
       locationAllowed:
         typeof stored.locationAllowed === 'boolean'

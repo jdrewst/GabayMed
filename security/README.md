@@ -41,3 +41,14 @@ Verify enrollment, removal, and sign-in with a test patient. Check that a passwo
 ## Health Record Vault (US-3.7)
 
 Run `security/health-records.sql` once in the SQL Editor, then restart the backend. It creates `public.health_records` (patients can only SELECT their own rows; all writes go through `/api/patient-health-records`) and a private `health-records` Storage bucket limited to PDF/JPG/PNG/HEIC/WEBP files up to 10 MB. Files are only reachable through 5-minute signed URLs. Records with `can_delete = false` (clinic-issued) cannot be deleted from the app. Deleting a patient account also removes their vault files.
+
+## Cross-app Health Record sharing (US-4.0)
+
+Run `security/health-record-sharing.sql` once after `health-records.sql`, then restart the backend. Clinic staff see a patient's vault files in the website's Patient Profile → Health Records tab, served only by `/api/provider-health-records`. Every list and every file open re-checks, on the server:
+
+1. the caller is signed-in `IT Admin` / `Hospital Staff` assigned to a facility (and has changed any temporary password);
+2. the patient (`patients.facility_id`) belongs to that same facility, otherwise "not found";
+3. the patient's account-level **Hospital Data Sharing** (`profiles.data_sharing_consent`) is explicitly `true` (unset counts as restricted);
+4. the file's **Share with my care providers** flag (`health_records.share_with_providers`) is `true`, filtered in the query itself.
+
+Staff never receive `storage_path`; files open through 2-minute signed URLs, and each view/download is written to `health_record_access_log` (service role only). Turning sharing off in the app hides files on the next request without changing or deleting them. `health_records` still has no staff RLS policy, so direct Supabase reads from the website remain blocked.
