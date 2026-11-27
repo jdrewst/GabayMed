@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Image, RefreshControl, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl, useWindowDimensions } from 'react-native';
 import { ArrowLeft, Hospital, MessageSquare, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ConversationView } from '../components/conversation-view';
@@ -39,9 +39,9 @@ export function MessagesPage({ onBack }) {
   }, []);
 
   // Filter based on search
-  const filteredConversations = conversations.filter(c => 
-    c.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    c.lastMessage.toLowerCase().includes(searchText.toLowerCase())
+  const searchTerm = searchText.trim().toLowerCase();
+  const filteredConversations = conversations.filter(conversation =>
+    [conversation.name, conversation.branchName, conversation.lastMessage].some(value => value.toLowerCase().includes(searchTerm))
   );
 
   const conversation = conversations.find(c => c.id === selectedConversation);
@@ -51,7 +51,7 @@ export function MessagesPage({ onBack }) {
       patientId={conversation.patientId}
       branchKey={conversation.branchKey}
       name={conversation.name}
-      avatar={conversation.avatar}
+      branchName={conversation.branchName}
       embedded={wide}
       onSent={message => setConversations(previous => previous.map(item => item.id === conversation.id
         ? { ...item, lastMessage: message.text, timestamp: 'Just now', unread: false }
@@ -107,7 +107,10 @@ export function MessagesPage({ onBack }) {
           >
             {filteredConversations.length === 0 ? (
               <View style={styles.centerContainer}>
-                <Text style={styles.emptyText}>{loadError ? 'Unable to load conversations. Pull down to retry.' : searchText ? 'No matching hospitals or clinics.' : 'No linked hospitals or clinics yet.'}</Text>
+                <Text style={styles.emptyText}>{loadError ? 'Unable to load conversations.' : searchTerm ? 'No matching hospitals or clinics.' : 'No linked hospitals or clinics yet.'}</Text>
+                {loadError && <TouchableOpacity accessibilityRole="button" onPress={onRefresh} style={styles.retryButton}>
+                  <Text style={styles.retryText}>Try again</Text>
+                </TouchableOpacity>}
               </View>
             ) : (
               filteredConversations.map((conv) => (
@@ -119,17 +122,14 @@ export function MessagesPage({ onBack }) {
                   style={[styles.conversationItem, selectedConversation === conv.id && styles.selectedItem]}
                 >
                   <View style={styles.avatar}>
-                    {conv.avatar ? (
-                      <Image source={{ uri: conv.avatar }} style={styles.avatarImage} />
-                    ) : (
-                      <Hospital size={22} color="#0369a1" />
-                    )}
+                    <Hospital size={22} color="#0369a1" />
                   </View>
                   <View style={styles.conversationContent}>
                     <View style={styles.conversationHeader}>
-                      <Text style={styles.conversationName}>{conv.name}</Text>
-                      <Text style={styles.conversationTime}>{conv.timestamp}</Text>
+                      <Text numberOfLines={1} style={styles.conversationName}>{conv.name}</Text>
+                      {!!conv.timestamp && <Text style={styles.conversationTime}>{conv.timestamp}</Text>}
                     </View>
+                    <Text numberOfLines={1} style={styles.branchName}>{conv.branchName}</Text>
                     <Text
                       style={[
                         styles.conversationMessage,
@@ -242,10 +242,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
   },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
   conversationContent: {
     flex: 1,
   },
@@ -253,17 +249,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    gap: 8,
   },
   conversationName: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#1f2937',
   },
   conversationTime: {
     fontSize: 12,
     color: '#6b7280',
   },
+  branchName: { color: '#0369a1', fontSize: 12, marginTop: 2, marginBottom: 4 },
+  retryButton: { marginTop: 12, padding: 10 },
+  retryText: { color: '#0369a1', fontWeight: '600' },
   conversationMessage: {
     fontSize: 14,
     color: '#6b7280',

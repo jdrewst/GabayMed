@@ -1,21 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { ArrowLeft, Send, Hospital } from 'lucide-react-native';
 import { GradientView } from './ui/gradient-button';
 import MessagesAPI from '../services/messagesApi';
 
-export function ConversationView({ patientId, branchKey, name, avatar, onBack, onSent, embedded }) {
+export function ConversationView({ patientId, branchKey, name, branchName, onBack, onSent, embedded }) {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState(false);
   const scrollViewRef = useRef();
 
   useEffect(() => {
     loadMessages();
-    // Mark as read when opening
-    MessagesAPI.markAsRead(patientId, branchKey);
 
     // Optional: Poll for new messages every 5 seconds
     const interval = setInterval(loadMessages, 5000);
@@ -26,15 +25,19 @@ export function ConversationView({ patientId, branchKey, name, avatar, onBack, o
     try {
       const data = await MessagesAPI.getMessages(patientId, branchKey);
       setMessages(data);
-    } catch (error) {
-      console.error("Error loading messages:", error);
+      setLoadError(false);
+      if (data.some(item => item.sender === 'staff' && !item.isRead)) {
+        await MessagesAPI.markAsRead(patientId, branchKey);
+      }
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSend = async () => {
-    if (!message.trim() || sending) return;
+    if (!message.trim() || loading || loadError || sending) return;
 
     const textToSend = message.trim();
     setMessage(''); // Clear input immediately for better UX
@@ -71,11 +74,11 @@ export function ConversationView({ patientId, branchKey, name, avatar, onBack, o
           <ArrowLeft size={20} color="#fff" />
         </TouchableOpacity>}
         <View style={styles.avatar}>
-          {avatar ? <Image source={{ uri: avatar }} style={styles.profileImage} /> : <Hospital size={22} color="#0369a1" />}
+          <Hospital size={22} color="#0369a1" />
         </View>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{name}</Text>
-          <Text style={styles.headerStatus}>Clinic conversation</Text>
+          <Text numberOfLines={1} style={styles.headerTitle}>{name}</Text>
+          <Text numberOfLines={1} style={styles.headerStatus}>{branchName}</Text>
         </View>
       </GradientView>
 
@@ -89,7 +92,19 @@ export function ConversationView({ patientId, branchKey, name, avatar, onBack, o
           style={styles.messagesContainer}
           onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
         >
-          {messages.length === 0 && <Text style={styles.emptyThread}>No messages yet. Send a message to start the conversation.</Text>}
+          {loadError ? (
+            <View style={styles.threadState}>
+              <Text accessibilityRole="alert" style={styles.emptyThread}>Unable to load messages.</Text>
+              <TouchableOpacity accessibilityRole="button" onPress={loadMessages} style={styles.retryButton}>
+                <Text style={styles.threadTitle}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : messages.length === 0 && (
+            <View style={styles.threadState}>
+              <Text style={styles.threadTitle}>Start a conversation</Text>
+              <Text style={styles.emptyThread}>Send a message to {name} using the field below.</Text>
+            </View>
+          )}
           {messages.map((msg) => (
             <View
               key={msg.id}
@@ -134,13 +149,13 @@ export function ConversationView({ patientId, branchKey, name, avatar, onBack, o
           onChangeText={setMessage}
           accessibilityLabel="Message"
           maxLength={4000}
-          editable={!sending}
+          editable={!loading && !loadError && !sending}
           multiline
         />
         <TouchableOpacity
           onPress={handleSend}
           style={[styles.sendButton, !message.trim() && !sending && styles.sendDisabled]}
-          disabled={sending || !message.trim()}
+          disabled={loading || loadError || sending || !message.trim()}
           accessibilityLabel="Send message"
           accessibilityRole="button"
         >
@@ -157,8 +172,10 @@ export function ConversationView({ patientId, branchKey, name, avatar, onBack, o
 
 const styles = StyleSheet.create({
   embeddedHeader: { paddingTop: 12 },
-  profileImage: { width: '100%', height: '100%', borderRadius: 20 },
-  emptyThread: { textAlign: 'center', color: '#475569', margin: 24 },
+  threadState: { alignItems: 'center', margin: 24, gap: 8 },
+  threadTitle: { color: '#0369a1', fontSize: 16, fontWeight: '600' },
+  emptyThread: { textAlign: 'center', color: '#475569' },
+  retryButton: { padding: 10 },
   sendError: { color: '#b91c1c', marginHorizontal: 16, marginTop: 8 },
   container: {
     flex: 1,

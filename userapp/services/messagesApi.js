@@ -15,8 +15,7 @@ const MessagesAPI = {
           patient_id,
           facility_id,
           facilities (
-            name,
-            image_url
+            name
           )
         `)
         .eq('profile_id', userId);
@@ -51,22 +50,21 @@ const MessagesAPI = {
 
       const conversations = new Map();
       function addConversation(patient, branchKey, message) {
-        if (!patient?.facilities) return;
+        if (!patient) return;
         const id = `${patient.patient_id}:${branchKey}`;
         if (conversations.has(id)) {
           if (message?.sender_type === 'staff' && !message.is_read) conversations.get(id).unread = true;
           return;
         }
 
-        const facility = patient.facilities;
-        const name = facility.name || 'Unknown Facility';
+        const name = patient.facilities?.name || 'Linked clinic';
         const branchName = branchNames.get(branchKey) || 'Clinic branch';
         conversations.set(id, {
           id,
           patientId: patient.patient_id,
           branchKey,
-          name: `${name} ? ${branchName}`,
-          avatar: facility.image_url || null,
+          name,
+          branchName,
           lastMessage: message?.content || '',
           timestamp: message ? new Date(message.created_at).toLocaleDateString() : '',
           unread: message?.sender_type === 'staff' && !message.is_read,
@@ -108,7 +106,7 @@ const MessagesAPI = {
 
     } catch (error) {
       console.error("Get Messages Error:", error);
-      return [];
+      throw error;
     }
   },
 
