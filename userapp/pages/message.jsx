@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl, useWindowDimensions } from 'react-native';
 import { ArrowLeft, Hospital, MessageSquare, Search } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,30 +13,33 @@ export function MessagesPage({ onBack }) {
   const [refreshing, setRefreshing] = useState(false);
 
   const [loadError, setLoadError] = useState(false);
+  const latestRequest = useRef(0);
   const wide = useWindowDimensions().width >= 760;
 
-  const fetchConversations = async () => {
+  const fetchConversations = useCallback(async () => {
+    const request = ++latestRequest.current;
     try {
       const data = await MessagesAPI.getConversations();
+      if (request !== latestRequest.current) return;
       setConversations(data);
       setLoadError(false);
     } catch {
-      setLoadError(true);
+      if (request === latestRequest.current) setLoadError(true);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request === latestRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  };
-
-  useEffect(() => {
-    fetchConversations();
   }, []);
+
+  useEffect(() => MessagesAPI.subscribeToMessages(fetchConversations), [fetchConversations]);
 
   // Refresh when pulling down
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchConversations();
-  }, []);
+  }, [fetchConversations]);
 
   // Filter based on search
   const searchTerm = searchText.trim().toLowerCase();

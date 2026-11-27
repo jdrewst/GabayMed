@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { ArrowLeft, Send, Hospital } from 'lucide-react-native';
 import { GradientView } from './ui/gradient-button';
@@ -12,29 +12,27 @@ export function ConversationView({ patientId, branchKey, name, branchName, onBac
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState(false);
   const scrollViewRef = useRef();
+  const latestRequest = useRef(0);
 
-  useEffect(() => {
-    loadMessages();
-
-    // Optional: Poll for new messages every 5 seconds
-    const interval = setInterval(loadMessages, 5000);
-    return () => clearInterval(interval);
-  }, [patientId, branchKey]);
-
-  const loadMessages = async () => {
+  const loadMessages = useCallback(async () => {
+    const request = ++latestRequest.current;
     try {
       const data = await MessagesAPI.getMessages(patientId, branchKey);
+      if (request !== latestRequest.current) return;
       setMessages(data);
       setLoadError(false);
       if (data.some(item => item.sender === 'staff' && !item.isRead)) {
         await MessagesAPI.markAsRead(patientId, branchKey);
       }
     } catch {
-      setLoadError(true);
+      if (request === latestRequest.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
-  };
+  }, [patientId, branchKey]);
+
+  useEffect(() => MessagesAPI.subscribeToMessages(loadMessages, { patientId, branchKey }),
+    [loadMessages, patientId, branchKey]);
 
   const handleSend = async () => {
     if (!message.trim() || loading || loadError || sending) return;

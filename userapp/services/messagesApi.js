@@ -1,7 +1,33 @@
 import { supabase } from '../lib/supabase';
 import Session from './session';
 
+let subscriptionId = 0;
+
 const MessagesAPI = {
+  subscribeToMessages(refresh, { patientId, branchKey } = {}) {
+    let active = true;
+    const reload = () => { if (active) refresh(); };
+    const changes = { event: 'INSERT', schema: 'public', table: 'messages' };
+    if (patientId) changes.filter = `patient_id=eq.${patientId}`;
+
+    const channel = supabase.channel(`patient-messages:${++subscriptionId}`)
+      .on('postgres_changes', changes, ({ new: message }) => {
+        if (!branchKey || message.branch_key === branchKey) reload();
+      })
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') reload();
+      });
+
+    reload();
+    // Catch up if the socket is reconnecting or Realtime is unavailable.
+    const fallback = setInterval(reload, 10000);
+    return () => {
+      active = false;
+      clearInterval(fallback);
+      void supabase.removeChannel(channel);
+    };
+  },
+
   // 1. Get Conversations (Grouped by Facility)
   async getConversations() {
     try {

@@ -8,6 +8,8 @@ Re-run the script on projects with an existing messages table to enable branch-s
 
 The script also creates `branch_messages` for staff conversations between branches of the same hospital. Re-run it before using **Other branches** on the website. Test sending from Main to another branch and replying after switching to that branch.
 
+Re-run the script to add patient messages to Supabase Realtime. To verify, leave a patient chat open on a phone and send a message from the website. The chat and its conversation preview should update automatically. The mobile app also periodically refreshes while Realtime is reconnecting or unavailable.
+
 Implemented: verified in-memory clinic context (no hardcoded clinic fallback), immediate screen lock on sign-out, 30-minute browser inactivity logout shared between tabs, account recheck when returning to the tab, and basic response security headers on Vercel.
 
 The inactivity control is a browser convenience, not server-enforced session expiry. Existing access tokens may remain valid until expiry. RLS must protect every request.
