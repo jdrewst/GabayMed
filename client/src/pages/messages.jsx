@@ -45,33 +45,40 @@ export function Messages() {
     }
     fetchConversations()
     
-    // Optional: Poll for new conversations every 30s
-    const interval = setInterval(fetchConversations, 30000)
+    // Poll for new conversations every 5s so incoming mobile messages appear quickly
+    const interval = setInterval(fetchConversations, 5000)
     return () => clearInterval(interval)
   }, [])
 
-  // Fetch messages when active conversation changes
+  // Fetch messages when active conversation changes + poll every 4s for live mobile messages
   useEffect(() => {
     if (!activeConversationId) return
 
-    const fetchMessages = async () => {
+    const fetchMessages = async (markRead = false) => {
       const data = await messagesAPI.getMessages(activeConversationId)
       setMessages(data)
-      // Mark as read
-      await messagesAPI.markAsRead(activeConversationId)
-      // Update unread status in conversation list locally
-      setConversations(prev => prev.map(c => 
-        c.id === activeConversationId ? { ...c, unread: false } : c
-      ))
+      if (markRead) {
+        await messagesAPI.markAsRead(activeConversationId)
+        setConversations(prev => prev.map(c => 
+          String(c.id) === String(activeConversationId) ? { ...c, unread: false } : c
+        ))
+      }
     }
-    fetchMessages()
+    fetchMessages(true)
+
+    const msgInterval = setInterval(() => fetchMessages(false), 4000)
+    return () => clearInterval(msgInterval)
   }, [activeConversationId])
 
   const filteredConversations = conversations.filter((conv) =>
     conv.patientName.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  const activeConversation = conversations.find((c) => c.id === activeConversationId)
+  const activeConversation = conversations.find(
+    (c) =>
+      String(c.id) === String(activeConversationId) ||
+      (Array.isArray(c.patientIds) && c.patientIds.some(pid => String(pid) === String(activeConversationId)))
+  )
 
   const handleSendMessage = async () => {
     if (messageText.trim() && activeConversationId) {
