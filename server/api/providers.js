@@ -42,6 +42,90 @@ module.exports = async function handler(req, res) {
       const result = await syncProviderEmail(admin, token, req.body);
       return res.status(200).json(result);
     }
+    if (req.body?.action === 'update_insurance_plan') {
+      if (!token) return res.status(401).json({ error: 'Authentication required.' });
+      const { data: { user }, error: authErr } = await admin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Invalid session.' });
+      const { planId, planData } = req.body;
+      if (!planId || !planData?.planName) return res.status(400).json({ error: 'Plan ID and Plan Name are required.' });
+      const { data: updated, error: updErr } = await admin
+        .from('insurance_plans')
+        .update({
+          plan_name: planData.planName,
+          type: planData.type,
+          renewal_month: planData.renewalMonth,
+          deductible: planData.deductible,
+          max_limit: planData.maxLimit,
+          copay_amount: planData.coPayAmount,
+          copay_type: planData.coPayType
+        })
+        .eq('insurance_id', planId)
+        .select();
+      if (updErr) return res.status(400).json({ error: updErr.message });
+      return res.status(200).json({ success: true, data: updated?.[0] || null });
+    }
+    if (req.body?.action === 'update_insurance_carrier') {
+      if (!token) return res.status(401).json({ error: 'Authentication required.' });
+      const { data: { user }, error: authErr } = await admin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Invalid session.' });
+      const { carrierId, carrierData } = req.body;
+      if (!carrierId || !carrierData?.carrierName) return res.status(400).json({ error: 'Carrier ID and Carrier Name are required.' });
+      const { data: updated, error: updErr } = await admin
+        .from('carrier')
+        .update({
+          name: carrierData.carrierName,
+          street_address: carrierData.streetAddress,
+          city: carrierData.city,
+          province: carrierData.province,
+          zip_code: carrierData.zipCode,
+          payer_id: carrierData.payerId,
+          accreditation_number: carrierData.accreditationNumber,
+          accreditation_expiration: carrierData.expirationDate,
+          type: carrierData.planName
+        })
+        .eq('carrier_id', carrierId)
+        .select();
+      if (updErr) return res.status(400).json({ error: updErr.message });
+      return res.status(200).json({ success: true, data: updated?.[0] || null });
+    }
+    if (req.body?.action === 'delete_insurance_plan') {
+      if (!token) return res.status(401).json({ error: 'Authentication required.' });
+      const { data: { user }, error: authErr } = await admin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Invalid session.' });
+      const { planId } = req.body;
+      if (!planId) return res.status(400).json({ error: 'Plan ID is required.' });
+      const { error: delErr } = await admin
+        .from('insurance_plans')
+        .delete()
+        .eq('insurance_id', planId);
+      if (delErr) {
+        if (delErr.code === '23503') {
+          return res.status(400).json({ error: 'This plan is linked to patient insurance records or fee schedules and cannot be deleted.' });
+        }
+        return res.status(400).json({ error: delErr.message });
+      }
+      return res.status(200).json({ success: true, id: planId });
+    }
+    if (req.body?.action === 'delete_insurance_carrier') {
+      if (!token) return res.status(401).json({ error: 'Authentication required.' });
+      const { data: { user }, error: authErr } = await admin.auth.getUser(token);
+      if (authErr || !user) return res.status(401).json({ error: 'Invalid session.' });
+      const { carrierId } = req.body;
+      if (!carrierId) return res.status(400).json({ error: 'Carrier ID is required.' });
+      // Delete associated insurance_plans first if none are referenced by patients/schedules
+      await admin.from('insurance_plans').delete().eq('carrier_id', carrierId);
+      const { error: delErr } = await admin
+        .from('carrier')
+        .delete()
+        .eq('carrier_id', carrierId);
+      if (delErr) {
+        if (delErr.code === '23503') {
+          return res.status(400).json({ error: 'This carrier has plans linked to patient insurance records or fee schedules and cannot be deleted.' });
+        }
+        return res.status(400).json({ error: delErr.message });
+      }
+      return res.status(200).json({ success: true, id: carrierId });
+    }
     const result = await createProviderAccount(admin, token, req.body);
     return res.status(201).json(result);
   } catch (error) {

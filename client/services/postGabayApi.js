@@ -158,6 +158,92 @@ export const POSTGabayAPI = {
     }
   },
 
+  // Update Carrier
+  async updateInsuranceCarrier(carrierId, carrierData) {
+    try {
+      const { data: rows, error: carrierError } = await supabase
+        .from('carrier')
+        .update({
+          name: carrierData.carrierName,
+          street_address: carrierData.streetAddress,
+          city: carrierData.city,
+          province: carrierData.province,
+          zip_code: carrierData.zipCode,
+          payer_id: carrierData.payerId,
+          accreditation_number: carrierData.accreditationNumber,
+          accreditation_expiration: carrierData.expirationDate,
+          type: carrierData.planName
+        })
+        .eq('carrier_id', carrierId)
+        .select();
+
+      if (carrierError) throw carrierError;
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        return { success: true, data: rows[0] };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const res = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ action: 'update_insurance_carrier', carrierId, carrierData })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok && result.success) return result;
+        if (result.error) throw new Error(result.error);
+      }
+
+      return { success: true, data: null };
+    } catch (error) {
+      console.error("Update Carrier Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Delete Carrier
+  async deleteInsuranceCarrier(carrierId) {
+    try {
+      // Remove child plans first where allowed
+      await supabase.from('insurance_plans').delete().eq('carrier_id', carrierId);
+
+      const { data: rows, error: delError } = await supabase
+        .from('carrier')
+        .delete()
+        .eq('carrier_id', carrierId)
+        .select('carrier_id');
+
+      if (delError) {
+        if (delError.code === '23503') {
+          throw new Error('This carrier has plans linked to patient insurance records or fee schedules and cannot be deleted.');
+        }
+        throw delError;
+      }
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        return { success: true, id: rows[0].carrier_id };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const res = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ action: 'delete_insurance_carrier', carrierId })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok && result.success) return result;
+        if (result.error) throw new Error(result.error);
+      }
+
+      return { success: true, id: carrierId };
+    } catch (error) {
+      console.error("Delete Carrier Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
   // Create Insurance Plan
   async createInsurancePlan(planData) {
     try {
@@ -173,13 +259,93 @@ export const POSTGabayAPI = {
           copay_amount: planData.coPayAmount,
           copay_type: planData.coPayType
         }])
-        .select()
-        .single();
+        .select();
 
       if (error) throw error;
-      return { success: true, data };
+      return { success: true, data: Array.isArray(data) ? data[0] : data };
     } catch (error) {
       console.error("Create Plan Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Update Insurance Plan
+  async updateInsurancePlan(planId, planData) {
+    try {
+      const { data: rows, error } = await supabase
+        .from('insurance_plans')
+        .update({
+          plan_name: planData.planName,
+          type: planData.type,
+          renewal_month: planData.renewalMonth,
+          deductible: planData.deductible,
+          max_limit: planData.maxLimit,
+          copay_amount: planData.coPayAmount,
+          copay_type: planData.coPayType
+        })
+        .eq('insurance_id', planId)
+        .select();
+
+      if (error) throw error;
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        return { success: true, data: rows[0] };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const res = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ action: 'update_insurance_plan', planId, planData })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok && result.success) return result;
+        if (result.error) throw new Error(result.error);
+      }
+
+      return { success: true, data: null };
+    } catch (error) {
+      console.error("Update Plan Error:", error.message);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Delete Insurance Plan
+  async deleteInsurancePlan(planId) {
+    try {
+      const { data: rows, error } = await supabase
+        .from('insurance_plans')
+        .delete()
+        .eq('insurance_id', planId)
+        .select('insurance_id');
+
+      if (error) {
+        if (error.code === '23503') {
+          throw new Error('This plan is linked to patient insurance records or fee schedules and cannot be deleted.');
+        }
+        throw error;
+      }
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        return { success: true, id: rows[0].insurance_id };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const res = await fetch(`${getEnv('VITE_API_BASE_URL') || '/api'}/providers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ action: 'delete_insurance_plan', planId })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok && result.success) return result;
+        if (result.error) throw new Error(result.error);
+      }
+
+      return { success: true, id: planId };
+    } catch (error) {
+      console.error("Delete Plan Error:", error.message);
       return { success: false, error: error.message };
     }
   }

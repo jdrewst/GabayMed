@@ -518,21 +518,34 @@ export const GabayAPI = {
           carrier_id,
           name,
           street_address,
+          city,
+          province,
+          zip_code,
+          payer_id,
+          accreditation_number,
+          accreditation_expiration,
           status,
           type,
           insurance_plans (
-            insurance_id,
-            plan_name
+            *
           )
-        `);
+        `)
+        .order('carrier_id', { ascending: true });
 
       if (error) throw error;
 
       // Transform the data to a flat structure for the UI
-      return data.map(carrier => ({
+      return (data || []).map(carrier => ({
         id: carrier.carrier_id,
         name: carrier.name,
         address: carrier.street_address,
+        street_address: carrier.street_address || '',
+        city: carrier.city || '',
+        province: carrier.province || '',
+        zip_code: carrier.zip_code || '',
+        payer_id: carrier.payer_id || '',
+        accreditation_number: carrier.accreditation_number || '',
+        accreditation_expiration: carrier.accreditation_expiration || '',
         status: carrier.status,
         type: carrier.type,
         // 1. The Count (Calculated from the array length)

@@ -64,14 +64,18 @@ export function buildFeeForm(procedures, schedules, schedule, today = localDate(
         }
       }
 
-      const currentFee = Number(currentFeeVal || 0)
+      const currentFee = Number.isFinite(Number(currentFeeVal)) && Number(currentFeeVal) >= 0 ? Number(currentFeeVal) : 0
       const desc = p.description || p.name || `Procedure #${p.id}`
-      const defaultNewFee = saved?.newFee ?? saved?.scheduleFee ?? standardPrice ?? (currentFee > 0 ? currentFee : referenceFee)
+      const rawDefaultFee = saved?.newFee ?? saved?.scheduleFee ?? standardPrice ?? (currentFee > 0 ? currentFee : referenceFee)
+      const parsedDefaultFee = Number(rawDefaultFee)
+      const defaultNewFee = Number.isFinite(parsedDefaultFee) && parsedDefaultFee >= 0
+        ? Number(parsedDefaultFee.toFixed(2))
+        : 0
 
       return {
         code: p.id,
         name: desc,
-        referenceFee,
+        referenceFee: Number.isFinite(Number(referenceFee)) ? Number(referenceFee) : 0,
         currentFee: Number(currentFee),
         current_fee: Number(currentFee),
         included: schedule ? !!saved : true,
@@ -82,25 +86,36 @@ export function buildFeeForm(procedures, schedules, schedule, today = localDate(
   }
 }
 
-export function feeFormPayload(form) {
-  if (!form.scheduleName.trim()) throw new Error('Enter a schedule name.')
-  if (!form.effectiveFrom || (form.effectiveTo && form.effectiveTo <= form.effectiveFrom)) throw new Error('End date must be later than the required start date.')
-  const items = form.procedureFees.filter(p => p.included)
-  if (!items.length) throw new Error('Include at least one procedure.')
-  for (const item of items) {
-    const feeVal = item.scheduleFee ?? item.newFee
-    if (!/^\d+(\.\d{1,2})?$/.test(String(feeVal)) || !Number.isFinite(Number(feeVal)) || Number(feeVal) > 9999999999.99) {
-      throw new Error(`Enter a non-negative price with at most two decimal places for ${item.name}.`)
+export function feeFormPayload(form, options = {}) {
+  const { requireHeader = true, requireProcedures = true } = options
+  if (requireHeader) {
+    if (!form.scheduleName?.trim()) throw new Error('Enter a schedule name.')
+    if (!form.effectiveFrom || (form.effectiveTo && form.effectiveTo <= form.effectiveFrom)) {
+      throw new Error('End date must be later than the required start date.')
+    }
+  }
+  const items = (form.procedureFees || []).filter(p => p.included)
+  if (requireProcedures && !items.length) throw new Error('Include at least one procedure.')
+  if (requireProcedures) {
+    for (const item of items) {
+      const feeVal = item.scheduleFee ?? item.newFee
+      if (!/^\d+(\.\d{1,2})?$/.test(String(feeVal)) || !Number.isFinite(Number(feeVal)) || Number(feeVal) > 9999999999.99) {
+        throw new Error(`Enter a non-negative price with at most two decimal places for ${item.name}.`)
+      }
     }
   }
   return {
     ...form,
-    scheduleName: form.scheduleName.trim(),
-    procedureFees: items.map(p => ({
-      code: p.code,
-      scheduleFee: p.newFee ?? p.scheduleFee,
-      newFee: p.newFee ?? p.scheduleFee,
-      current_fee: parseFloat(p.newFee ?? p.scheduleFee)
-    }))
+    scheduleName: (form.scheduleName || '').trim(),
+    procedureFees: items.map(p => {
+      const rawFee = Number(p.newFee ?? p.scheduleFee)
+      const cleanFee = Number.isFinite(rawFee) && rawFee >= 0 ? Number(rawFee.toFixed(2)) : 0
+      return {
+        code: p.code,
+        scheduleFee: String(cleanFee),
+        newFee: String(cleanFee),
+        current_fee: cleanFee
+      }
+    })
   }
 }

@@ -623,10 +623,11 @@ export const settingsAPI = {
     return { code: procId, included: true, currentFee: val };
   },
 
-  async saveFeeSchedule(id, form, original = null) {
+  // Dedicated function for creating a new Fee Schedule
+  async addFeeSchedule(form) {
     const facilityId = Session.getFacilityId();
 
-    const formattedItems = form.procedureFees.map(p => {
+    const formattedItems = (form.procedureFees || []).map(p => {
       const val = parseFloat(p.current_fee ?? p.newFee ?? p.scheduleFee);
       const procId = isNaN(Number(p.code)) ? p.code : parseInt(p.code, 10);
       return {
@@ -636,76 +637,6 @@ export const settingsAPI = {
       };
     });
 
-    // When updating an existing schedule, only update modified header fields & modified fee items
-    if (id) {
-      const headerPatch = {};
-      const nextName = form.scheduleName.trim();
-      const nextIns = form.insuranceId ? parseInt(form.insuranceId, 10) : null;
-      const nextFrom = form.effectiveFrom;
-      const nextTo = form.effectiveTo || null;
-
-      if (!original || nextName !== (original.scheduleName || '').trim()) {
-        headerPatch.schedule_name = nextName;
-      }
-      if (!original || String(form.insuranceId || '') !== String(original.insuranceId || '')) {
-        headerPatch.insurance_id = nextIns;
-      }
-      if (!original || nextFrom !== original.effectiveFrom) {
-        headerPatch.effective_from = nextFrom;
-      }
-      if (!original || (form.effectiveTo || '') !== (original.effectiveTo || '')) {
-        headerPatch.effective_to = nextTo;
-      }
-
-      if (Object.keys(headerPatch).length > 0) {
-        const { error: updateErr } = await supabase
-          .from('fee_schedules')
-          .update(headerPatch)
-          .eq('schedule_id', id);
-
-        if (updateErr) {
-          if (updateErr.code === '23505') {
-            throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
-          }
-          throw updateErr;
-        }
-      }
-
-      // Selective per-item diff: only update, insert, or delete individual fee items that changed
-      const { data: currentRows, error: fetchErr } = await supabase
-        .from('fee_schedule_items')
-        .select('*')
-        .eq('schedule_id', id);
-
-      if (fetchErr) throw fetchErr;
-
-      const existingByProc = new Map(
-        (currentRows || []).map(r => [
-          String(r.procedure_id),
-          Number(r.current_fee ?? r.custom_price ?? r.price ?? r.fee ?? r.amount ?? 0)
-        ])
-      );
-      const wantedByProc = new Map(formattedItems.map(i => [String(i.procedure_id), i]));
-
-      // 1. Delete only items that were removed/unchecked
-      for (const [procKey] of existingByProc.entries()) {
-        if (!wantedByProc.has(procKey)) {
-          await this.updateFeeScheduleItem(id, procKey, 0, false);
-        }
-      }
-
-      // 2. Insert or update only items whose fee changed or were newly included
-      for (const [procKey, item] of wantedByProc.entries()) {
-        const prevFee = existingByProc.get(procKey);
-        if (prevFee === undefined || Math.abs(prevFee - item.current_fee) > 0.0001) {
-          await this.updateFeeScheduleItem(id, item.procedure_id, item.current_fee, true);
-        }
-      }
-
-      return id;
-    }
-
-    // Creating a new schedule (id == null)
     const schedulePayload = {
       facility_id: facilityId,
       schedule_name: form.scheduleName.trim(),
@@ -753,6 +684,94 @@ export const settingsAPI = {
     }
 
     return savedScheduleId;
+  },
+
+  // Dedicated function for editing an existing Fee Schedule (selective header + item updates)
+  async updateFeeSchedule(id, form, original = null) {
+    if (!id) throw new Error('Schedule ID is required to update a fee schedule.');
+
+    const formattedItems = (form.procedureFees || []).map(p => {
+      const val = parseFloat(p.current_fee ?? p.newFee ?? p.scheduleFee);
+      const procId = isNaN(Number(p.code)) ? p.code : parseInt(p.code, 10);
+      return {
+        procedure_id: procId,
+        current_fee: val,
+        custom_price: val
+      };
+    });
+
+    const headerPatch = {};
+    const nextName = form.scheduleName.trim();
+    const nextIns = form.insuranceId ? parseInt(form.insuranceId, 10) : null;
+    const nextFrom = form.effectiveFrom;
+    const nextTo = form.effectiveTo || null;
+
+    if (!original || nextName !== (original.scheduleName || '').trim()) {
+      headerPatch.schedule_name = nextName;
+    }
+    if (!original || String(form.insuranceId || '') !== String(original.insuranceId || '')) {
+      headerPatch.insurance_id = nextIns;
+    }
+    if (!original || nextFrom !== original.effectiveFrom) {
+      headerPatch.effective_from = nextFrom;
+    }
+    if (!original || (form.effectiveTo || '') !== (original.effectiveTo || '')) {
+      headerPatch.effective_to = nextTo;
+    }
+
+    if (Object.keys(headerPatch).length > 0) {
+      const { error: updateErr } = await supabase
+        .from('fee_schedules')
+        .update(headerPatch)
+        .eq('schedule_id', id);
+
+      if (updateErr) {
+        if (updateErr.code === '23505') {
+          throw new Error('A schedule for this plan and start date already exists. Edit it or choose another date.');
+        }
+        throw updateErr;
+      }
+    }
+
+    // Selective per-item diff: only update, insert, or delete individual fee items that changed
+    const { data: currentRows, error: fetchErr } = await supabase
+      .from('fee_schedule_items')
+      .select('*')
+      .eq('schedule_id', id);
+
+    if (fetchErr) throw fetchErr;
+
+    const existingByProc = new Map(
+      (currentRows || []).map(r => [
+        String(r.procedure_id),
+        Number(r.current_fee ?? r.custom_price ?? r.price ?? r.fee ?? r.amount ?? 0)
+      ])
+    );
+    const wantedByProc = new Map(formattedItems.map(i => [String(i.procedure_id), i]));
+
+    // 1. Delete only items that were removed/unchecked
+    for (const [procKey] of existingByProc.entries()) {
+      if (!wantedByProc.has(procKey)) {
+        await this.updateFeeScheduleItem(id, procKey, 0, false);
+      }
+    }
+
+    // 2. Insert or update only items whose fee changed or were newly included
+    for (const [procKey, item] of wantedByProc.entries()) {
+      const prevFee = existingByProc.get(procKey);
+      if (prevFee === undefined || Math.abs(prevFee - item.current_fee) > 0.0001) {
+        await this.updateFeeScheduleItem(id, item.procedure_id, item.current_fee, true);
+      }
+    }
+
+    return id;
+  },
+
+  async saveFeeSchedule(id, form, original = null) {
+    if (id) {
+      return this.updateFeeSchedule(id, form, original);
+    }
+    return this.addFeeSchedule(form);
   },
 
   async deleteFeeSchedule(id) {
@@ -806,8 +825,13 @@ function mapProcedure(p) {
 }
 
 function procedureRecord(values) {
-  const errors = validateSettingsForm('procedure', values);
+  const rawCode = String(values.code ?? values.procedure_id ?? values.id ?? '').trim();
+  const normalizedValues = { ...values, code: rawCode };
+  const errors = validateSettingsForm('procedure', normalizedValues);
   if (Object.keys(errors).length) throw userSettingsError(Object.values(errors)[0]);
+  if (!rawCode) {
+    throw userSettingsError('Procedure code is required.');
+  }
   if (!values.description?.trim() || !values.category?.trim()) {
     throw userSettingsError('Description and category are required.');
   }
@@ -819,12 +843,15 @@ function procedureRecord(values) {
   if (!Number.isInteger(Number(values.duration)) || Number(values.duration) < 1) {
     throw userSettingsError('Duration must be a positive whole number of minutes.');
   }
+  const procId = /^\d+$/.test(rawCode) ? parseInt(rawCode, 10) : rawCode;
   return {
+    procedure_id: procId,
     description: values.description.trim(),
     category: values.category.trim(),
     professional_fee: Number(values.price),
     healthcare_institution_fee: Number(values.officeFee),
-    PHcase_rate: Number(values.phCaseRate), duration: Number(values.duration)
+    PHcase_rate: Number(values.phCaseRate),
+    duration: Number(values.duration)
   };
 }
 
