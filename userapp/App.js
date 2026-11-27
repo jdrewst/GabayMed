@@ -55,9 +55,10 @@ export default function App() {
     const unsubscribe = Session.subscribe(next => {
       setSession(next);
       if (next) {
-        ProfileAPI.getProfile().catch(() => {});
-        ProfileAPI.getPermissions().catch(() => {});
+        ProfileAPI.getProfile({ forceRefresh: true }).catch(() => {});
+        ProfileAPI.getPermissions({ forceRefresh: true }).catch(() => {});
       } else {
+        ProfileAPI.clearCache();
         setShowMfaSettings(false);
         setShowProfile(false);
         setShowMessages(false);

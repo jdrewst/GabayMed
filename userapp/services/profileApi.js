@@ -220,10 +220,16 @@ function normalizeRowToUi(raw) {
     bloodType: raw.blood_type || 'Not set',
     allergies: allergiesRaw || 'None',
     allergiesList: allergiesRaw
-      ? allergiesRaw.split(',').map(s => s.trim()).filter(Boolean)
+      ? allergiesRaw
+          .split(/[\n,;]+/)
+          .map(s => s.trim())
+          .filter(s => s && s.toLowerCase() !== 'none')
       : [],
     medicalHistory: historyRaw
-      ? historyRaw.split(',').map(s => s.trim()).filter(Boolean)
+      ? historyRaw
+          .split(/[\n,;]+/)
+          .map(s => s.trim())
+          .filter(s => s && s.toLowerCase() !== 'none')
       : [],
     avatar: raw.avatar_url || '',
     insuranceConsent:
@@ -306,6 +312,12 @@ function notifyPermissionsChanged(perms) {
 }
 
 const ProfileAPI = {
+  clearCache() {
+    cachedProfile = null;
+    cachedPermissions = null;
+    stopRealtimeProfileSync();
+  },
+
   subscribe(listener) {
     profileListeners.add(listener);
     ensureRealtimeProfileSync();

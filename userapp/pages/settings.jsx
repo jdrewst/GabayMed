@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Switch, Linking,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Switch, Linking, RefreshControl,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -39,6 +39,19 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function ProfilePage({ onBack }) {
   const [profileData, setProfileData] = useState(() => ProfileAPI.getCachedProfile());
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const data = await ProfileAPI.getProfile({ forceRefresh: true });
+      if (data) setProfileData(data);
+      await ProfileAPI.getPermissions({ forceRefresh: true });
+    } catch {}
+    finally {
+      setRefreshing(false);
+    }
+  };
 
   // In-place editing per box (keeps the exact same card layout)
   const [editingPersonal, setEditingPersonal] = useState(false);
@@ -456,6 +469,14 @@ export function ProfilePage({ onBack }) {
           contentContainerStyle={{ paddingBottom: 110 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#0284C7"
+              colors={['#0284C7']}
+            />
+          }
         >
           {/* Hero Header: Avatar on top + Full Name below */}
           <View style={styles.heroCard}>
@@ -1118,6 +1139,23 @@ export function SettingsPage({
 }) {
   const cachedPerms = ProfileAPI.getCachedPermissions();
   const [profileData, setProfileData] = useState(() => ProfileAPI.getCachedProfile());
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const data = await ProfileAPI.getProfile({ forceRefresh: true });
+      if (data) setProfileData(data);
+      const perms = await ProfileAPI.getPermissions({ forceRefresh: true });
+      if (perms) {
+        if (typeof perms.insuranceConsent === 'boolean') setInsuranceConsent(perms.insuranceConsent);
+        if (typeof perms.dataSharingConsent === 'boolean') setDataSharingConsent(perms.dataSharingConsent);
+      }
+    } catch {}
+    finally {
+      setRefreshing(false);
+    }
+  };
   const [insuranceConsent, setInsuranceConsent] = useState(
     cachedPerms ? !!cachedPerms.insuranceConsent : true
   );
@@ -1566,7 +1604,18 @@ export function SettingsPage({
         onOpenProfile={onOpenProfile}
       />
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 110 }}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: 110 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#0284C7"
+            colors={['#0284C7']}
+          />
+        }
+      >
         <Text style={[styles.title, { color: display.textPrimary, fontSize: fs(20) }]}>
           {t.settingsTitle}
         </Text>

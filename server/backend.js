@@ -12,6 +12,7 @@ const patientBillingHandler = require('./api/billing');
 const patientClaimsHandler = require('./api/patient-claims');
 const healthRecordsHandler = require('./api/health-records');
 const providerHealthRecordsHandler = require('./api/provider-health-records');
+const patientSyncHandler = require('./api/patient-sync');
 
 const routes = {
   '/api/providers': providerHandler, '/api/first-password': firstPasswordHandler,
@@ -27,7 +28,8 @@ const routes = {
   '/api/patient-billing': patientBillingHandler, '/api/billing': patientBillingHandler,
   '/api/patient-claims': patientClaimsHandler,
   '/api/patient-health-records': healthRecordsHandler,
-  '/api/provider-health-records': providerHealthRecordsHandler
+  '/api/provider-health-records': providerHealthRecordsHandler,
+  '/api/patient-sync': patientSyncHandler
 };
 
 function createServer() {

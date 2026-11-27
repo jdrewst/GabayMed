@@ -867,9 +867,266 @@ async function managePatientProfile(admin, token, body = {}, { secret } = {}) {
   return { profile: mapFullProfile(saved.data) };
 }
 
+const PERMITTED_DEMOGRAPHIC_FIELDS = [
+  'first_name', 'middle_name', 'last_name', 'name_suffix', 'full_name',
+  'phone_number', 'date_of_birth', 'gender',
+  'street_address', 'barangay', 'city_municipality', 'province', 'zip_code', 'address'
+];
+
+const PERMITTED_MEDICAL_FIELDS = [
+  'blood_type', 'allergies', 'medical_history'
+];
+
+const PROTECTED_MOBILE_ATTRIBUTES = [
+  'avatar_url',
+  'insurance_consent',
+  'data_sharing_consent',
+  'terms_accepted_at',
+  'privacy_accepted_at',
+  'onboarding_completed_at'
+];
+
+/**
+ * Reverse synchronization from Gabay 1.0 `patients` record updates back to the linked Gabay 2.0 `profiles`.
+ * Only synchronizes permitted demographic and medical summary fields.
+ * Mobile-only profile attributes (such as avatar selection or app preferences) are strictly preserved.
+ * If synchronization fails, any partial changes are rolled back to preserve the last valid saved record.
+ */
+async function reverseSyncPatientToProfile(admin, patientId, updates = {}, { previousPatient = null } = {}) {
+  if (!patientId) {
+    throw new RequestError(400, 'Patient ID is required for synchronization.');
+  }
+
+  const { data: patient, error: patientErr } = await admin
+    .from('patients')
+    .select('*')
+    .eq('patient_id', patientId)
+    .maybeSingle();
+
+  if (patientErr) {
+    throw new RequestError(503, 'Could not load patient record for synchronization.');
+  }
+  if (!patient) {
+    throw new RequestError(404, 'Patient record not found.');
+  }
+
+  if (!patient.profile_id) {
+    // Walk-in patient without a linked mobile account: nothing to sync to profile
+    return { success: true, synced: false, reason: 'unlinked', patientId };
+  }
+
+  const { data: prevProfile, error: profileErr } = await admin
+    .from('profiles')
+    .select(FULL_PROFILE_COLUMNS)
+    .eq('id', patient.profile_id)
+    .maybeSingle();
+
+  if (profileErr) {
+    throw new RequestError(503, 'Could not load linked patient profile.');
+  }
+  if (!prevProfile) {
+    return { success: true, synced: false, reason: 'unlinked_profile_missing', patientId };
+  }
+
+  // Filter ONLY permitted demographic and medical summary fields
+  const profilePatch = {};
+
+  // Demographic fields
+  if (updates.first_name !== undefined) profilePatch.first_name = (updates.first_name || '').trim();
+  if (updates.middle_name !== undefined) profilePatch.middle_name = (updates.middle_name || '').trim() || null;
+  if (updates.last_name !== undefined) profilePatch.last_name = (updates.last_name || '').trim();
+  if (updates.name_suffix !== undefined) profilePatch.name_suffix = (updates.name_suffix || '').trim() || null;
+
+  if (profilePatch.first_name || profilePatch.last_name) {
+    const fName = profilePatch.first_name ?? prevProfile.first_name ?? '';
+    const mName = profilePatch.middle_name ?? prevProfile.middle_name ?? '';
+    const lName = profilePatch.last_name ?? prevProfile.last_name ?? '';
+    const sfx = profilePatch.name_suffix ?? prevProfile.name_suffix ?? '';
+    profilePatch.full_name = [fName, mName, lName, sfx].filter(Boolean).join(' ');
+  } else if (updates.full_name !== undefined) {
+    profilePatch.full_name = (updates.full_name || '').trim();
+  }
+
+  if (updates.phone_number !== undefined || updates.phone !== undefined) {
+    const rawPhone = updates.phone_number ?? updates.phone;
+    profilePatch.phone_number = normalizeMobile(rawPhone) || rawPhone || null;
+  }
+
+  if (updates.date_of_birth !== undefined || updates.birthDate !== undefined) {
+    const rawDob = updates.date_of_birth ?? updates.birthDate;
+    profilePatch.date_of_birth = normalizeBirthdate(rawDob) || (rawDob ? String(rawDob).slice(0, 10) : null);
+  }
+
+  if (updates.gender !== undefined || updates.sex !== undefined) {
+    const rawGender = updates.gender ?? updates.sex;
+    profilePatch.gender = rawGender === 'M' ? 'Male' : rawGender === 'F' ? 'Female' : (rawGender || null);
+  }
+
+  if (updates.street_address !== undefined) profilePatch.street_address = (updates.street_address || '').trim() || null;
+  if (updates.barangay !== undefined) profilePatch.barangay = (updates.barangay || '').trim() || null;
+  if (updates.city_municipality !== undefined) profilePatch.city_municipality = (updates.city_municipality || '').trim() || null;
+  if (updates.province !== undefined) profilePatch.province = (updates.province || '').trim() || null;
+  if (updates.zip_code !== undefined) profilePatch.zip_code = (updates.zip_code || '').trim() || null;
+
+  if (
+    updates.street_address !== undefined ||
+    updates.barangay !== undefined ||
+    updates.city_municipality !== undefined ||
+    updates.province !== undefined ||
+    updates.zip_code !== undefined
+  ) {
+    const str = profilePatch.street_address ?? prevProfile.street_address;
+    const brg = profilePatch.barangay ?? prevProfile.barangay;
+    const city = profilePatch.city_municipality ?? prevProfile.city_municipality;
+    const prov = profilePatch.province ?? prevProfile.province;
+    const zip = profilePatch.zip_code ?? prevProfile.zip_code;
+    profilePatch.address = [str, brg, city, prov, zip].filter(Boolean).join(', ') || null;
+  } else if (updates.address !== undefined) {
+    profilePatch.address = (updates.address || '').trim() || null;
+  }
+
+  // Medical summary fields
+  if (updates.blood_type !== undefined) {
+    const bt = (updates.blood_type || '').trim();
+    profilePatch.blood_type = BLOOD_TYPES.includes(bt) ? bt : (bt || null);
+  }
+  if (updates.allergies !== undefined) {
+    const rawAllergies = Array.isArray(updates.allergies)
+      ? updates.allergies.join(', ')
+      : String(updates.allergies || '');
+    profilePatch.allergies = rawAllergies.trim().slice(0, 500) || null;
+  }
+  if (updates.medical_history !== undefined) {
+    const rawHistory = Array.isArray(updates.medical_history)
+      ? updates.medical_history.join(', ')
+      : String(updates.medical_history || '');
+    profilePatch.medical_history = rawHistory.trim().slice(0, 1000) || null;
+  }
+
+  // Ensure NO protected mobile attribute can be updated from clinic side
+  for (const protectedAttr of PROTECTED_MOBILE_ATTRIBUTES) {
+    delete profilePatch[protectedAttr];
+  }
+
+  if (Object.keys(profilePatch).length === 0) {
+    return { success: true, synced: true, profileId: patient.profile_id, profile: mapFullProfile(prevProfile) };
+  }
+
+  // Apply reverse sync update to profiles
+  const { data: updatedProfile, error: updateError } = await admin
+    .from('profiles')
+    .update(profilePatch)
+    .eq('id', patient.profile_id)
+    .select(FULL_PROFILE_COLUMNS)
+    .maybeSingle();
+
+  if (updateError || !updatedProfile) {
+    // If sync fails, preserve the last valid saved record by rolling back any changes to patients
+    if (previousPatient) {
+      try {
+        await admin.from('patients').update(previousPatient).eq('patient_id', patientId);
+      } catch {}
+    }
+    throw new RequestError(
+      503,
+      'Synchronization failed: Could not update patient mobile profile. The last valid saved record has been preserved.'
+    );
+  }
+
+  // Propagate demographic & medical changes to all linked facility `patients` rows
+  const ageYears = calculateAgeYears(profilePatch.date_of_birth ?? prevProfile.date_of_birth);
+  const patientSync = {};
+  if (profilePatch.full_name !== undefined) patientSync.full_name = profilePatch.full_name;
+  if (profilePatch.first_name !== undefined) patientSync.first_name = profilePatch.first_name;
+  if (profilePatch.middle_name !== undefined) patientSync.middle_name = profilePatch.middle_name;
+  if (profilePatch.last_name !== undefined) patientSync.last_name = profilePatch.last_name;
+  if (profilePatch.phone_number !== undefined) patientSync.phone_number = profilePatch.phone_number;
+  if (profilePatch.address !== undefined) patientSync.address = profilePatch.address;
+  if (profilePatch.date_of_birth !== undefined) {
+    patientSync.date_of_birth = profilePatch.date_of_birth;
+    patientSync.age = ageYears;
+  }
+  if (profilePatch.gender !== undefined) patientSync.gender = profilePatch.gender;
+  if (profilePatch.medical_history !== undefined) patientSync.medical_history = profilePatch.medical_history;
+
+  if (Object.keys(patientSync).length > 0) {
+    try {
+      await admin.from('patients').update(patientSync).eq('profile_id', patient.profile_id);
+    } catch {}
+  }
+
+  return {
+    success: true,
+    synced: true,
+    profileId: patient.profile_id,
+    profile: mapFullProfile(updatedProfile),
+  };
+}
+
+async function updatePatientRecordAndSync(admin, staffActor, { patientId, updates } = {}) {
+  if (!patientId) throw new RequestError(400, 'Patient ID is required.');
+  const { data: patient, error: patientErr } = await admin
+    .from('patients')
+    .select('*')
+    .eq('patient_id', patientId)
+    .maybeSingle();
+
+  if (patientErr) throw new RequestError(503, 'Could not load patient record.');
+  if (!patient || (staffActor?.facility_id && String(patient.facility_id) !== String(staffActor.facility_id))) {
+    throw new RequestError(404, 'Patient not found.');
+  }
+
+  const prevPatient = { ...patient };
+  const patientPatch = {};
+
+  if (updates.first_name !== undefined) patientPatch.first_name = (updates.first_name || '').trim();
+  if (updates.middle_name !== undefined) patientPatch.middle_name = (updates.middle_name || '').trim() || null;
+  if (updates.last_name !== undefined) patientPatch.last_name = (updates.last_name || '').trim();
+  if (updates.phone_number !== undefined || updates.phone !== undefined) {
+    const rawPhone = updates.phone_number ?? updates.phone;
+    patientPatch.phone_number = (rawPhone || '').trim() || null;
+  }
+  if (updates.address !== undefined) patientPatch.address = (updates.address || '').trim() || null;
+  if (updates.date_of_birth !== undefined || updates.birthDate !== undefined) {
+    const rawDob = updates.date_of_birth ?? updates.birthDate;
+    patientPatch.date_of_birth = rawDob ? String(rawDob).slice(0, 10) : null;
+    patientPatch.age = calculateAgeYears(patientPatch.date_of_birth);
+  }
+  if (updates.gender !== undefined || updates.sex !== undefined) {
+    const rawGender = updates.gender ?? updates.sex;
+    patientPatch.gender = rawGender === 'M' ? 'Male' : rawGender === 'F' ? 'Female' : (rawGender || null);
+  }
+  if (updates.medical_history !== undefined) {
+    patientPatch.medical_history = (updates.medical_history || '').trim() || null;
+  }
+  if (patientPatch.first_name || patientPatch.last_name) {
+    patientPatch.full_name = [
+      patientPatch.first_name ?? patient.first_name,
+      patientPatch.middle_name ?? patient.middle_name,
+      patientPatch.last_name ?? patient.last_name,
+      updates.name_suffix ?? patient.name_suffix
+    ].filter(Boolean).join(' ');
+  } else if (updates.full_name !== undefined) {
+    patientPatch.full_name = updates.full_name;
+  }
+
+  const { error: saveErr } = await admin
+    .from('patients')
+    .update(patientPatch)
+    .eq('patient_id', patientId);
+
+  if (saveErr) {
+    throw new RequestError(503, 'Could not save patient record.');
+  }
+
+  // Reverse sync to linked profile
+  return reverseSyncPatientToProfile(admin, patientId, updates, { previousPatient: prevPatient });
+}
+
 module.exports = {
   registrationInput, normalizeMobile, passwordProblem, handlePatientOtp, registerPatient,
   resetPatientPassword, loginPatient, refreshPatientSession, completeOnboarding,
   validateProfileUpdateInput, validateMedicalUpdateInput, syncLinkedPatients,
+  reverseSyncPatientToProfile, updatePatientRecordAndSync,
   managePatientProfile, logoutPatient, patientAccount, verifiedUser, changePatientPassword, rejected
 };

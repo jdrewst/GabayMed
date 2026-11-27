@@ -88,7 +88,7 @@ export function feeFormPayload(form) {
   const items = form.procedureFees.filter(p => p.included)
   if (!items.length) throw new Error('Include at least one procedure.')
   for (const item of items) {
-    const feeVal = item.newFee ?? item.scheduleFee
+    const feeVal = item.scheduleFee ?? item.newFee
     if (!/^\d+(\.\d{1,2})?$/.test(String(feeVal)) || !Number.isFinite(Number(feeVal)) || Number(feeVal) > 9999999999.99) {
       throw new Error(`Enter a non-negative price with at most two decimal places for ${item.name}.`)
     }

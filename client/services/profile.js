@@ -194,15 +194,17 @@ export const profileAPI = {
   },
 
   // 3. Update Patient Personal & Demographic Profile (independent of medical fields)
+  // Reverse sync to linked Gabay 2.0 mobile profile; preserves mobile-only attributes; rolls back on failure
   async updatePatient(patientId, updates) {
     try {
       const { data: patient, error: fetchError } = await supabase
         .from("patients")
-        .select("patient_id, profile_id")
+        .select("*")
         .eq("patient_id", patientId)
         .single();
       if (fetchError) throw fetchError;
 
+      const prevPatient = { ...patient };
       const firstName = (updates.first_name || "").trim();
       const middleName = (updates.middle_name || "").trim() || null;
       const lastName = (updates.last_name || "").trim();
@@ -223,46 +225,6 @@ export const profileAPI = {
       const age = updates.birthDate ? calculateAge(updates.birthDate) : null;
       const ageNum = typeof age === "number" && !Number.isNaN(age) ? age : null;
 
-      let updatedProfile = null;
-      let prevProfile = null;
-
-      if (patient?.profile_id) {
-        const { data: existingProfile } = await supabase
-          .from("profiles")
-          .select(
-            "first_name, middle_name, last_name, name_suffix, full_name, email, phone_number, date_of_birth, gender, street_address, barangay, city_municipality, province, zip_code, address"
-          )
-          .eq("id", patient.profile_id)
-          .maybeSingle();
-        prevProfile = existingProfile || null;
-
-        const { data: savedProfile, error: profileError } = await supabase
-          .from("profiles")
-          .update({
-            first_name: firstName,
-            middle_name: middleName,
-            last_name: lastName,
-            name_suffix: nameSuffix,
-            full_name: fullName,
-            email: (updates.email || "").trim() || prevProfile?.email || null,
-            phone_number: (updates.phone || "").trim() || null,
-            date_of_birth: updates.birthDate || null,
-            gender: normalizedGender,
-            street_address: streetAddress,
-            barangay,
-            city_municipality: cityMunicipality,
-            province,
-            zip_code: zipCode,
-            address,
-          })
-          .eq("id", patient.profile_id)
-          .select()
-          .single();
-
-        if (profileError) throw profileError;
-        updatedProfile = savedProfile;
-      }
-
       const patientPatch = {
         full_name: fullName,
         first_name: firstName,
@@ -275,19 +237,70 @@ export const profileAPI = {
         age: ageNum,
       };
 
-      // Sync across all linked facility patient rows when linked, or just this patient row for walk-ins
-      const patientQuery = patient?.profile_id
-        ? supabase.from("patients").update(patientPatch).eq("profile_id", patient.profile_id)
-        : supabase.from("patients").update(patientPatch).eq("patient_id", patientId);
+      // 1. Update clinic-side patient record first
+      const { error: patientError } = await supabase
+        .from("patients")
+        .update(patientPatch)
+        .eq("patient_id", patientId);
 
-      const { error: patientError } = await patientQuery;
-      if (patientError) {
-        if (patient?.profile_id && prevProfile) {
+      if (patientError) throw patientError;
+
+      let updatedProfile = null;
+
+      // 2. Reverse synchronization to linked Gabay 2.0 mobile profile
+      if (patient?.profile_id) {
+        const { data: prevProfile } = await supabase
+          .from("profiles")
+          .select(
+            "first_name, middle_name, last_name, name_suffix, full_name, email, phone_number, date_of_birth, gender, street_address, barangay, city_municipality, province, zip_code, address"
+          )
+          .eq("id", patient.profile_id)
+          .maybeSingle();
+
+        const profilePatch = {
+          first_name: firstName,
+          middle_name: middleName,
+          last_name: lastName,
+          name_suffix: nameSuffix,
+          full_name: fullName,
+          email: (updates.email || "").trim() || prevProfile?.email || null,
+          phone_number: (updates.phone || "").trim() || null,
+          date_of_birth: updates.birthDate || null,
+          gender: normalizedGender,
+          street_address: streetAddress,
+          barangay,
+          city_municipality: cityMunicipality,
+          province,
+          zip_code: zipCode,
+          address,
+        };
+
+        const { data: savedProfile, error: profileError } = await supabase
+          .from("profiles")
+          .update(profilePatch)
+          .eq("id", patient.profile_id)
+          .select()
+          .single();
+
+        if (profileError || !savedProfile) {
+          // Synchronization failed: rollback clinic patient record to preserve last valid saved record
           try {
-            await supabase.from("profiles").update(prevProfile).eq("id", patient.profile_id);
+            await supabase.from("patients").update(prevPatient).eq("patient_id", patientId);
           } catch {}
+          throw new Error(
+            "Synchronization failed: Could not update patient's linked mobile profile. The last valid saved record has been preserved."
+          );
         }
-        throw patientError;
+
+        updatedProfile = savedProfile;
+
+        // Synchronize across all other linked facility patient rows if multiple exist
+        try {
+          await supabase
+            .from("patients")
+            .update(patientPatch)
+            .eq("profile_id", patient.profile_id);
+        } catch {}
       }
 
       return {
@@ -302,28 +315,31 @@ export const profileAPI = {
   },
 
   // 3b. Update Patient Medical Chart (blood type, allergies, medical conditions — independent of personal details)
+  // Reverse sync to linked Gabay 2.0 mobile profile; preserves mobile-only attributes; rolls back on failure
   async updatePatientMedical(patientId, { blood_type, allergies, medical_history }) {
     try {
       const { data: patient, error: fetchError } = await supabase
         .from("patients")
-        .select("patient_id, profile_id")
+        .select("*")
         .eq("patient_id", patientId)
         .single();
       if (fetchError) throw fetchError;
 
+      const prevPatient = { ...patient };
       const cleanBloodType = (blood_type || "").trim() || null;
       const cleanAllergies = (allergies || "").trim().slice(0, 500) || null;
       const cleanHistory = (medical_history || "").trim().slice(0, 1000) || null;
 
-      let prevProfile = null;
-      if (patient?.profile_id) {
-        const { data: existingProfile } = await supabase
-          .from("profiles")
-          .select("blood_type, allergies, medical_history")
-          .eq("id", patient.profile_id)
-          .maybeSingle();
-        prevProfile = existingProfile || null;
+      // 1. Update clinic patient record
+      const { error: patientError } = await supabase
+        .from("patients")
+        .update({ medical_history: cleanHistory })
+        .eq("patient_id", patientId);
 
+      if (patientError) throw patientError;
+
+      // 2. Reverse synchronization to linked Gabay 2.0 mobile profile
+      if (patient?.profile_id) {
         const { error: profileError } = await supabase
           .from("profiles")
           .update({
@@ -333,21 +349,26 @@ export const profileAPI = {
           })
           .eq("id", patient.profile_id);
 
-        if (profileError) throw profileError;
-      }
-
-      const patientQuery = patient?.profile_id
-        ? supabase.from("patients").update({ medical_history: cleanHistory }).eq("profile_id", patient.profile_id)
-        : supabase.from("patients").update({ medical_history: cleanHistory }).eq("patient_id", patientId);
-
-      const { error: patientError } = await patientQuery;
-      if (patientError) {
-        if (patient?.profile_id && prevProfile) {
+        if (profileError) {
+          // Synchronization failed: rollback clinic patient record to preserve last valid saved record
           try {
-            await supabase.from("profiles").update(prevProfile).eq("id", patient.profile_id);
+            await supabase
+              .from("patients")
+              .update({ medical_history: prevPatient.medical_history })
+              .eq("patient_id", patientId);
           } catch {}
+          throw new Error(
+            "Synchronization failed: Could not update patient's linked mobile medical records. The last valid saved record has been preserved."
+          );
         }
-        throw patientError;
+
+        // Synchronize across all other linked facility patient rows if multiple exist
+        try {
+          await supabase
+            .from("patients")
+            .update({ medical_history: cleanHistory })
+            .eq("profile_id", patient.profile_id);
+        } catch {}
       }
 
       return {

@@ -434,6 +434,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
 
     if (!res.success) {
       setPersonalError(res.error || "Could not save personal details.")
+      showBanner("error", res.error || "Synchronization failed. Could not save personal details. The last valid record has been preserved.")
       return
     }
 
@@ -492,6 +493,7 @@ export function PatientProfile({ patient, onPatientUpdated }) {
 
     if (!res.success) {
       setMedicalError(res.error || "Could not save medical records.")
+      showBanner("error", res.error || "Synchronization failed. Could not save medical records. The last valid record has been preserved.")
       return
     }
 
