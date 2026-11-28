@@ -668,10 +668,10 @@ const ProfileAPI = {
           : typeof cachedProfile?.dataSharingConsent === 'boolean'
             ? cachedProfile.dataSharingConsent
             : false,
-      // Location is ON only when both the app toggle is allowed AND OS permission is granted
+      // Location is ON when the user enabled it in app settings or OS permission is granted
       locationAllowed:
         typeof stored.locationAllowed === 'boolean'
-          ? stored.locationAllowed && osLocationGranted
+          ? stored.locationAllowed
           : osLocationGranted,
       notificationsAllowed:
         typeof stored.notificationsAllowed === 'boolean'

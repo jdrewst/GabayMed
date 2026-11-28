@@ -437,27 +437,32 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
 
   const activateAndFetchUserLocation = async () => {
     const locResult = await MapAPI.requestUserLocation({ forceEnable: true });
-    if (!locResult.granted) {
+    if (!locResult.granted || !locResult.coords) {
       Linking.openSettings?.();
       return null;
     }
     setLocationGranted(true);
     setUserCoords(locResult.coords);
+    let updatedLocations = locations;
     if (locResult.coords) {
-      setLocations(prev =>
-        prev
-          .map(loc => {
-            const km = getDistanceKm(
-              locResult.coords.latitude,
-              locResult.coords.longitude,
-              loc.latitude,
-              loc.longitude
-            );
-            return { ...loc, distanceKm: km, distanceLabel: formatDistance(km) };
-          })
-          .sort((a, b) => (a.distanceKm ?? 99999) - (b.distanceKm ?? 99999))
-      );
+      updatedLocations = (locations || [])
+        .map(loc => {
+          const km = getDistanceKm(
+            locResult.coords.latitude,
+            locResult.coords.longitude,
+            loc.latitude,
+            loc.longitude
+          );
+          return { ...loc, distanceKm: km, distanceLabel: formatDistance(km) };
+        })
+        .sort((a, b) => (a.distanceKm ?? 99999) - (b.distanceKm ?? 99999));
+      setLocations(updatedLocations);
     }
+    sharedMapStore.update({
+      locationGranted: true,
+      userCoords: locResult.coords,
+      locations: updatedLocations,
+    });
     return locResult.coords;
   };
 
@@ -471,7 +476,11 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     };
     setFocusUser(true);
     setRegion(targetRegion);
-    sharedMapStore.update({ region: targetRegion });
+    sharedMapStore.update({
+      locationGranted: true,
+      userCoords: coords,
+      region: targetRegion,
+    });
   };
 
   const computeAndFrameRoute = async (origin, dest) => {
@@ -482,12 +491,15 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     try {
       const routeData = await MapAPI.getInAppRoute(origin, dest);
       setActiveRoute(routeData);
+      setShowSteps(true);
       const framed = computeBoundingRegion([
         origin,
-        { latitude: dest.latitude, longitude: dest.longitude },
+        { latitude: Number(dest.latitude), longitude: Number(dest.longitude) },
       ]);
       setRegion(framed);
       sharedMapStore.update({
+        locationGranted: true,
+        userCoords: origin,
         selectedPin: dest,
         activeRoute: routeData,
         region: framed,
@@ -552,7 +564,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     if (typeof window === 'undefined') return;
     const onMessage = event => {
       if (event?.data?.type === 'GABAY_SELECT_PIN') {
-        const found = activeLocations.find(loc => String(loc.id) === String(event.data.id));
+        const found = combinedLocations.find(loc => String(loc.id) === String(event.data.id));
         if (found) selectFacilityPin(found);
       } else if (event?.data?.type === 'GABAY_MAP_BG_CLICK') {
         setShowSuggestions(false);
@@ -560,7 +572,7 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [activeLocations]);
+  }, [combinedLocations]);
 
   const startInAppDirections = async targetFacility => {
     const dest = targetFacility || selectedPin;
@@ -780,8 +792,15 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
           </TouchableOpacity>
         </View>
 
-        {activeRoute && showSteps && !isCompact && (
-          <ScrollView style={[styles.stepsList, { borderTopColor: display.border }]} nestedScrollEnabled>
+        {activeRoute && showSteps && (
+          <ScrollView
+            style={[
+              styles.stepsList,
+              isCompact && { maxHeight: 85 },
+              { borderTopColor: display.border },
+            ]}
+            nestedScrollEnabled
+          >
             {activeRoute.steps.map(step => (
               <View key={step.id} style={styles.stepRow}>
                 <CornerDownRight size={14} color="#0ea5e9" />
@@ -811,31 +830,19 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
             </TouchableOpacity>
           ) : (
             <View style={styles.activeRouteRow}>
-              {!isCompact ? (
-                <TouchableOpacity style={styles.stepsToggleBtn} onPress={() => setShowSteps(!showSteps)}>
-                  {showSteps ? <ChevronDown size={16} color="#0284c7" /> : <ChevronUp size={16} color="#0284c7" />}
-                  <Text style={styles.stepsToggleText}>
-                    {showSteps ? 'Hide Steps' : `View Steps (${activeRoute.steps.length})`}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={styles.stepsToggleBtn}
-                  onPress={() => {
-                    setMapExpanded(true);
-                    setShowSteps(true);
-                  }}
-                >
-                  <ChevronUp size={16} color="#0284c7" />
-                  <Text style={styles.stepsToggleText}>View Full Route & Steps</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={styles.stepsToggleBtn} onPress={() => setShowSteps(!showSteps)}>
+                {showSteps ? <ChevronDown size={16} color="#0284c7" /> : <ChevronUp size={16} color="#0284c7" />}
+                <Text style={styles.stepsToggleText}>
+                  {showSteps ? 'Hide Steps' : `View Steps (${activeRoute.steps.length})`}
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.clearRouteBtn}
                 onPress={() => {
                   setActiveRoute(null);
                   setShowSteps(false);
+                  sharedMapStore.update({ activeRoute: null });
                 }}
               >
                 <Text style={styles.clearRouteText}>End Route</Text>

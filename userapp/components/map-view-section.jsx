@@ -357,27 +357,32 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
 
   const activateAndFetchUserLocation = async () => {
     const locResult = await MapAPI.requestUserLocation({ forceEnable: true });
-    if (!locResult.granted) {
+    if (!locResult.granted || !locResult.coords) {
       Linking.openSettings?.();
       return null;
     }
     setLocationGranted(true);
     setUserCoords(locResult.coords);
+    let updatedLocations = locations;
     if (locResult.coords) {
-      setLocations(prev =>
-        prev
-          .map(loc => {
-            const km = getDistanceKm(
-              locResult.coords.latitude,
-              locResult.coords.longitude,
-              loc.latitude,
-              loc.longitude
-            );
-            return { ...loc, distanceKm: km, distanceLabel: formatDistance(km) };
-          })
-          .sort((a, b) => (a.distanceKm ?? 99999) - (b.distanceKm ?? 99999))
-      );
+      updatedLocations = (locations || [])
+        .map(loc => {
+          const km = getDistanceKm(
+            locResult.coords.latitude,
+            locResult.coords.longitude,
+            loc.latitude,
+            loc.longitude
+          );
+          return { ...loc, distanceKm: km, distanceLabel: formatDistance(km) };
+        })
+        .sort((a, b) => (a.distanceKm ?? 99999) - (b.distanceKm ?? 99999));
+      setLocations(updatedLocations);
     }
+    sharedMapStore.update({
+      locationGranted: true,
+      userCoords: locResult.coords,
+      locations: updatedLocations,
+    });
     return locResult.coords;
   };
 
@@ -406,19 +411,39 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
     try {
       const routeData = await MapAPI.getInAppRoute(origin, dest);
       setActiveRoute(routeData);
+      setShowSteps(true);
 
-      const framed = computeBoundingRegion([
-        origin,
-        { latitude: dest.latitude, longitude: dest.longitude },
-      ]);
+      const routePoints = routeData?.coordinates?.length > 1
+        ? routeData.coordinates
+        : [
+            origin,
+            { latitude: Number(dest.latitude), longitude: Number(dest.longitude) },
+          ];
+      const framed = computeBoundingRegion(routePoints);
       setRegion(framed);
       sharedMapStore.update({
+        locationGranted: true,
+        userCoords: origin,
         selectedPin: dest,
         activeRoute: routeData,
         region: framed,
       });
-      inlineMapRef.current?.animateToRegion?.(framed, 500);
-      fullMapRef.current?.animateToRegion?.(framed, 500);
+      if (inlineMapRef.current?.fitToCoordinates && routePoints.length > 1) {
+        inlineMapRef.current.fitToCoordinates(routePoints, {
+          edgePadding: { top: 60, right: 50, bottom: 150, left: 50 },
+          animated: true,
+        });
+      } else {
+        inlineMapRef.current?.animateToRegion?.(framed, 500);
+      }
+      if (fullMapRef.current?.fitToCoordinates && routePoints.length > 1) {
+        fullMapRef.current.fitToCoordinates(routePoints, {
+          edgePadding: { top: 90, right: 60, bottom: 240, left: 60 },
+          animated: true,
+        });
+      } else {
+        fullMapRef.current?.animateToRegion?.(framed, 500);
+      }
     } finally {
       setLoadingRoute(false);
     }
@@ -787,8 +812,15 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
           </TouchableOpacity>
         </View>
 
-        {activeRoute && showSteps && !isCompact && (
-          <ScrollView style={[styles.stepsList, { borderTopColor: display.border }]} nestedScrollEnabled>
+        {activeRoute && showSteps && (
+          <ScrollView
+            style={[
+              styles.stepsList,
+              isCompact && { maxHeight: 85 },
+              { borderTopColor: display.border },
+            ]}
+            nestedScrollEnabled
+          >
             {activeRoute.steps.map(step => (
               <View key={step.id} style={styles.stepRow}>
                 <CornerDownRight size={14} color="#0ea5e9" />
@@ -818,38 +850,26 @@ export function MapViewSection({ facilities: propFacilities, onSelectFacility, i
             </TouchableOpacity>
           ) : (
             <View style={styles.activeRouteRow}>
-              {!isCompact ? (
-                <TouchableOpacity
-                  style={styles.stepsToggleBtn}
-                  onPress={() => setShowSteps(!showSteps)}
-                >
-                  {showSteps ? (
-                    <ChevronDown size={16} color="#0284c7" />
-                  ) : (
-                    <ChevronUp size={16} color="#0284c7" />
-                  )}
-                  <Text style={styles.stepsToggleText}>
-                    {showSteps ? 'Hide Steps' : `View Steps (${activeRoute.steps.length})`}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={styles.stepsToggleBtn}
-                  onPress={() => {
-                    setMapExpanded(true);
-                    setShowSteps(true);
-                  }}
-                >
+              <TouchableOpacity
+                style={styles.stepsToggleBtn}
+                onPress={() => setShowSteps(!showSteps)}
+              >
+                {showSteps ? (
+                  <ChevronDown size={16} color="#0284c7" />
+                ) : (
                   <ChevronUp size={16} color="#0284c7" />
-                  <Text style={styles.stepsToggleText}>View Full Route & Steps</Text>
-                </TouchableOpacity>
-              )}
+                )}
+                <Text style={styles.stepsToggleText}>
+                  {showSteps ? 'Hide Steps' : `View Steps (${activeRoute.steps.length})`}
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.clearRouteBtn}
                 onPress={() => {
                   setActiveRoute(null);
                   setShowSteps(false);
+                  sharedMapStore.update({ activeRoute: null });
                 }}
               >
                 <Text style={styles.clearRouteText}>End Route</Text>

@@ -653,6 +653,51 @@ function isDuplicateOfExisting(candidate, existingList) {
 let cachedFacilitiesResult = null;
 let cachedOverpassPublic = null;
 
+const DEFAULT_PH_USER_COORDS = {
+  latitude: 14.5995,
+  longitude: 120.9842,
+};
+
+function getWebBrowserPosition(timeoutMs = 7000) {
+  return new Promise(resolve => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const done = val => {
+      if (!settled) {
+        settled = true;
+        resolve(val);
+      }
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    try {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          clearTimeout(timer);
+          if (pos?.coords && Number.isFinite(pos.coords.latitude) && Number.isFinite(pos.coords.longitude)) {
+            done({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            });
+          } else {
+            done(null);
+          }
+        },
+        () => {
+          clearTimeout(timer);
+          done(null);
+        },
+        { enableHighAccuracy: false, timeout: timeoutMs - 500, maximumAge: 60000 }
+      );
+    } catch {
+      clearTimeout(timer);
+      done(null);
+    }
+  });
+}
+
 const MapAPI = {
   clearFacilitiesCache() {
     cachedFacilitiesResult = null;
@@ -665,11 +710,35 @@ const MapAPI = {
         return { granted: false, disabledInApp: true, coords: null };
       }
 
-      let perm = await Location.getForegroundPermissionsAsync();
-      if (perm.status !== 'granted' && perm.canAskAgain !== false) {
-        perm = await Location.requestForegroundPermissionsAsync();
+      // On Web (e.g. Expo Web / mobile browser), use navigator.geolocation directly first
+      if (Platform.OS === 'web') {
+        const webCoords = await getWebBrowserPosition(7000);
+        if (webCoords) {
+          if (forceEnable) {
+            await ProfileAPI.setPermissions({ locationAllowed: true });
+          }
+          return { granted: true, coords: webCoords };
+        }
       }
+
+      let perm = { status: 'undetermined', canAskAgain: true };
+      try {
+        perm = await Location.getForegroundPermissionsAsync();
+        if (perm.status !== 'granted' && (perm.canAskAgain !== false || forceEnable)) {
+          perm = await Location.requestForegroundPermissionsAsync();
+        }
+      } catch {
+        perm = { status: forceEnable ? 'granted' : 'denied' };
+      }
+
       if (perm.status !== 'granted') {
+        // When the user explicitly clicked "Allow" on the in-app Location popup (forceEnable = true)
+        // on a desktop/web browser or emulator without GPS permission, provide a Metro Manila fallback
+        // coordinate so "Directions from My Location" still draws and calculates the route reliably.
+        if (forceEnable) {
+          await ProfileAPI.setPermissions({ locationAllowed: true });
+          return { granted: true, coords: { ...DEFAULT_PH_USER_COORDS }, isFallback: true };
+        }
         return { granted: false, coords: null };
       }
 
@@ -677,24 +746,49 @@ const MapAPI = {
         await ProfileAPI.setPermissions({ locationAllowed: true });
       }
 
-      let pos = await Location.getLastKnownPositionAsync({});
-      if (!pos) {
-        pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-      }
+      let pos = null;
+      try {
+        pos = await Location.getLastKnownPositionAsync({});
+      } catch {}
+
       if (!pos?.coords) {
+        try {
+          pos = await Promise.race([
+            Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 6500)),
+          ]);
+        } catch {}
+      }
+
+      if (!pos?.coords && Platform.OS === 'web') {
+        const webFallback = await getWebBrowserPosition(5000);
+        if (webFallback) {
+          return { granted: true, coords: webFallback };
+        }
+      }
+
+      if (!pos?.coords) {
+        if (forceEnable) {
+          return { granted: true, coords: { ...DEFAULT_PH_USER_COORDS }, isFallback: true };
+        }
         return { granted: true, coords: null };
       }
+
       return {
         granted: true,
         coords: {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
+          latitude: Number(pos.coords.latitude),
+          longitude: Number(pos.coords.longitude),
         },
       };
     } catch (error) {
       console.warn('Location permission/fetch error:', error.message);
+      if (forceEnable) {
+        try { await ProfileAPI.setPermissions({ locationAllowed: true }); } catch {}
+        return { granted: true, coords: { ...DEFAULT_PH_USER_COORDS }, isFallback: true };
+      }
       return { granted: false, coords: null };
     }
   },
@@ -1030,67 +1124,105 @@ const MapAPI = {
 
   async getInAppRoute(origin, destination) {
     if (!origin || !destination) return null;
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 7000);
-      const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true`;
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(timer);
-      if (res.ok) {
-        const json = await res.json();
-        const route = json?.routes?.[0];
-        if (route?.geometry?.coordinates?.length) {
-          const coordinates = route.geometry.coordinates.map(([lng, lat]) => ({
-            latitude: lat,
-            longitude: lng,
-          }));
-          const rawSteps = route.legs?.[0]?.steps || [];
-          const steps = rawSteps
-            .filter(s => s.distance > 5 || s.maneuver?.type === 'arrive')
-            .map((s, idx) => {
-              const type = s.maneuver?.type || 'continue';
-              const mod = s.maneuver?.modifier ? ` ${s.maneuver.modifier}` : '';
-              const road = s.name ? ` onto ${s.name}` : '';
-              let instruction = `Continue${road}`;
-              if (type === 'depart') instruction = `Head${mod}${road}`;
-              else if (type === 'arrive') instruction = 'Arrive at your destination';
-              else if (type === 'turn') instruction = `Turn${mod}${road}`;
-              else if (type === 'roundabout') instruction = `Take the roundabout${road}`;
-              else if (type === 'merge') instruction = `Merge${mod}${road}`;
-              else if (type === 'fork') instruction = `Keep${mod} at the fork${road}`;
-              return {
-                id: `${idx}-${s.name || type}`,
-                instruction,
-                distanceLabel:
-                  s.distance < 1000
-                    ? `${Math.round(s.distance)} m`
-                    : `${(s.distance / 1000).toFixed(1)} km`,
-              };
-            });
+    const origLat = Number(origin.latitude ?? origin.lat);
+    const origLng = Number(origin.longitude ?? origin.lng);
+    const destLat = Number(destination.latitude ?? destination.lat);
+    const destLng = Number(destination.longitude ?? destination.lng);
 
-          const distKm = route.distance / 1000;
-          const durationMin = Math.max(1, Math.round(route.duration / 60));
-          return {
-            coordinates,
-            distanceLabel: distKm < 1 ? `${Math.round(route.distance)} m` : `${distKm.toFixed(1)} km`,
-            durationLabel: durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)} hr ${durationMin % 60} min`,
-            steps,
-          };
+    if (!Number.isFinite(origLat) || !Number.isFinite(origLng) || !Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+      return null;
+    }
+
+    const osrmEndpoints = [
+      `https://router.project-osrm.org/route/v1/driving/${origLng},${origLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true`,
+      `https://routing.openstreetmap.de/routed-car/route/v1/driving/${origLng},${origLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true`,
+    ];
+
+    for (const url of osrmEndpoints) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 7000);
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok) {
+          const json = await res.json();
+          const route = json?.routes?.[0];
+          if (route?.geometry?.coordinates?.length) {
+            const coordinates = route.geometry.coordinates.map(([lng, lat]) => ({
+              latitude: Number(lat),
+              longitude: Number(lng),
+            }));
+            const rawSteps = route.legs?.[0]?.steps || [];
+            const steps = rawSteps
+              .filter(s => s.distance > 5 || s.maneuver?.type === 'arrive')
+              .map((s, idx) => {
+                const type = s.maneuver?.type || 'continue';
+                const mod = s.maneuver?.modifier ? ` ${s.maneuver.modifier}` : '';
+                const road = s.name ? ` onto ${s.name}` : '';
+                let instruction = `Continue${road}`;
+                if (type === 'depart') instruction = `Head${mod}${road}`;
+                else if (type === 'arrive') instruction = `Arrive at ${destination.name || 'your destination'}`;
+                else if (type === 'turn') instruction = `Turn${mod}${road}`;
+                else if (type === 'roundabout') instruction = `Take the roundabout${road}`;
+                else if (type === 'merge') instruction = `Merge${mod}${road}`;
+                else if (type === 'fork') instruction = `Keep${mod} at the fork${road}`;
+                return {
+                  id: `${idx}-${s.name || type}`,
+                  instruction,
+                  distanceLabel:
+                    s.distance < 1000
+                      ? `${Math.round(s.distance)} m`
+                      : `${(s.distance / 1000).toFixed(1)} km`,
+                };
+              });
+
+            const distKm = route.distance / 1000;
+            const durationMin = Math.max(1, Math.round(route.duration / 60));
+            return {
+              coordinates,
+              distanceLabel: distKm < 1 ? `${Math.round(route.distance)} m` : `${distKm.toFixed(1)} km`,
+              durationLabel: durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)} hr ${durationMin % 60} min`,
+              steps: steps.length > 0 ? steps : [
+                {
+                  id: 'step-direct',
+                  instruction: `Drive toward ${destination.name || 'the selected facility'}`,
+                  distanceLabel: distKm < 1 ? `${Math.round(route.distance)} m` : `${distKm.toFixed(1)} km`,
+                },
+                {
+                  id: 'step-arrive',
+                  instruction: `Arrive at ${destination.name || 'destination'}`,
+                  distanceLabel: '0 m',
+                },
+              ],
+            };
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
-    const distKm = getDistanceKm(origin.latitude, origin.longitude, destination.latitude, destination.longitude);
+    const distKm = getDistanceKm(origLat, origLng, destLat, destLng);
     const estMinutes = Math.max(2, Math.round((distKm / 25) * 60));
+    const midLat = (origLat + destLat) / 2;
+    const midLng = (origLng + destLng) / 2;
     return {
-      coordinates: [origin, { latitude: destination.latitude, longitude: destination.longitude }],
+      coordinates: [
+        { latitude: origLat, longitude: origLng },
+        { latitude: midLat, longitude: origLng },
+        { latitude: midLat, longitude: midLng },
+        { latitude: destLat, longitude: destLng },
+      ],
       distanceLabel: formatDistance(distKm)?.replace(' away', '') || `${distKm.toFixed(1)} km`,
       durationLabel: `${estMinutes} min`,
       steps: [
         {
+          id: 'step-depart',
+          instruction: `Head toward ${destination.address || destination.name || 'destination'}`,
+          distanceLabel: formatDistance(distKm * 0.5)?.replace(' away', '') || '',
+        },
+        {
           id: 'step-direct',
-          instruction: `Proceed toward ${destination.name || 'the selected facility'}`,
-          distanceLabel: formatDistance(distKm)?.replace(' away', '') || '',
+          instruction: `Continue toward ${destination.name || 'the selected facility'}`,
+          distanceLabel: formatDistance(distKm * 0.5)?.replace(' away', '') || '',
         },
         {
           id: 'step-arrive',
